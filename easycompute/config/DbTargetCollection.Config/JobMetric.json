@@ -1,0 +1,5 @@
+{
+  "name": "JobMetric",
+  "createOnly": false,
+  "updateMode": "merge"
+}

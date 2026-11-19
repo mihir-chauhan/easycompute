@@ -1,0 +1,16 @@
+/**
+ * Versioned deterministic Purdue / cluster / lab rules (MODEL_MAP). Rule evaluation runs in the planner
+ * ({@link RunRequest#checkRules}); this type exposes it by name with its policy version.
+ */
+type ClusterPolicyEngine {
+
+  /**
+   * Evaluates every active rule for a run request (same as {@link RunRequest#checkRules}).
+   */
+  check: function(runRequestId: !string): [RuleCheck] js-server
+
+  /**
+   * Policy version, rule counts by scope and severity, and provenance.
+   */
+  info: function(): json js-server
+}

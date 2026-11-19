@@ -148,4 +148,34 @@ entity type RunPlan {
    * Number of WARN-severity rules this option violates.
    */
   ruleWarnings: int
+
+  /**
+   * P90 runtime (AnvilRuntimeQ50Q90, or the labeled fallback).
+   */
+  estDurationP90Hours: double
+
+  /**
+   * P90 queue wait (AnvilQueueWaitQ50Q90 on Anvil, else partition statistics).
+   */
+  estWaitP90Hours: double
+
+  /**
+   * Host memory requested in the script (AnvilHostMemoryQ50Q90 P90 when available).
+   */
+  memRequestGb: double
+
+  /**
+   * CPU right-sizing evidence (AnvilTaskCPUQ50Q90).
+   */
+  cpuEvidence: string
+
+  /**
+   * Why GPUShapeAdvisor chose this GPU type and count.
+   */
+  shapeReason: string
+
+  /**
+   * Components behind the plan, one provenance object each.
+   */
+  provenance: json
 }

@@ -34,6 +34,7 @@ var ENTITIES = [
   { type: 'JobAlert', group: 'monitor', ts: 'detectedAt' },
   { type: 'ActionLogEntry', group: 'monitor', ts: 'actedAt' },
   { type: 'AppUser', group: 'reference', ts: 'lastActive' },
+  { type: 'JobPrediction', group: 'monitor', ts: 'scoredAt', optional: true },
 ];
 
 function ms(v) {
@@ -116,6 +117,7 @@ function graph() {
   var entityRows = {};
 
   ENTITIES.forEach(function (e) {
+    if (e.optional && typeOrNull(e.type) == null) return;
     var n = entityNode(e, now);
     entityRows[e.type] = n.stats.rows;
     nodes.push(n);
@@ -177,13 +179,19 @@ function graph() {
       edges.push({ from: 'ent:' + t, to: c.id, label: 'reads', rows: entityRows[t] || 0 });
     });
   });
+  if (entityRows.JobPrediction !== undefined) {
+    edges.push({ from: 'use:ml', to: 'ent:JobPrediction', label: 'scoreLive (hourly)', rows: entityRows.JobPrediction });
+    edges.push({ from: 'ent:JobPrediction', to: 'use:monitor', label: 'walltime risk', rows: entityRows.JobPrediction });
+  }
 
   var count = function (kind) {
     return nodes.filter(function (n) {
       return n.kind == kind;
     }).length;
   };
-  var totalRows = ENTITIES.reduce(function (s, e) {
+  var totalRows = ENTITIES.filter(function (e) {
+    return entityRows[e.type] !== undefined;
+  }).reduce(function (s, e) {
     return s + (entityRows[e.type] || 0);
   }, 0);
   log.info('graph: {} nodes, {} edges', nodes.length, edges.length);

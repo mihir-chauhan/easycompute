@@ -1,0 +1,37 @@
+/**
+ * Owns the "Run guardrail triage" agentic workflow (`Genai.Agent.Resource.Workflow` id `run_guardrail_triage`).
+ * The graph is defined declaratively in `resource/workflows/run_guardrail_triage.json`:
+ * input (JobAlert id) → load alert context (code) → LLM triage (Model Hub client `default-completions`) →
+ * record {@link ActionLogEntry} + {@link GuardrailTriage} (code). Runs in the workflows runtime.
+ */
+type GuardrailWorkflow {
+
+  /**
+   * Creates or updates the workflow from `resource/workflows/run_guardrail_triage.json`, validates the graph,
+   * publishes and compiles it. Idempotent: an existing workflow is rebuilt in place from the JSON.
+   *
+   * @return
+   *   `{ id, name, published, created, validation }` describing the resulting workflow.
+   */
+  ensureWorkflow: function(): json py-workflows
+
+  /**
+   * Executes the workflow for one {@link JobAlert}: answers the input node with `alertId` and runs to completion.
+   *
+   * @param alertId
+   *   The JobAlert id; blank or null triages the newest OPEN JobAlert.
+   * @return
+   *   `{ executionId, status, state }` where `state` is the final workflow state (alert_id, alert_context,
+   *   severity, rootCause, recommendedAction, rationale, triage_result).
+   */
+  triage: function(alertId: string): json py-workflows
+
+  /**
+   * Triages up to 3 OPEN {@link JobAlert}s (newest first) that have no {@link GuardrailTriage} yet.
+   * Called every 15 minutes by CronJob `EasyComputeGuardrailTriage`.
+   *
+   * @return
+   *   Number of alerts successfully triaged.
+   */
+  triageNew: function(): int py-workflows
+}

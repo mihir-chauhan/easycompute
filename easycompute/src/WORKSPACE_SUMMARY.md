@@ -30,6 +30,13 @@ Response shapes and method contracts: `project/API.md`. Platform-name collisions
   removeUser, pendingApprovals, approve, reject; lab scope enforced in code). Platform roles
   `metadata/Role/EasyCompute.{UniversityAdmin,LabPI,LabMember}.json` + same-id `seed/UserGroup/*.json`.
   RunRequest `approvalStatus` (+ `.Approval`): checkRules sets PENDING for "PI approval" rules; submit blocks until approved.
+- Guardrail triage agentic workflow (genAiUi `workflows`, id `run_guardrail_triage`): graph spec in
+  `resource/workflows/run_guardrail_triage.json` (get_user_input_v2 START `alert_id` → code `load_alert_context` →
+  `llm_node_template` `triage_alert` (client `default-completions`) → code `record_triage`). `GuardrailWorkflow.py`
+  (claim `py-workflows`): `ensureWorkflow` rebuilds graph from the JSON + publish + compile, `triage(alertId)` executes
+  and resumes the input interrupt in one process, `triageNew` (≤3 untriaged OPEN alerts; CronJob seed
+  `seed/CronJob/EasyComputeGuardrailTriage.json`, every 15 min, active). Result entity `GuardrailTriage` (id = alert id);
+  creates AUTOPILOT PENDING_APPROVAL `ActionLogEntry`; never touches the JobAlert.
 - `DataLineage.graph()` (`DataLineage.js`): sources → pipelines (native FileSourceCollections when deployed) → entities →
   consumers with live row counts and freshness.
 - Tests: `test/js-rhino/test_{RunRequest,Job,Insights,UserAdmin}.js` (self-contained fixtures, need `testtools` in the manifest).

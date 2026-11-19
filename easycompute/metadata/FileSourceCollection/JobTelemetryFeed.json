@@ -1,0 +1,6 @@
+{
+  "name": "JobTelemetryFeed",
+  "description": "Daily DCGM exporter + node_exporter JSON telemetry -> SourceJobTelemetry -> CanonicalJobTelemetry -> JobMetric (valid samples) / IngestRejection (rejected samples).",
+  "sourceSystem": "EasyComputeFeeds",
+  "source": "SourceJobTelemetry"
+}

@@ -5,7 +5,7 @@
  * -> IngestRejection). Live stats come from features/admin/api.ts (feedStat / entityStat).
  */
 
-export type LineageKind = 'source' | 'pipeline' | 'entity' | 'consumer';
+export type LineageKind = 'source' | 'pipeline' | 'entity' | 'model' | 'consumer';
 
 export interface LineageNode {
   id: string;
@@ -25,6 +25,8 @@ export interface LineageNode {
   native?: boolean;
   /** Freshness expectation in hours (warn after 1x, bad after 4x). */
   slaHours?: number;
+  /** model: MODEL_MAP component name (provenance chip, catalogue). */
+  component?: string;
 }
 
 export interface LineageEdge {
@@ -54,6 +56,15 @@ export const LINEAGE_NODES: LineageNode[] = [
   { id: 'e-alloc', kind: 'entity', label: 'Allocation', sub: 'Budgets per lab and cluster', detail: 'Allocation balances used for budget checks and burn alerts.', ref: 'Allocation', slaHours: 24 },
   { id: 'e-part', kind: 'entity', label: 'Partition · ComputeCluster', sub: 'Limits, queues, capacity', detail: 'Partition limits and queue state; cluster capacity and billing.', ref: 'Partition', slaHours: 24 },
   { id: 'e-lab', kind: 'entity', label: 'Lab · Policy', sub: 'Context and rules', detail: 'Labs with their context dump; university, cluster, partition and lab rules.', ref: 'Policy', slaHours: 168 },
+  // Models & engines (MODEL_MAP.md)
+  { id: 'm-runtime', kind: 'model', label: 'AnvilRuntimeQ50Q90', sub: 'Quantile regression · P50/P90 runtime', detail: 'LinearQuantileRegressor (pinball loss) trained on completed Anvil parent jobs from the sacct history, temporal holdout. Historical only.', component: 'AnvilRuntimeQ50Q90' },
+  { id: 'm-wait', kind: 'model', label: 'AnvilQueueWaitQ50Q90', sub: 'Quantile regression · queue wait', detail: 'LinearQuantileRegressor on started Anvil parent jobs. Low confidence: the archive has no backlog snapshots.', component: 'AnvilQueueWaitQ50Q90' },
+  { id: 'm-cpu', kind: 'model', label: 'AnvilTaskCPUQ50Q90', sub: 'Quantile regression · CPU demand', detail: 'Per-task core-equivalent from parent requests + batch-step AveCPU; right-sizing evidence only.', component: 'AnvilTaskCPUQ50Q90' },
+  { id: 'm-mem', kind: 'model', label: 'AnvilHostMemoryQ50Q90', sub: 'Quantile regression · host memory', detail: 'Host memory P50/P90 from parent requests + batch-step TRES memory (no GPU VRAM in the archive).', component: 'AnvilHostMemoryQ50Q90' },
+  { id: 'm-policy', kind: 'model', label: 'ClusterPolicyEngine', sub: 'Versioned deterministic rules', detail: 'Exact, explainable checks of every plan against Purdue, cluster, partition and lab rules.', component: 'ClusterPolicyEngine' },
+  { id: 'm-underuse', kind: 'model', label: 'GPUUnderuseDetector', sub: 'EWMA / CUSUM on telemetry', detail: 'Detects persistent GPU underuse against the run’s own baseline from DCGM telemetry.', component: 'GPUUnderuseDetector' },
+  { id: 'm-guard', kind: 'model', label: 'GuardrailRuleEngine', sub: 'State machine with hysteresis', detail: 'Memory, walltime, checkpoint and failure guardrails; records why it fired; consequential actions need confirmation.', component: 'GuardrailRuleEngine' },
+  { id: 'm-rag', kind: 'model', label: 'PolicyRAGAdvisor', sub: 'RAG over policy docs, cited', detail: 'Retrieval over versioned Purdue docs, lab rules and context with source citations. Explains; never submits or overrides rules.', component: 'PolicyRAGAdvisor' },
   // Consumers
   { id: 'c-plan', kind: 'consumer', label: 'Launch planner', sub: 'checkRules · recommendPlans', detail: 'Checks a planned run against every rule and ranks configurations by time, cost and deadline.', route: '/plan' },
   { id: 'c-monitor', kind: 'consumer', label: 'Live monitor & guardrails', sub: 'evaluateHealth · applyAction', detail: 'Watches live runs, raises alerts and takes or proposes actions.', route: '/runs' },
@@ -76,16 +87,27 @@ export const LINEAGE_EDGES: LineageEdge[] = [
   { from: 'p-monitor', to: 'e-metric' },
   { from: 'p-monitor', to: 'e-alert' },
   { from: 'p-monitor', to: 'e-job' },
-  { from: 'e-job', to: 'c-plan' },
-  { from: 'e-part', to: 'c-plan' },
-  { from: 'e-alloc', to: 'c-plan' },
-  { from: 'e-lab', to: 'c-plan' },
-  { from: 'e-job', to: 'c-monitor' },
-  { from: 'e-metric', to: 'c-monitor' },
+  { from: 'e-job', to: 'm-runtime' },
+  { from: 'e-job', to: 'm-wait' },
+  { from: 'e-job', to: 'm-cpu' },
+  { from: 'e-job', to: 'm-mem' },
+  { from: 'e-lab', to: 'm-policy' },
+  { from: 'e-part', to: 'm-policy' },
+  { from: 'e-alloc', to: 'm-policy' },
+  { from: 'e-metric', to: 'm-underuse' },
+  { from: 'e-metric', to: 'm-guard' },
+  { from: 'e-job', to: 'm-guard' },
+  { from: 'e-lab', to: 'm-rag' },
+  { from: 'm-runtime', to: 'c-plan' },
+  { from: 'm-wait', to: 'c-plan' },
+  { from: 'm-cpu', to: 'c-plan' },
+  { from: 'm-mem', to: 'c-plan' },
+  { from: 'm-policy', to: 'c-plan' },
+  { from: 'm-underuse', to: 'c-monitor' },
+  { from: 'm-guard', to: 'c-monitor' },
   { from: 'e-alert', to: 'c-monitor' },
-  { from: 'e-lab', to: 'c-advisor' },
+  { from: 'm-rag', to: 'c-advisor' },
   { from: 'e-alloc', to: 'c-advisor' },
-  { from: 'e-job', to: 'c-advisor' },
   { from: 'e-alert', to: 'c-advisor' },
   { from: 'e-job', to: 'c-dash' },
   { from: 'e-alloc', to: 'c-dash' },

@@ -1,0 +1,4 @@
+{
+  "name": "EasyComputeFeeds",
+  "description": "Daily EasyCompute file feeds: Slurm accounting exports (SlurmSacctFeed) and DCGM/node_exporter telemetry (JobTelemetryFeed). Uses the app's managed file system; files are dropped in each collection's inbox."
+}

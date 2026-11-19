@@ -92,7 +92,7 @@ function unitsPerHour(job) {
 // ---------------------------------------------------------------- health rules
 
 /** Returns [{ alertType, severity, message, action }] for the job's current metric window. */
-function detect(job, samples, ap, alloc, burnPerDay) {
+function detect(job, samples, ap, alloc, burnPerDay, prediction) {
   var out = [];
   if (!samples.length) return out;
   var last = samples[samples.length - 1];
@@ -155,6 +155,11 @@ function detect(job, samples, ap, alloc, burnPerDay) {
   var limit = num(job.timelimitHours, 0);
   var remainingMin = (limit - elapsed) * 60;
   var plannedHours = job.runRequest && job.runRequest.chosenPlan ? num(job.runRequest.chosenPlan.estDurationHours, null) : null;
+  var basis = 'Planner predicted';
+  if (plannedHours == null && prediction != null && prediction.predictedHours != null) {
+    plannedHours = Number(prediction.predictedHours);
+    basis = 'The job-duration ML model' + (prediction.modelId ? ' (' + prediction.modelId + ')' : '') + ' predicts';
+  }
   var ckptAge = num(last.checkpointAgeMin, 0);
   if (limit > 0) {
     var overrun = plannedHours != null && plannedHours - elapsed > limit - elapsed + 0.01;
@@ -166,7 +171,7 @@ function detect(job, samples, ap, alloc, burnPerDay) {
         severity: crit ? 'CRITICAL' : 'WARNING',
         action: overrun ? 'EXTEND_WALLTIME' : 'CHECKPOINT_NOW',
         message: overrun
-          ? 'Predicted to need ' + round(plannedHours - elapsed, 1) + ' h more but only ' + fmtMin(remainingMin) + ' of walltime remain. Request an extension or checkpoint and chain a continuation job.'
+          ? basis + ' ' + round(plannedHours, 1) + ' h in total: ' + round(plannedHours - elapsed, 1) + ' h more, but only ' + fmtMin(remainingMin) + ' of walltime remain. Request an extension or checkpoint and chain a continuation job.'
           : 'Slurm kills the job at its ' + round(limit, 1) + ' h limit in ' + fmtMin(Math.max(0, remainingMin)) + '; the last checkpoint is ' + fmtMin(ckptAge) + ' old. Checkpoint now and chain a continuation job (--dependency=afterany) if it is not done.',
       });
     }
@@ -248,7 +253,9 @@ function evaluateHealth() {
     var c0 = burn && burn.length ? burn[0].cells[0] : null;
     burnPerDay = c0 == null ? 0 : num(c0.value(), 0) / 30;
   }
-  var found = detect(job, samples, autopilotFor(labId), alloc, burnPerDay);
+  // ML duration prediction (JobPrediction, written by JobDurationModel.scoreLive) when that model is deployed
+  var prediction = typeof JobPrediction === 'undefined' ? null : JobPrediction.make({ id: job.id }).get('predictedHours, modelId');
+  var found = detect(job, samples, autopilotFor(labId), alloc, burnPerDay, prediction);
   var foundTypes = {};
   found.forEach(function (f) {
     foundTypes[f.alertType] = f;
@@ -300,9 +307,10 @@ function evaluateHealth() {
 
 /** A `json` result of another type's method as a plain object (it may arrive boxed or as a string). */
 function plainJson(v) {
-  if (v == null || typeof v.user !== 'undefined') return v;
-  if (v.value != null && typeof v.value.user !== 'undefined') return v.value;
-  return JSON.parse(typeof v.toJsonString === 'function' ? v.toJsonString() : String(v));
+  if (v == null) return v;
+  if (typeof v === 'string') return JSON.parse(v);
+  if (typeof v.type === 'string' && /^Boxed/.test(v.type) && v.value != null) return v.value;
+  return v;
 }
 
 /** Lab scope for user actions: students/staff act on their own jobs, PIs on their lab's jobs, admins on all. */

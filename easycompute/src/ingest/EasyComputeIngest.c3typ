@@ -1,0 +1,20 @@
+/**
+ * Parsing and validation for the EasyCompute file feeds. Called from the Source-to-Canonical transforms
+ * (`SourceSlurmSacct-CanonicalSlurmJob`, `SourceJobTelemetry-CanonicalJobTelemetry`). Never throws for bad data:
+ * every problem is collected into the canonical's `rejectReason`, which routes the row to {@link IngestRejection}.
+ */
+type EasyComputeIngest {
+
+  /**
+   * Parses one {@link SourceSlurmSacct} row into a {@link CanonicalSlurmJob}: resolves cluster, partition (exact QOS,
+   * else QOS "normal"), lab (account with "-gpu"/"-aws" stripped, in {@link Lab#slurmAccounts}) and GPU type, splits
+   * AllocTRES and AdminComment, and records every validation failure in {@link CanonicalSlurmJob#rejectReason}.
+   */
+  slurmToCanonical: function(src: !SourceSlurmSacct): !CanonicalSlurmJob js-server
+
+  /**
+   * Parses one {@link SourceJobTelemetry} sample into a {@link CanonicalJobTelemetry}, checks that the {@link Job}
+   * exists, and records every validation failure in {@link CanonicalJobTelemetry#rejectReason}.
+   */
+  telemetryToCanonical: function(src: !SourceJobTelemetry): !CanonicalJobTelemetry js-server
+}

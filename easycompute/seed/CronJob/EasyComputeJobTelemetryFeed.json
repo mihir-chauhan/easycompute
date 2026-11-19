@@ -1,0 +1,8 @@
+{
+  "id": "EasyComputeJobTelemetryFeed",
+  "name": "EasyCompute JobTelemetryFeed ingestion (hourly at :20)",
+  "description": "Processes any new DCGM/node_exporter JSON files in the JobTelemetryFeed inbox into JobMetric / IngestRejection.",
+  "action": { "typeName": "FileSourceCollection", "actionName": "process" },
+  "inputs": { "this": { "type": "FileSourceCollection", "name": "JobTelemetryFeed" }, "spec": { "process": true } },
+  "scheduleDef": { "cronExpression": "0 20 * * * ?" }
+}

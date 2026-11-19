@@ -14,7 +14,7 @@ import {
   Gauge,
   HeartPulse,
   ListChecks,
-  Rocket,
+  Search,
   ShieldCheck,
   Zap,
   type LucideIcon,
@@ -22,11 +22,12 @@ import {
 
 import { cn } from '@/lib/utils';
 
-import { SOFT } from './ProposalCard';
+import { SOFT } from './tones';
 import type { ToolCall } from './types';
 
 /** Human labels and icons for the advisor tools. */
 export const TOOLS: Record<string, { label: string; icon: LucideIcon }> = {
+  retrieveSources: { label: 'Retrieved policy sources', icon: Search },
   labContext: { label: 'Read lab context', icon: BookOpenText },
   labSummary: { label: 'Read lab dashboard', icon: Gauge },
   listPolicies: { label: 'Looked up policies', icon: ShieldCheck },
@@ -35,8 +36,6 @@ export const TOOLS: Record<string, { label: string; icon: LucideIcon }> = {
   liveJobs: { label: 'Scanned live jobs', icon: Activity },
   jobHealth: { label: 'Checked job health', icon: HeartPulse },
   universityOverview: { label: 'Read university overview', icon: Building2 },
-  proposeRunSubmission: { label: 'Proposed a submission', icon: Rocket },
-  proposeJobAction: { label: 'Proposed a job action', icon: Zap },
 };
 
 const formatArgs = (args?: string): string => {

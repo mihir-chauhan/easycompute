@@ -1,0 +1,10 @@
+/**
+ * Cluster / university overview with normalized metrics and source timestamps (MODEL_MAP).
+ */
+type ClusterCapacityAggregator {
+
+  /**
+   * Utilization, cost by billing type, fairness, idle resources and demand (same as {@link Insights#universityOverview}).
+   */
+  overview: function(): json js-server
+}

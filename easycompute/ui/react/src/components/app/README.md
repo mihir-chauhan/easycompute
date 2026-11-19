@@ -50,6 +50,15 @@ import { PageFrame, KpiRow, KpiTile, CardGrid, SectionCard, MetricChart, barOpti
   `KeyValue items` (".kv"), `Chips items`, `Toggle on onChange label` (".switch"), `SectionHeading`.
 - **Toolbar**: `SearchBox`, `Segmented` (".seg" with count chips), `SelectPill label value options` ("Cluster: All ▾"),
   `ClearFilters`, `ResultCount`, `PageTabs tabs value onChange` (underline tabs, e.g. Launch planner steps).
+- **ModelComputing** `component verb? variant='inline'|'card'|'overlay' active? children?` — every place a MODEL_MAP
+  component runs: pulsing green dot + "<mono>AnvilRuntimeQ50Q90</mono> is computing…" (role=status). `verb` e.g.
+  `is checking 49 rules`. `card` adds skeleton lines; `overlay` dims its children while `active`.
+- **ModelProvenance** `component provenance? compact?` — chip (cpu icon, mono name, version, "historical" tag) opening a
+  popover: method, version / policy version, training period, sample support, P50/P90 (+unit), confidence, sources,
+  "Historical only" note. Defaults come from `MODEL_CATALOG` (all 13 MODEL_MAP components); pass the backend
+  `provenance` object to add version/support/P50/P90. Helpers: `provenanceOf(res)`, `provenanceFor(res, component)`
+  (handles a single object, an array, a map keyed by component, or `<section>.provenance`). `MetricChart` takes
+  `model` + `provenance` and does both automatically (computing line while loading, chip in the header after).
 - **StatusBadge** `kind="jobState|alertSeverity|alertStatus|ruleSeverity|ruleScope|checkOutcome|runRequestStatus|clusterStatus|actionOutcome|actor" value=...`;
   `SeverityBadge value="CRITICAL|WARNING|INFO|BLOCK|WARN"`; `ToneBadge tone>text`; `ToneDot tone label`.
 - **BudgetBurn** `used total elapsed format compact` — bar + elapsed-period marker, toned by burn rate.

@@ -14,6 +14,8 @@ import {
   ClearFilters,
   DataTable,
   ErrorState,
+  ModelComputing,
+  ModelProvenance,
   Note,
   PageFrame,
   Pill,
@@ -250,6 +252,13 @@ export default function AdminPolicies() {
   // Test a configuration
   const [script, setScript] = useState(SAMPLE);
   const [testCluster, setTestCluster] = useState('gautschi');
+  // Brief "ClusterPolicyEngine is checking N rules…" state while the user edits the script.
+  const [checking, setChecking] = useState(false);
+  useEffect(() => {
+    setChecking(true);
+    const t = window.setTimeout(() => setChecking(false), 450);
+    return () => window.clearTimeout(t);
+  }, [script, testCluster]);
   const results = useMemo(() => (data ? dryRun(script, testCluster, data.policies, data.partitions, labId) : []), [data, script, testCluster, labId]);
   const testClusters = useMemo(() => {
     const m = new Map<string, string>();
@@ -336,7 +345,17 @@ export default function AdminPolicies() {
 
       {error ? <ErrorState message={`Could not load policies: ${error}`} onRetry={reload} /> : null}
 
-      <SectionCard flush>
+      <SectionCard
+        flush
+        title={`${rows.length} rules`}
+        actions={
+          loading && !data ? (
+            <ModelComputing component="ClusterPolicyEngine" verb="is loading the policy set" />
+          ) : (
+            <ModelProvenance component="ClusterPolicyEngine" provenance={{ component: 'ClusterPolicyEngine', rulesEvaluated: all.length, policyVersion: 'RCAC sync 2026-11-02' }} />
+          )
+        }
+      >
         <DataTable
           columns={columns}
           rows={rows}
@@ -353,7 +372,11 @@ export default function AdminPolicies() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <SectionCard
           title="Test a configuration"
-          actions={<span className="text-[13px] text-[var(--ec-fg-2)]">Dry-run against the limits</span>}
+          actions={
+            data ? (
+              <ModelProvenance component="ClusterPolicyEngine" provenance={{ component: 'ClusterPolicyEngine', rulesEvaluated: all.filter((p) => p.active !== false).length, policyVersion: 'RCAC sync 2026-11-02', mode: 'client dry-run of numeric limits' }} compact />
+            ) : undefined
+          }
           className="h-full"
         >
           <div className="flex flex-col gap-3">
@@ -372,7 +395,8 @@ export default function AdminPolicies() {
               className="ec-code min-h-28 resize-y whitespace-pre text-[var(--ec-fg)] outline-none focus-visible:border-[var(--ec-fg-3)]"
             />
             <div>
-              {results.map((r, i) => (
+              {checking ? <ModelComputing component="ClusterPolicyEngine" verb={`is checking ${all.filter((p) => p.active !== false).length} rules`} variant="card" /> : null}
+              {!checking && results.map((r, i) => (
                 <CheckRow key={i} status={r.status} title={r.title} detail={r.detail} right={r.src} />
               ))}
             </div>

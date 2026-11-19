@@ -27,15 +27,8 @@ import type {
   TickSummary,
 } from './types';
 
-/**
- * Every lab-view backend call goes through `labCall`, which is `c3Call` unless the dev server runs with
- * `VITE_LAB_STUBS=1` (local layout work without a C3 backend; the stub module is never bundled otherwise).
- */
+/** Every lab-view backend call goes through `labCall` (= `c3Call`, typed). */
 async function labCall<T>(type: string, action: string, thisArg?: unknown, args?: unknown[]): Promise<T> {
-  if (import.meta.env.VITE_LAB_STUBS === '1') {
-    const { stubCall } = await import('./stubs');
-    return stubCall(type, action, thisArg, args ?? []) as T;
-  }
   return (await c3Call(type, action, thisArg, args)) as T;
 }
 

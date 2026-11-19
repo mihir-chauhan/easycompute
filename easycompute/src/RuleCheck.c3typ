@@ -49,4 +49,9 @@ entity type RuleCheck {
    * Scope of the rule.
    */
   scope: string enum Policy.Scope
+
+  /**
+   * Component that produced the check (ClusterPolicyEngine, policy version, computedAt).
+   */
+  provenance: json
 }

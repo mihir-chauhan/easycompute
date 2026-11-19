@@ -271,7 +271,7 @@ export interface FeedStat {
 export async function feedStat(feed: string): Promise<FeedStat> {
   const lit = filterLiteral(feed);
   try {
-    const fsc = await fetchObjs<{ id: string; name?: string }>('FileSourceCollection', { include: 'id, name', filter: `name == ${lit} || id == ${lit}`, limit: 1 });
+    const fsc = await fetchObjs<{ name?: string }>('FileSourceCollection', { include: 'name', filter: `name == ${lit}`, limit: 1 });
     if (!fsc.length) return { feed, deployed: false, files: 0, failedFiles: 0, lastLoad: null, rejected: null };
     const [files, rejected] = await Promise.all([
       fetchObjs<{ id: string; status?: { state?: string }; meta?: { updated?: string } }>('SourceFile', {
@@ -294,3 +294,13 @@ export async function feedStat(feed: string): Promise<FeedStat> {
     return { feed, deployed: false, files: 0, failedFiles: 0, lastLoad: null, rejected: null, error: e instanceof Error ? e.message : String(e) };
   }
 }
+
+/** Completed Anvil jobs in the history = candidate training rows for the Anvil quantile models. */
+export const anvilTrainingRows = async (): Promise<number | null> => {
+  try {
+    const n = await adminCall<number>('Job', 'fetchCount', null, [{ filter: "cluster.id == 'anvil' && state == 'COMPLETED' && isLive == false" }]);
+    return typeof n === 'number' ? n : null;
+  } catch {
+    return null;
+  }
+};

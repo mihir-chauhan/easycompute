@@ -1,0 +1,10 @@
+/**
+ * Persistent GPU underuse detection with EWMA / CUSUM over a job's own telemetry baseline (MODEL_MAP).
+ */
+type GPUUnderuseDetector {
+
+  /**
+   * Baseline, EWMA and CUSUM series and whether underuse is persistent.
+   */
+  analyze: function(jobId: !string): json js-server
+}

@@ -34,4 +34,10 @@ entity type Advisor.ToolCall {
    * When the tool was called.
    */
   calledAt: datetime
+
+  /**
+   * JSON text `{citations: [...], links: [...]}`: the sources the result cites and the deep links (Launch planner, run
+   * pages) the Assistant page shows under the answer.
+   */
+  evidence: string
 }

@@ -7,7 +7,7 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Boxes, Database, ExternalLink, FileStack, GitBranch, RefreshCw, Workflow } from 'lucide-react';
+import { Boxes, Cpu, Database, ExternalLink, FileStack, GitBranch, RefreshCw, Workflow } from 'lucide-react';
 
 import {
   ErrorState,
@@ -15,6 +15,8 @@ import {
   KpiRow,
   KpiRowSkeleton,
   KpiTile,
+  MODEL_CATALOG,
+  ModelProvenance,
   Note,
   PageFrame,
   Pill,
@@ -25,7 +27,7 @@ import {
 } from '@/components/app';
 import { NATIVE_TOOL_LABEL, nativeToolUrl, type NativeTool } from '@/components/app/nativeTools';
 import { Button } from '@/components/ui/button';
-import { entityStat, feedStat, type EntityStat, type FeedStat } from '@/features/admin/api';
+import { anvilTrainingRows, entityStat, feedStat, type EntityStat, type FeedStat } from '@/features/admin/api';
 import { ENTITY_TYPES, LINEAGE_EDGES, LINEAGE_NODES, connected, type LineageKind } from '@/features/admin/lineage';
 import { cn } from '@/lib/utils';
 
@@ -33,6 +35,7 @@ const COLUMNS: Array<{ kind: LineageKind; title: string; icon: React.ReactNode }
   { kind: 'source', title: 'Sources', icon: <FileStack className="size-3.5" /> },
   { kind: 'pipeline', title: 'Pipelines', icon: <Workflow className="size-3.5" /> },
   { kind: 'entity', title: 'EasyCompute entities', icon: <Database className="size-3.5" /> },
+  { kind: 'model', title: 'Models & engines', icon: <Cpu className="size-3.5" /> },
   { kind: 'consumer', title: 'Consumers', icon: <Boxes className="size-3.5" /> },
 ];
 
@@ -65,14 +68,16 @@ const maxIso = (a: Array<string | null>) => a.filter((x): x is string => Boolean
 interface Stats {
   feeds: Record<string, FeedStat>;
   entities: Record<string, EntityStat>;
+  anvilRows: number | null;
   loadedAt: string;
 }
 
 async function loadStats(): Promise<Stats> {
   const feedNames = LINEAGE_NODES.filter((n) => n.kind === 'pipeline' && n.ref).map((n) => n.ref as string);
   const types = [...new Set(Object.values(ENTITY_TYPES).flat())];
-  const [feeds, ents] = await Promise.all([Promise.all(feedNames.map(feedStat)), Promise.all(types.map(entityStat))]);
+  const [feeds, ents, anvilRows] = await Promise.all([Promise.all(feedNames.map(feedStat)), Promise.all(types.map(entityStat)), anvilTrainingRows()]);
   return {
+    anvilRows,
     feeds: Object.fromEntries(feeds.map((f) => [f.feed, f])),
     entities: Object.fromEntries(ents.map((e) => [e.type, e])),
     loadedAt: new Date().toISOString(),
@@ -119,6 +124,18 @@ function computeStatus(stats: Stats | null): Record<string, NodeStatus> {
       };
       return;
     }
+    if (f.files === 0) {
+      out[n.id] = {
+        tone: 'neutral',
+        label: 'Deployed · no files yet',
+        rows: targets.reduce((s, t) => s + (t?.rows ?? 0), 0),
+        rejected: f.rejected,
+        lastLoad: targetLoad,
+        files: 0,
+        note: 'Feed is deployed in C3 Data Fusion; no source files have been processed yet, so entity rows still come from the package seed.',
+      };
+      return;
+    }
     const tone: Tone = f.failedFiles > 0 ? 'warn' : fresh(f.lastLoad, n.slaHours);
     out[n.id] = {
       tone,
@@ -132,8 +149,28 @@ function computeStatus(stats: Stats | null): Record<string, NodeStatus> {
   LINEAGE_NODES.filter((n) => n.kind === 'source').forEach((n) => {
     const p = LINEAGE_EDGES.filter((x) => x.from === n.id).map((x) => out[x.to])[0];
     out[n.id] = p
-      ? { tone: p.tone, label: p.label === 'Seed load' ? 'Seed snapshot' : p.label === 'Running' ? 'Streaming' : p.tone === 'good' ? 'Connected' : p.label, rows: p.rows, rejected: p.rejected, lastLoad: p.lastLoad, files: p.files }
+      ? { tone: p.tone, label: p.label === 'Seed load' || p.label.startsWith('Deployed') ? 'Seed snapshot' : p.label === 'Running' ? 'Streaming' : p.tone === 'good' ? 'Connected' : p.label, rows: p.rows, rejected: p.rejected, lastLoad: p.lastLoad, files: p.files }
       : { tone: 'neutral', label: 'Unknown', rows: null, rejected: null, lastLoad: null };
+  });
+  LINEAGE_NODES.filter((n) => n.kind === 'model').forEach((n) => {
+    const spec = n.component ? MODEL_CATALOG[n.component] : undefined;
+    const ups = LINEAGE_EDGES.filter((x) => x.to === n.id).map((x) => out[x.from]);
+    const inputLoad = maxIso(ups.map((u) => u?.lastLoad ?? null));
+    const inputsBad = ups.some((u) => u?.tone === 'bad');
+    if (spec?.kind === 'learned') {
+      out[n.id] = {
+        tone: stats.anvilRows ? 'info' : 'neutral',
+        label: 'Historical only',
+        rows: stats.anvilRows,
+        rejected: null,
+        lastLoad: inputLoad,
+        note: `Training set: completed Anvil parent jobs from the sacct history (${stats.anvilRows?.toLocaleString('en-US') ?? '—'} rows today). Predictions carry P50/P90, training period and sample support.`,
+      };
+    } else if (spec?.kind === 'rules') {
+      out[n.id] = { tone: inputsBad ? 'warn' : 'good', label: 'Deterministic', rows: null, rejected: null, lastLoad: inputLoad };
+    } else {
+      out[n.id] = { tone: inputsBad ? 'bad' : fresh(inputLoad, 24), label: inputsBad ? 'Inputs missing' : 'Live', rows: null, rejected: null, lastLoad: inputLoad };
+    }
   });
   LINEAGE_NODES.filter((n) => n.kind === 'consumer').forEach((n) => {
     const ups = LINEAGE_EDGES.filter((x) => x.to === n.id).map((x) => out[x.from]);
@@ -294,7 +331,7 @@ export default function AdminData() {
               );
             })}
           </svg>
-          <div className="relative grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 lg:gap-14">
+          <div className="relative grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-5 lg:gap-9">
             {COLUMNS.map((col) => (
               <div key={col.kind} className="flex min-w-0 flex-col gap-3">
                 <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--ec-fg-2)]">
@@ -321,13 +358,13 @@ export default function AdminData() {
                       )}
                     >
                       <span className="flex items-center justify-between gap-2">
-                        <span className={cn('truncate text-sm font-medium text-[var(--ec-fg-hi)]', (n.kind === 'pipeline' || n.kind === 'entity') && 'font-mono text-[13px]')}>{n.label}</span>
+                        <span className={cn('truncate text-sm font-medium text-[var(--ec-fg-hi)]', (n.kind === 'pipeline' || n.kind === 'entity' || n.kind === 'model') && 'font-mono text-[12.5px]')}>{n.label}</span>
                         {st ? <span aria-label={st.label} title={st.label} className={cn('size-[7px] shrink-0 rounded-full', DOT[st.tone])} /> : <Skeleton className="size-2 rounded-full" />}
                       </span>
                       <span className="truncate text-xs text-[var(--ec-fg-2)]">{n.sub}</span>
                       {n.kind !== 'consumer' ? (
                         <span className="flex items-center justify-between gap-2 text-[11px] text-[var(--ec-fg-3)] tabular-nums">
-                          <span>{st ? (st.rows != null ? `${fmt(st.rows)} rows` : st.label) : ' '}</span>
+                          <span>{st ? (n.kind === 'model' ? st.label : st.rows != null ? `${fmt(st.rows)} rows` : st.label) : ' '}</span>
                           <span className="font-mono">{st ? ago(st.lastLoad) : ''}</span>
                         </span>
                       ) : (
@@ -347,7 +384,7 @@ export default function AdminData() {
           title={
             sel ? (
               <span className="flex flex-wrap items-center gap-2.5">
-                <span className={sel.kind === 'pipeline' || sel.kind === 'entity' ? 'font-mono' : undefined}>{sel.label}</span>
+                <span className={sel.kind !== 'source' && sel.kind !== 'consumer' ? 'font-mono' : undefined}>{sel.label}</span>
                 {selStatus ? (
                   <Pill tone={selStatus.tone} dot>
                     {selStatus.label}
@@ -366,8 +403,15 @@ export default function AdminData() {
               <KeyValue
                 items={[
                   ...(sel.chain ? [{ label: 'Chain', value: <span className="font-mono text-[12.5px]">{sel.chain.join(' → ')}</span> }] : []),
+                  ...(sel.kind === 'model' && sel.component
+                    ? [
+                        { label: 'Method', value: MODEL_CATALOG[sel.component]?.method ?? '—' },
+                        { label: 'Training', value: MODEL_CATALOG[sel.component]?.training ?? '—' },
+                        { label: 'Provenance', value: <ModelProvenance component={sel.component} /> },
+                      ]
+                    : []),
                   ...(sel.kind === 'entity' ? [{ label: 'C3 types', value: <span className="font-mono text-[12.5px]">{(ENTITY_TYPES[sel.id] ?? []).join(', ')}</span> }] : []),
-                  { label: 'Rows', value: fmt(selStatus?.rows) },
+                  ...(sel.kind === 'model' ? (MODEL_CATALOG[sel.component ?? '']?.kind === 'learned' ? [{ label: 'Training rows', value: fmt(selStatus?.rows) }] : []) : [{ label: 'Rows', value: fmt(selStatus?.rows) }]),
                   ...(sel.kind === 'pipeline' && !sel.native ? [{ label: 'Rejected rows', value: selStatus?.rejected == null ? '—' : fmt(selStatus.rejected) }] : []),
                   ...(selStatus?.files != null ? [{ label: 'Source files', value: fmt(selStatus.files) }] : []),
                   { label: 'Last load', value: selStatus?.lastLoad ? `${new Date(selStatus.lastLoad).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · ${ago(selStatus.lastLoad)}` : '—' },

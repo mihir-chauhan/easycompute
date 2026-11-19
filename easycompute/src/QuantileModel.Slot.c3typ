@@ -1,0 +1,17 @@
+/**
+ * Model Ops slot of a {@link QuantileModel}.
+ */
+enum type QuantileModel.Slot {
+  /**
+   * Used by the planner.
+   */
+  CHAMPION = 'CHAMPION'
+  /**
+   * Evaluated alongside the champion; not used for planning.
+   */
+  CHALLENGER = 'CHALLENGER'
+  /**
+   * No longer used.
+   */
+  RETIRED = 'RETIRED'
+}

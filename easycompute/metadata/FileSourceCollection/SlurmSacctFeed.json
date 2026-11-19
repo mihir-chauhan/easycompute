@@ -1,0 +1,6 @@
+{
+  "name": "SlurmSacctFeed",
+  "description": "Daily Slurm sacct CSV export -> SourceSlurmSacct -> CanonicalSlurmJob -> Job (valid rows) / IngestRejection (rejected rows).",
+  "sourceSystem": "EasyComputeFeeds",
+  "source": "SourceSlurmSacct"
+}

@@ -17,11 +17,14 @@ import {
   fetchGpuTypes,
   fetchProjects,
   getRunRequestStatus,
+  predictDuration,
+  type DurationPrediction,
   recommendPlans,
   submitPlan,
   updateRunRequest,
 } from '@/features/lab/api';
 import { CheckRow, HeadNote, KV, muted, ScriptBlock } from '@/features/lab/components';
+import { ModelComputing, ModelProvenance, ModelsComputing } from '@/features/lab/models';
 import { formatDuration, formatInt, formatUsd, WORKLOAD_LABEL } from '@/features/lab/format';
 import type { RuleCheck, RunPlan, RunRequest, RunRequestStatus } from '@/features/lab/types';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
@@ -71,7 +74,9 @@ function Stepper({ step, reached, onJump }: { step: number; reached: number; onJ
   );
 }
 
-function PlanCard({ plan, selected, deadlineLabel, onSelect }: { plan: RunPlan; selected: boolean; deadlineLabel?: string; onSelect: () => void }) {
+const WAIT_RANGE: Record<string, string> = { '<15 min': '0-15 min', '15 min-2 h': '15 min-2 h', '2-12 h': '2-12 h', '>12 h': '12 h+' };
+
+function PlanCard({ plan, selected, deadlineLabel, pred, fairShare, onSelect }: { plan: RunPlan; selected: boolean; deadlineLabel?: string; pred?: DurationPrediction | null; fairShare?: RuleCheck; onSelect: () => void }) {
   const label = plan.label ?? `Plan ${plan.rank}`;
   const slack = plan.deadlineSlackHours;
   const big = plan.label === 'Cheapest' && plan.estCostUnits != null ? `${formatInt(plan.estCostUnits)} units` : formatUsd(plan.estCostUsd);
@@ -107,8 +112,45 @@ function PlanCard({ plan, selected, deadlineLabel, onSelect }: { plan: RunPlan; 
           rows={[
             ['GPUs', `${plan.gpus ?? 0} × ${plan.gpuType?.id ?? 'CPU'} · ${plan.nodes ?? 1} node${(plan.nodes ?? 1) > 1 ? 's' : ''}`],
             ['Jobs', chained ? `${plan.chainedJobs} × ${formatDuration(plan.walltimeHours)}, chained` : `1 × ${formatDuration(plan.walltimeHours)}`],
-            ['Queue wait', <span key="w">{`~${formatDuration(plan.estWaitHours)}`}{plan.waitBucket ? <span className={muted}>{` (${plan.waitBucket})`}</span> : null}</span>],
-            ['Runtime', `${formatDuration(plan.estDurationHours)} predicted`],
+            [
+              'Runtime',
+              <span key="rt" className="flex flex-col gap-1">
+                <span>
+                  {pred?.estDurationHours != null && pred?.p90DurationHours != null
+                    ? `P50 ${formatDuration(pred.estDurationHours)} · P90 ${formatDuration(pred.p90DurationHours as number)}`
+                    : `${formatDuration(plan.estDurationHours)} predicted`}
+                </span>
+                <ModelProvenance name="AnvilRuntimeQ50Q90" support={pred?.sampleSize != null ? `${formatInt(pred.sampleSize as number)} jobs` : undefined} extra={typeof pred?.explanation === 'string' ? pred.explanation : undefined} />
+              </span>,
+            ],
+            [
+              'Queue wait',
+              <span key="w" className="flex flex-col gap-1">
+                <span>
+                  {`~${formatDuration(plan.estWaitHours)}`}
+                  {plan.waitBucket ? <span className={muted}>{` (P50-P90 ${WAIT_RANGE[plan.waitBucket] ?? plan.waitBucket})`}</span> : null}
+                </span>
+                <ModelProvenance name="AnvilQueueWaitQ50Q90" confidence="low" extra={plan.waitReason} />
+              </span>,
+            ],
+            [
+              'GPU shape',
+              <span key="g" className="flex flex-col gap-1">
+                <span>{plan.gpuMemNeedGb ? `Needs ~${formatInt(plan.gpuMemNeedGb)} GB VRAM · fits ${plan.gpuType?.id ?? ''}` : `${plan.gpus ?? 0} × ${plan.gpuType?.id ?? 'CPU'}`}</span>
+                <ModelProvenance name="GPUShapeAdvisor" />
+              </span>,
+            ],
+            ...(fairShare
+              ? ([
+                  [
+                    'Fair share',
+                    <span key="fs" className="flex flex-col gap-1">
+                      <span className={fairShare.outcome === 'PASS' ? undefined : 'text-[var(--c3-style-basic-fg-warning)]'}>{fairShare.outcome === 'PASS' ? 'Within the lab’s share' : 'Lab above share: lower launch priority'}</span>
+                      <ModelProvenance name="LabFairShareAllocator" extra={fairShare.message} />
+                    </span>,
+                  ],
+                ] as [React.ReactNode, React.ReactNode][])
+              : []),
             [
               'Finishes',
               <span key="f">
@@ -122,7 +164,7 @@ function PlanCard({ plan, selected, deadlineLabel, onSelect }: { plan: RunPlan; 
             ],
           ]}
         />
-        {plan.rationale && <p className={cn('text-[13px]', muted)}>{plan.rationale}</p>}
+        {plan.rationale && <p className={cn('line-clamp-4 text-[13px]', muted)} title={plan.rationale}>{plan.rationale}</p>}
         <Button className="mt-auto w-full" variant={selected ? 'solid' : 'outline'} appearance={selected ? 'accent' : 'secondary'} leadingIcon={selected ? <Check /> : undefined} onClick={onSelect}>
           {selected ? 'Selected' : 'Select'}
         </Button>
@@ -147,6 +189,8 @@ const PlanRun: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showRuledOut, setShowRuledOut] = useState(false);
+  const [showPassed, setShowPassed] = useState(false);
+  const [preds, setPreds] = useState<Record<string, DurationPrediction | null>>({});
   const plansRef = useRef<HTMLDivElement>(null);
   const scriptRef = useRef<HTMLDivElement>(null);
 
@@ -194,6 +238,14 @@ const PlanRun: React.FC = () => {
       setStep(1);
       const ps = await recommendPlans(rr.id);
       setPlans(ps);
+      setPreds({});
+      Promise.all(
+        ps.map((p) =>
+          predictDuration(rr.workloadType ?? 'TRAINING', p.gpuType?.id ?? null, p.gpus ?? 1, rr.modelParamsB ?? 1)
+            .then((d) => [p.id, d] as const)
+            .catch(() => [p.id, null] as const),
+        ),
+      ).then((rows) => setPreds(Object.fromEntries(rows)));
       setStatus((await getRunRequestStatus(rr.id).catch(() => null)) ?? (ps.length ? 'PLANNED' : 'REJECTED'));
       setSelected(ps.find((p) => p.label === 'Balanced')?.id ?? ps[0]?.id ?? null);
       if (ps.length) setStep(2);
@@ -228,6 +280,9 @@ const PlanRun: React.FC = () => {
   };
 
   const fails = checks.filter((c) => c.outcome === 'FAIL');
+  const fairShare = checks.find((c) => c.ruleKind === 'FAIRSHARE_CAP' && c.outcome !== 'PASS') ?? checks.find((c) => c.ruleKind === 'FAIRSHARE_CAP');
+  const issues = checks.filter((c) => c.outcome !== 'PASS');
+  const passed = checks.filter((c) => c.outcome === 'PASS');
   const warns = checks.filter((c) => c.outcome === 'WARN');
   const ruledOut = checks.filter((c) => c.outcome !== 'PASS' && /rules out/i.test(c.message ?? ''));
   const runName = (request?.name ?? form.name) || 'new run';
@@ -305,8 +360,8 @@ const PlanRun: React.FC = () => {
             <SectionCard
               title="Rule checks"
               actions={
-                busy === 'check' && !plans ? (
-                  <HeadNote>Checking…</HeadNote>
+                busy === 'check' && checks.length === 0 ? (
+                  <ModelComputing name="ClusterPolicyEngine" detail="is checking rules…" />
                 ) : fails.length && !plans?.length ? (
                   <ToneBadge tone="bad">{`${fails.length} blocking`}</ToneBadge>
                 ) : (
@@ -314,22 +369,41 @@ const PlanRun: React.FC = () => {
                 )
               }
             >
+              {checks.length > 0 && (
+                <div className="mb-3">
+                  <ModelProvenance name="ClusterPolicyEngine" support={`${checks.length} rules checked`} />
+                </div>
+              )}
               <ul className="flex flex-col">
-                {checks.map((c) => (
-                  <CheckRow key={c.id} kind={checkKind(c)} title={c.title ?? c.policy?.title ?? c.ruleKind ?? 'Rule'} detail={c.outcome !== 'PASS' || checks.length < 8 ? c.message : undefined} right={<CheckTag c={c} />} />
+                {issues.map((c) => (
+                  <CheckRow key={c.id} kind={checkKind(c)} title={c.title ?? c.policy?.title ?? c.ruleKind ?? 'Rule'} detail={<span className="line-clamp-3" title={c.message}>{c.message}</span>} right={<CheckTag c={c} />} />
+                ))}
+                {(showPassed ? passed : passed.slice(0, 3)).map((c) => (
+                  <CheckRow key={c.id} kind="ok" title={c.title ?? c.policy?.title ?? c.ruleKind ?? 'Rule'} right={<CheckTag c={c} />} />
                 ))}
                 {checks.length === 0 && <li className={cn('py-4 text-sm', muted)}>No rules apply to this request.</li>}
               </ul>
+              {passed.length > 3 && (
+                <button type="button" onClick={() => setShowPassed((v) => !v)} className="mt-3 flex items-center gap-1 text-[13px] text-[var(--c3-style-basic-fg-accent)] hover:underline">
+                  <ChevronRight className={cn('size-3.5 transition-transform', showPassed && 'rotate-90')} aria-hidden />
+                  {showPassed ? 'Hide passed rules' : `${passed.length - 3} more rules passed`}
+                </button>
+              )}
             </SectionCard>
           </div>
 
           <div ref={plansRef} className="flex scroll-mt-4 flex-col gap-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="text-lg font-medium text-[var(--c3-style-basic-fg-primary)]">Ranked configurations</h2>
-              <HeadNote>Ranked by deadline slack, then lab cost, then queue wait</HeadNote>
+              <span className="flex flex-wrap items-center gap-2">
+                <HeadNote>Ranked by deadline slack, then lab cost, then queue wait</HeadNote>
+                <ModelProvenance name="AnvilHostMemoryQ50Q90" extra="Host memory request sized from P90 of similar jobs (--mem in the script)." />
+              </span>
             </div>
             {plans === null ? (
-              <LoadingState label="Ranking configurations from your lab's past runs…" />
+              <SectionCard>
+                <ModelsComputing names={['AnvilRuntimeQ50Q90', 'AnvilQueueWaitQ50Q90', 'AnvilHostMemoryQ50Q90', 'GPUShapeAdvisor', 'LabFairShareAllocator']} />
+              </SectionCard>
             ) : plans.length === 0 ? (
               <SectionCard>
                 <div className="flex flex-col items-center gap-2 py-6 text-center">
@@ -346,6 +420,8 @@ const PlanRun: React.FC = () => {
                   <PlanCard
                     key={p.id}
                     plan={p}
+                    pred={preds[p.id]}
+                    fairShare={fairShare}
                     selected={p.id === selected}
                     deadlineLabel={project?.deadlineLabel}
                     onSelect={() => {

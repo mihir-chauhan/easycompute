@@ -21,6 +21,9 @@ import {
   KpiRowSkeleton,
   KpiTile,
   MetricChart,
+  ModelComputing,
+  ModelProvenance,
+  provenanceFor,
   PageFrame,
   ProgressBar,
   SectionCard,
@@ -150,6 +153,13 @@ export default function AdminOverview() {
         data ? `GPUs, spend and fairness across ${k?.clusters ?? 0} clusters and ${k?.labs ?? 0} labs · updated ${new Date(data.asOf).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : 'GPUs, spend and fairness across Purdue research computing'
       }
       breadcrumbs={[{ label: 'Research Computing' }, { label: 'Overview' }]}
+      badges={
+        loading && !data ? (
+          <ModelComputing component="ClusterCapacityAggregator" verb={'is aggregating 6 clusters'} />
+        ) : (
+          <ModelProvenance component="ClusterCapacityAggregator" provenance={provenanceFor(data, 'ClusterCapacityAggregator')} compact />
+        )
+      }
       actions={
         <Button variant="outline" appearance="secondary" size="sm" leadingIcon={<RotateCw />} onClick={reload}>
           Refresh
@@ -201,15 +211,25 @@ export default function AdminOverview() {
           loading={loading && !data}
           empty={Boolean(data) && gpuClusters.length === 0}
           ariaLabel="Horizontal bar chart of GPU utilization by cluster"
+          model="ClusterCapacityAggregator"
+          provenance={provenanceFor(data, 'ClusterCapacityAggregator')}
           onItemClick={(name) => {
             const c = gpuClusters.find((x) => x.name === name);
             if (c) navigate(`/admin/clusters/${c.id}`);
           }}
           legend={gpuClusters.map((c) => ({ label: c.name, swatchClass: CLUSTER_BG[c.id] ?? 'bg-[var(--ec-ink)]', value: `${num(c.busyGpus)}/${num(c.totalGpus)}` }))}
         />
-        <SectionCard title="Spend by billing model" subtitle="In-house node shares vs NSF ACCESS vs third-party cloud">
+        <SectionCard
+          title="Spend by billing model"
+          subtitle={
+            <span className="flex flex-col items-start gap-1.5">
+              In-house node shares vs NSF ACCESS vs third-party cloud
+              {data ? <ModelProvenance component="AllocationBurnForecaster" provenance={provenanceFor(data, 'AllocationBurnForecaster')} compact /> : null}
+            </span>
+          }
+        >
           {loading && !data ? (
-            <TableSkeleton rows={4} />
+            <ModelComputing component="AllocationBurnForecaster" verb="is reconciling the billing ledger" variant="card" />
           ) : (
             <div className="flex flex-col gap-4">
               <div>
@@ -246,6 +266,8 @@ export default function AdminOverview() {
           loading={loading && !data}
           heightClass="h-80"
           ariaLabel="Grouped bar chart of fair-share target and actual usage per lab"
+          model="LabFairShareAllocator"
+          provenance={provenanceFor(data, 'LabFairShareAllocator')}
           legend={[
             { label: 'Target', swatchClass: 'bg-[var(--ec-ink-soft)]' },
             { label: 'Balanced', swatchClass: 'bg-[var(--ec-good)]' },
@@ -315,14 +337,24 @@ export default function AdminOverview() {
           option={demandOption}
           loading={loading && !data}
           ariaLabel="Line chart of weekly GPU-hours with a 4-week forecast"
+          model="ClusterCapacityAggregator"
+          provenance={provenanceFor(data, 'ClusterCapacityAggregator')}
           legend={[
             { label: 'Actual GPU-hours', swatchClass: 'bg-[var(--ec-ink)]' },
             { label: 'Forecast', swatchClass: '', dashed: true },
           ]}
         />
-        <SectionCard title="Where more resources are needed" subtitle="Partitions under the most pressure">
+        <SectionCard
+          title="Where more resources are needed"
+          subtitle={
+            <span className="flex flex-col items-start gap-1.5">
+              Partitions under the most pressure
+              {data ? <ModelProvenance component="ClusterCapacityAggregator" provenance={provenanceFor(data, 'ClusterCapacityAggregator')} compact /> : null}
+            </span>
+          }
+        >
           {loading && !data ? (
-            <TableSkeleton rows={4} />
+            <ModelComputing component="ClusterCapacityAggregator" verb="is ranking partitions by pressure" variant="card" />
           ) : (data?.demand.partitions ?? []).length === 0 ? (
             <EmptyState icon={<TrendingUp />} title="No partition under pressure" />
           ) : (

@@ -1,0 +1,8 @@
+{
+  "id": "EasyComputeSlurmSacctFeed",
+  "name": "EasyCompute SlurmSacctFeed ingestion (hourly at :10)",
+  "description": "Processes any new Slurm sacct CSV files in the SlurmSacctFeed inbox into Job / IngestRejection. Runs before JobTelemetryFeed so new jobs exist before their telemetry is validated.",
+  "action": { "typeName": "FileSourceCollection", "actionName": "process" },
+  "inputs": { "this": { "type": "FileSourceCollection", "name": "SlurmSacctFeed" }, "spec": { "process": true } },
+  "scheduleDef": { "cronExpression": "0 10 * * * ?" }
+}

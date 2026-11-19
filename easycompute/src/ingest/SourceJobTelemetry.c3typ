@@ -1,0 +1,92 @@
+/**
+ * One raw telemetry sample (DCGM exporter GPU metrics joined with node_exporter host metrics) delivered as a JSON
+ * array of flat objects to the `JobTelemetryFeed` {@link FileSourceCollection}. Values are kept as text so a
+ * malformed value never fails the file; {@link EasyComputeIngest#telemetryToCanonical} parses and validates it into a
+ * {@link CanonicalJobTelemetry}.
+ */
+type SourceJobTelemetry mixes Source {
+
+  /**
+   * Sample time, ISO-8601 UTC. Mapped from `timestamp` (which collides with {@link Source#timestamp}).
+   */
+  @ser(name="timestamp")
+  sampleTimestampRaw: string
+
+  /**
+   * Cluster id, a {@link ComputeCluster} id.
+   */
+  @ser(name="cluster")
+  clusterRaw: string
+
+  /**
+   * Slurm JobID on that cluster.
+   */
+  @ser(name="jobid")
+  jobIdRaw: string
+
+  /**
+   * Sample sequence number within the job (zero-padded to 2 digits in the {@link JobMetric} id).
+   */
+  @ser(name="seq")
+  seqRaw: string
+
+  /**
+   * Host the sample was taken on (informational; not stored on {@link JobMetric}).
+   */
+  @ser(name="hostname")
+  hostnameRaw: string
+
+  /**
+   * DCGM GPU utilization (0-100).
+   */
+  @ser(name="DCGM_FI_DEV_GPU_UTIL")
+  gpuUtilRaw: string
+
+  /**
+   * DCGM frame-buffer memory used (0-100).
+   */
+  @ser(name="DCGM_FI_DEV_FB_USED_PCT")
+  fbUsedPctRaw: string
+
+  /**
+   * DCGM board power in watts.
+   */
+  @ser(name="DCGM_FI_DEV_POWER_USAGE")
+  powerUsageRaw: string
+
+  /**
+   * node_exporter CPU utilization (0-100).
+   */
+  @ser(name="node_cpu_util_pct")
+  cpuUtilPctRaw: string
+
+  /**
+   * node_exporter memory used (0-100).
+   */
+  @ser(name="node_mem_used_pct")
+  memUsedPctRaw: string
+
+  /**
+   * node_exporter disk read throughput in MB/s.
+   */
+  @ser(name="node_disk_read_mbps")
+  diskReadMbpsRaw: string
+
+  /**
+   * node_exporter disk write throughput in MB/s.
+   */
+  @ser(name="node_disk_write_mbps")
+  diskWriteMbpsRaw: string
+
+  /**
+   * Minutes since the last checkpoint.
+   */
+  @ser(name="ckpt_age_min")
+  ckptAgeMinRaw: string
+
+  /**
+   * Training loss reported by the application (optional).
+   */
+  @ser(name="train_loss")
+  trainLossRaw: string
+}

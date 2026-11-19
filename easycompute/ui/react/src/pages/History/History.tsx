@@ -35,6 +35,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { fetchHistoryJobs, getLabSummary } from '@/features/lab/api';
 import { CliHint, HeadNote, Mono, muted } from '@/features/lab/components';
+import { ModelProvenance } from '@/features/lab/models';
 import { formatInt, formatPct100, formatUsd, titleCase } from '@/features/lab/format';
 import { gpuHours, type GroupStats, groupStats, histogram, wastedGpuHours, wastePatterns, weekStart } from '@/features/lab/insights';
 import type { SummaryAllocation } from '@/features/lab/types';
@@ -127,42 +128,74 @@ const History: React.FC = () => {
   }, [memberWeeks, themeKey]);
 
   /** Cumulative spend by week with a straight-line forecast at the last 4 weeks' pace. */
+  /**
+   * AllocationBurnForecaster: cumulative charged by week, then three burn scenarios from complete weeks —
+   * baseline = EWMA (alpha 0.5), low / high = the lowest / highest of the last 4 weeks — with run-out weeks.
+   */
   const forecast = useMemo(() => {
     const weekly = s?.weekly ?? [];
     if (weekly.length < 2) return null;
     let cum = 0;
     const actual = weekly.map((w) => (cum += w.costUsd));
     const full = completeWeeks(weekly, s?.asOf);
-    const pace = full.length ? full.slice(-4).reduce((n, w) => n + w.costUsd, 0) / Math.min(4, full.length) : 0;
+    const recent = full.slice(-4).map((w) => w.costUsd);
+    const baseline = full.reduce((e, w, i) => (i === 0 ? w.costUsd : 0.5 * w.costUsd + 0.5 * e), 0);
+    const low = recent.length ? Math.min(...recent) : baseline;
+    const high = recent.length ? Math.max(...recent) : baseline;
     const budget = cum + allocations.reduce((n, a) => n + (a.remainingUsd ?? 0), 0);
-    const ahead = 12;
-    const fx = Array.from({ length: ahead }, (_, i) => cum + pace * (i + 1));
+    const ahead = 16;
+    const proj = (rate: number) => Array.from({ length: ahead }, (_, i) => cum + rate * (i + 1));
+    const fBase = proj(baseline);
+    const fLow = proj(low);
+    const fHigh = proj(high);
     const lastWeek = new Date(weekly[weekly.length - 1].week);
     const x = [
       ...weekly.map((w) => formatShortDate(w.week)),
-      ...fx.map((_, i) => formatShortDate(new Date(lastWeek.getTime() + (i + 1) * 7 * 86400000).toISOString())),
+      ...fBase.map((_, i) => formatShortDate(new Date(lastWeek.getTime() + (i + 1) * 7 * 86400000).toISOString())),
     ];
-    const outWeek = fx.findIndex((v) => v > budget);
+    const runOut = (f: number[]) => {
+      const i = f.findIndex((v) => v > budget);
+      return i >= 0 ? x[weekly.length + i] : null;
+    };
+    const join = (f: number[]) => [...actual.map((v, i) => (i === actual.length - 1 ? v : null)), ...f];
     return {
-      pace,
+      pace: baseline,
+      low,
+      high,
       budget,
       spent: cum,
-      outLabel: outWeek >= 0 ? x[weekly.length + outWeek] : null,
+      outLabel: runOut(fBase),
+      outLow: runOut(fLow),
+      outHigh: runOut(fHigh),
       option: lineOption({
         x,
         series: [
-          { name: 'Charged', data: [...actual, ...fx.map(() => null)], area: true, color: toneColor('good') },
-          { name: 'Current pace', data: [...actual.map((v, i) => (i === actual.length - 1 ? v : null)), ...fx], dashed: true, color: toneColor('bad') },
+          { name: 'Charged', data: [...actual, ...fBase.map(() => null)], area: true, color: toneColor('good') },
+          { name: 'High burn', data: join(fHigh), dashed: true, color: toneColor('bad') },
+          { name: 'Baseline', data: join(fBase), dashed: true, color: toneColor('warn') },
+          { name: 'Low burn', data: join(fLow), dashed: true, color: toneColor('info') },
         ],
         valueFormat: (v) => formatUsd(v),
         min: 0,
-        max: budget > 0 ? Math.ceil((Math.max(budget, fx[fx.length - 1]) * 1.08) / 1000) * 1000 : undefined,
+        max: budget > 0 ? Math.ceil((Math.max(budget, fHigh[fHigh.length - 1]) * 1.08) / 1000) * 1000 : undefined,
         thresholds: budget > 0 ? [{ value: Math.round(budget), label: `All allocations ${formatUsd(budget)}`, tone: 'bad' }] : [],
         forecastFrom: weekly.length,
       }),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s, themeKey]);
+
+  /** Right-sizing evidence: share of requested cores / memory actually used by finished jobs (P50 and P90). */
+  const rightSizing = useMemo(() => {
+    const q = (xs: number[], p: number) => {
+      if (!xs.length) return null;
+      const v = [...xs].sort((a, b) => a - b);
+      return v[Math.min(v.length - 1, Math.floor(p * (v.length - 1)))];
+    };
+    const cpu = jobs.map((j) => j.cpuEfficiency).filter((v): v is number => v != null && v > 0);
+    const mem = jobs.filter((j) => j.reqMemGb && j.maxRssGb != null).map((j) => (j.maxRssGb as number) / (j.reqMemGb as number));
+    return { cpuN: cpu.length, cpu50: q(cpu, 0.5), cpu90: q(cpu, 0.9), memN: mem.length, mem50: q(mem, 0.5), mem90: q(mem, 0.9) };
+  }, [jobs]);
 
   const utilOption = useMemo(() => {
     const bins = histogram(gpuJobs.filter((j) => j.gpuUtilAvg != null).map((j) => j.gpuUtilAvg as number));
@@ -322,7 +355,12 @@ const History: React.FC = () => {
 
       <MetricChart
         title="Spend forecast"
-        subtitle={forecast ? (forecast.outLabel ? `At the current pace (${formatUsd(forecast.pace)}/week) every allocation is used up by ${forecast.outLabel}` : `At the current pace (${formatUsd(forecast.pace)}/week) the allocations last past the next 12 weeks`) : 'Cumulative charged across all allocations'}
+        subtitle={
+          forecast
+            ? `Run-out: baseline ${forecast.outLabel ?? 'beyond 16 weeks'} (${formatUsd(forecast.pace)}/wk) · high ${forecast.outHigh ?? 'beyond 16 weeks'} (${formatUsd(forecast.high)}/wk) · low ${forecast.outLow ?? 'beyond 16 weeks'} (${formatUsd(forecast.low)}/wk)`
+            : 'Cumulative charged across all allocations'
+        }
+        actions={<ModelProvenance name="AllocationBurnForecaster" support={`${s?.weekly?.length ?? 0} weeks of charges`} />}
         option={forecast?.option ?? null}
         loading={!s && !summary.error}
         error={summary.error}
@@ -330,7 +368,9 @@ const History: React.FC = () => {
         emptyLabel="Not enough weekly history yet"
         legend={[
           { label: 'Charged', swatchClass: TONE_BG.good },
-          { label: 'Current pace', swatchClass: TONE_BG.bad, dashed: true },
+          { label: 'High burn', swatchClass: TONE_BG.bad },
+          { label: 'Baseline (EWMA)', swatchClass: TONE_BG.warn },
+          { label: 'Low burn', swatchClass: TONE_BG.info },
         ]}
         ariaLabel="Spend forecast"
         footer={
@@ -419,6 +459,23 @@ const History: React.FC = () => {
             </div>
           </SectionCard>
 
+          <div className="flex min-w-0 flex-col gap-4">
+          <SectionCard title="Right-sizing evidence" actions={<HeadNote>Finished jobs in this period</HeadNote>}>
+            <div className="flex flex-col gap-4 text-[13px]">
+              <div className="flex flex-col gap-1">
+                <span className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">Requested CPU cores actually used</span>
+                <span className="tabular-nums">{rightSizing.cpu50 != null ? `P50 ${formatPct100(rightSizing.cpu50 * 100)} · P90 ${formatPct100((rightSizing.cpu90 ?? 0) * 100)}` : 'No CPU efficiency data'}</span>
+                {rightSizing.cpu90 != null && rightSizing.cpu90 < 0.6 && <span className={muted}>{`Most jobs could request about ${formatPct100(Math.max(0.25, rightSizing.cpu90 * 1.2) * 100)} of today's cores.`}</span>}
+                <ModelProvenance name="AnvilTaskCPUQ50Q90" support={`${formatInt(rightSizing.cpuN)} jobs`} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">Requested host memory actually used</span>
+                <span className="tabular-nums">{rightSizing.mem50 != null ? `P50 ${formatPct100(rightSizing.mem50 * 100)} · P90 ${formatPct100((rightSizing.mem90 ?? 0) * 100)}` : 'No memory high-water data'}</span>
+                {rightSizing.mem90 != null && rightSizing.mem90 < 0.6 && <span className={muted}>{`--mem could drop to ~${formatPct100(Math.max(0.25, rightSizing.mem90 * 1.25) * 100)} of the usual request without OOM risk at P90.`}</span>}
+                <ModelProvenance name="AnvilHostMemoryQ50Q90" support={`${formatInt(rightSizing.memN)} jobs`} />
+              </div>
+            </div>
+          </SectionCard>
           <MetricChart
             title="GPU utilization of finished jobs"
             subtitle={`${formatPct100(totals.util)} GPU-hour weighted · ${formatPct100(totals.success * 100)} of ${formatInt(jobs.length)} jobs completed`}
@@ -432,6 +489,7 @@ const History: React.FC = () => {
               { label: '< 40%', swatchClass: TONE_BG.bad },
             ]}
           />
+          </div>
         </div>
       )}
     </PageFrame>

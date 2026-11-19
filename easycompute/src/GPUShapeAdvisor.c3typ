@@ -1,0 +1,11 @@
+/**
+ * GPU type and count recommendation from the hardware catalogue and deterministic rules (MODEL_MAP; no learned
+ * GPU model).
+ */
+type GPUShapeAdvisor {
+
+  /**
+   * Fit of every GPU type for the workload: minimum GPUs for the memory need, sensible counts and the reason.
+   */
+  advise: function(workloadType: !string, modelParamsB: double, datasetGb: double, requestedGpus: int, requestedGpuTypeId: string, description: string): json js-server
+}

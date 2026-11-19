@@ -1,0 +1,33 @@
+/**
+ * A feed row that failed validation and was not written to its target ({@link Job} or {@link JobMetric}). Written by
+ * the `CanonicalSlurmJob-IngestRejection` and `CanonicalJobTelemetry-IngestRejection` transforms. The id is a hash of
+ * feed, file and raw row, so re-processing the same file updates rather than duplicates.
+ */
+@db(index=['feed', 'sourceFile'])
+entity type IngestRejection {
+
+  /**
+   * Feed (SourceCollection) the row came from: "SlurmSacctFeed" or "JobTelemetryFeed".
+   */
+  feed: string
+
+  /**
+   * File name the row came from.
+   */
+  sourceFile: string
+
+  /**
+   * Key of the rejected row (target id when derivable, otherwise a best-effort key).
+   */
+  rowKey: string
+
+  /**
+   * Every validation failure for the row, "; "-separated.
+   */
+  reason: string
+
+  /**
+   * The original row as JSON.
+   */
+  rawRow: string
+}

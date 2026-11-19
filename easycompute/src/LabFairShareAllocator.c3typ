@@ -1,0 +1,21 @@
+/**
+ * Lab-level project fairness and launch ordering (MODEL_MAP): weighted deficit round robin for queued work and
+ * weighted max-min for the budget portfolio. Does not change Slurm priority.
+ */
+type LabFairShareAllocator {
+
+  /**
+   * Order in which the lab's queued runs and pending jobs should launch, with each project's deficit.
+   */
+  launchOrder: function(labId: !string): json js-server
+
+  /**
+   * Weighted max-min fair split of the lab's remaining budget across its projects.
+   */
+  portfolio: function(labId: !string): json js-server
+
+  /**
+   * Weight, recent usage share and deficit of one project, used to rank plans.
+   */
+  projectWeights: function(labId: !string, projectId: string): json js-server
+}

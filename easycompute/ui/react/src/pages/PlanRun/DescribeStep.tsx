@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { predictDuration } from '@/features/lab/api';
 import { muted } from '@/features/lab/components';
+import { ModelComputing } from '@/features/lab/models';
 import { countdown, formatDuration, formatInt, WORKLOAD_LABEL } from '@/features/lab/format';
 import type { Project, WorkloadType } from '@/features/lab/types';
 import { formatDateTime } from '@/lib/format';
@@ -220,6 +221,7 @@ export default function DescribeStep({ form, onChange, projects, gpuTypes, clust
           <Button className="mt-4 w-full" trailingIcon={<ArrowRight />} disabled={!canNext} loading={busy} onClick={onNext}>
             Check rules
           </Button>
+          {busy && <ModelComputing name="ClusterPolicyEngine" detail="is checking rules…" className="mt-3" />}
         </Container>
         <Container title="How planning works">
           <ol className={`flex flex-col gap-2 text-c3-regular-body-p2 ${muted}`}>

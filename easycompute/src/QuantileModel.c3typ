@@ -1,0 +1,94 @@
+/**
+ * A trained quantile model (MODEL_MAP: AnvilRuntimeQ50Q90, AnvilQueueWaitQ50Q90, AnvilHostMemoryQ50Q90,
+ * AnvilTaskCPUQ50Q90), seeded by the ML trainer. Id = artifact id (for example `anvil_runtime_q50_q90_v1`); inherited `name` is
+ * the component name. {@link QuantileModel#payload} holds the feature schema and P50 / P90 heads;
+ * {@link QuantileModel#predict} evaluates them in JS.
+ */
+@db(index=['name', 'status'])
+entity type QuantileModel {
+
+  /**
+   * Model Ops slot; empty means CHAMPION (used by the planner).
+   */
+  status: string enum QuantileModel.Slot
+
+  /**
+   * Artifact version (for example "v1").
+   */
+  modelVersion: string
+
+  /**
+   * Model family (for example "LinearQuantileRegressor/NumPyPinballAdam").
+   */
+  family: string
+
+  /**
+   * True when the model reflects historical behaviour only (no live scheduler state).
+   */
+  historicalOnly: boolean
+
+  /**
+   * Trainer-assessed confidence (LOW, MEDIUM, HIGH).
+   */
+  confidence: string
+
+  /**
+   * Predicted quantity (runtimeHours, queueWaitHours, hostMemoryGiB, taskCpuCores).
+   */
+  targetName: string
+
+  /**
+   * Unit of the predicted quantity.
+   */
+  targetUnit: string
+
+  /**
+   * Observation period the model was trained on.
+   */
+  trainingPeriod: string
+
+  /**
+   * Number of observations behind the model.
+   */
+  sampleSupport: int
+
+  /**
+   * Training observations (temporal split).
+   */
+  trainCount: int
+
+  /**
+   * Holdout observations (temporal split).
+   */
+  testCount: int
+
+  /**
+   * How the temporal train / holdout split was made.
+   */
+  splitLabel: string
+
+  /**
+   * Holdout metrics (pinball loss, P50 log error, P90 coverage, constant baseline).
+   */
+  metrics: json
+
+  /**
+   * Feature schema, scaling, P50 / P90 heads and target transform (tools/ml/quantile_model.js contract).
+   */
+  payload: json
+
+  /**
+   * P50 / P90 for one feature vector; `id` is the artifact id or the component name.
+   */
+  predict: function(id: !string, featuresJson: !json): json js-server
+
+  /**
+   * P50 / P90 for several feature vectors in one call.
+   */
+  predictBatch: function(id: !string, featuresListJson: !json): json js-server
+
+  /**
+   * Champion and challenger models with their status, version, training period, sample support and metrics.
+   */
+  registry: function(): json js-server
+}

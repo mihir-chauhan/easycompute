@@ -3,10 +3,16 @@
  * Confidential and Proprietary C3 Materials.
  */
 
-import type { ExtractedConstraint, LabConstraints, Policy } from './types';
+import type { EvidenceSpan, ExtractedConstraint, LabConstraints, Policy } from './types';
+
+/** Quote text of an evidence span (string or `{ quote, start, end }`). */
+export const evText = (e?: EvidenceSpan | null): string | undefined => (e == null ? undefined : typeof e === 'string' ? e : e.quote);
+
+const UNIT: Record<string, string> = { SU: 'SU', GPU_HOURS: 'GPU-hours', GPU_YEARS: 'GPU-years', NODE_HOURS: 'node-hours' };
+const PERIODS = ['DAY', 'WEEK', 'MONTH', 'QUARTER', 'SEMESTER', 'YEAR'];
 
 const fmtAmount = (kind: string, amount: number) =>
-  kind === 'USD' ? `$${Math.round(amount).toLocaleString('en-US')}` : `${Math.round(amount).toLocaleString('en-US')} ${kind.replace(/_/g, '-').toLowerCase()}`;
+  kind === 'USD' ? `$${Math.round(amount).toLocaleString('en-US')}` : `${Math.round(amount).toLocaleString('en-US')} ${UNIT[kind] ?? kind.replace(/_/g, ' ').toLowerCase()}`;
 
 /** Advisor output → candidate LAB rules (one per enforceable statement), each tied to the sentence it came from. */
 export function toCandidateRules(c: LabConstraints | null | undefined): ExtractedConstraint[] {
@@ -17,21 +23,22 @@ export function toCandidateRules(c: LabConstraints | null | undefined): Extracte
       key: `budget-${i}`,
       kind: 'BUDGET_REMAINING',
       severity: 'WARN',
-      title: `Spend cap ${fmtAmount(b.kind, b.amount)}${b.period ? ` per ${b.period.toLowerCase()}` : ''}${b.scope ? ` (${b.scope})` : ''}`,
+      title: `Spend cap ${fmtAmount(b.kind, b.amount)}${b.period && PERIODS.includes(b.period.toUpperCase()) ? ` per ${b.period.toLowerCase()}` : b.period ? ` (${b.period.toLowerCase()})` : ''}${b.scope ? ` · ${b.scope}` : ''}`,
       limitValue: b.amount,
       limitText: b.kind,
-      sourceText: b.evidence,
+      sourceText: evText(b.evidence),
     }),
   );
   (c.deadlines ?? []).forEach((d, i) =>
-    out.push({ key: `deadline-${i}`, kind: 'DEADLINE_FEASIBLE', severity: 'INFO', title: `Finish before ${d.label}`, limitText: d.date, sourceText: d.evidence }),
+    out.push({ key: `deadline-${i}`, kind: 'DEADLINE_FEASIBLE', severity: 'INFO', title: `Finish before ${d.label}`, limitText: d.date, sourceText: evText(d.evidence) }),
   );
   const p = c.preferences ?? {};
-  if (p.preemptibleOk === false) out.push({ key: 'preempt', kind: 'PREEMPTIBLE_ONLY', severity: 'BLOCK', title: 'Never run on preemptible / standby QOS', limitText: 'deny' });
-  if (p.preemptibleOk === true) out.push({ key: 'preempt', kind: 'PREEMPTIBLE_ONLY', severity: 'INFO', title: 'Exploratory work may use preemptible QOS', limitText: 'allow' });
-  if (p.maxWalltimeHours) out.push({ key: 'wall', kind: 'MAX_WALLTIME', severity: 'WARN', title: `Max ${p.maxWalltimeHours} h walltime per job`, limitValue: p.maxWalltimeHours });
-  if (p.quietHours) out.push({ key: 'quiet', kind: 'QUIET_HOURS', severity: 'INFO', title: `Quiet hours: ${p.quietHours}`, limitText: p.quietHours });
-  (p.avoid ?? []).forEach((a, i) => out.push({ key: `avoid-${i}`, kind: 'ALLOWED_GPU_TYPES', severity: 'WARN', title: `Avoid ${a}`, limitText: `avoid:${a}` }));
+  const pev = (field: string) => p.evidence?.find((e) => e.field === field)?.quote;
+  if (p.preemptibleOk === false) out.push({ key: 'preempt', kind: 'PREEMPTIBLE_ONLY', severity: 'BLOCK', title: 'Never run on preemptible / standby QOS', limitText: 'deny', sourceText: pev('preemptibleOk') });
+  if (p.preemptibleOk === true) out.push({ key: 'preempt', kind: 'PREEMPTIBLE_ONLY', severity: 'INFO', title: 'Exploratory work may use preemptible QOS', limitText: 'allow', sourceText: pev('preemptibleOk') });
+  if (p.maxWalltimeHours) out.push({ key: 'wall', kind: 'MAX_WALLTIME', severity: 'WARN', title: `Max ${p.maxWalltimeHours} h walltime per job`, limitValue: p.maxWalltimeHours, sourceText: pev('maxWalltimeHours') });
+  if (p.quietHours) out.push({ key: 'quiet', kind: 'QUIET_HOURS', severity: 'INFO', title: `Quiet hours: ${p.quietHours}`, limitText: p.quietHours, sourceText: pev('quietHours') });
+  (p.avoid ?? []).forEach((a, i) => out.push({ key: `avoid-${i}`, kind: 'ALLOWED_GPU_TYPES', severity: 'WARN', title: `Avoid ${a}`, limitText: `avoid:${a}`, sourceText: pev('avoid') }));
   (c.dataRestrictions ?? []).forEach((d, i) =>
     out.push({
       key: `data-${i}`,
@@ -39,11 +46,11 @@ export function toCandidateRules(c: LabConstraints | null | undefined): Extracte
       severity: 'BLOCK',
       title: d.description || `${d.kind.replace(/_/g, ' ')} data restriction`,
       limitText: d.kind,
-      sourceText: d.evidence,
+      sourceText: evText(d.evidence),
     }),
   );
   (c.memberCaps ?? []).forEach((m, i) =>
-    out.push({ key: `cap-${i}`, kind: 'FAIRSHARE_CAP', severity: 'WARN', title: `${m.who} capped at ${Math.round(m.pct)}% of lab compute`, limitValue: m.pct, limitText: m.who, sourceText: m.evidence }),
+    out.push({ key: `cap-${i}`, kind: 'FAIRSHARE_CAP', severity: 'WARN', title: `${m.who} capped at ${Math.round(m.pct)}% of lab compute`, limitValue: m.pct, limitText: m.who, sourceText: evText(m.evidence) }),
   );
   (c.approvals ?? []).forEach((a, i) =>
     out.push({
@@ -53,7 +60,7 @@ export function toCandidateRules(c: LabConstraints | null | undefined): Extracte
       title: `PI approval above ${a.threshold.toLocaleString('en-US')} ${a.unit}`,
       limitValue: a.threshold,
       limitText: a.unit,
-      sourceText: a.evidence,
+      sourceText: evText(a.evidence),
     }),
   );
   return out;

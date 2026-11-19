@@ -1,0 +1,5 @@
+{
+  "name": "ComputeCluster",
+  "createOnly": false,
+  "updateMode": "merge"
+}

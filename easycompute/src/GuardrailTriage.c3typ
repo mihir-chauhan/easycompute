@@ -1,0 +1,55 @@
+/**
+ * Result of one run of the "Run guardrail triage" agentic workflow ({@link GuardrailWorkflow}) for a
+ * {@link JobAlert}. The row id equals the alert id, so re-triaging an alert overwrites its previous result.
+ * The triaged {@link JobAlert} itself is never modified; the proposed action is recorded as a
+ * PENDING_APPROVAL {@link ActionLogEntry} referenced by {@link GuardrailTriage#actionLogEntry}.
+ */
+@db(index=['alert', 'job', 'triagedAt'])
+entity type GuardrailTriage {
+
+  /**
+   * The {@link JobAlert} that was triaged (same value as the row id).
+   */
+  alert: JobAlert
+
+  /**
+   * The {@link Job} the alert belongs to ({@link JobAlert#job}).
+   */
+  job: Job
+
+  /**
+   * Severity assigned by the LLM triage node: CRITICAL, WARNING or INFO.
+   */
+  severity: string enum JobAlert.Severity
+
+  /**
+   * Most likely root cause of the alert, at most 30 words.
+   */
+  rootCause: string
+
+  /**
+   * The single {@link ActionType} the triage recommends; also the {@link ActionLogEntry#actionType} of
+   * {@link GuardrailTriage#actionLogEntry}.
+   */
+  recommendedAction: string enum ActionType
+
+  /**
+   * Why the recommended action fits, at most 40 words.
+   */
+  rationale: string
+
+  /**
+   * The AUTOPILOT {@link ActionLogEntry} with outcome PENDING_APPROVAL created by the triage run.
+   */
+  actionLogEntry: ActionLogEntry
+
+  /**
+   * Id of the {@link Genai.WorkflowExecution} of workflow `run_guardrail_triage` that produced this row.
+   */
+  workflowExecutionId: string
+
+  /**
+   * When the triage result was recorded.
+   */
+  triagedAt: datetime
+}

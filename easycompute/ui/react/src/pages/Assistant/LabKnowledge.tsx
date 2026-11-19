@@ -4,12 +4,13 @@
  */
 
 import React, { type ReactNode } from 'react';
-import { CalendarClock, Cpu, ShieldAlert, Sparkles, Wallet } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { CalendarClock, Cpu, ShieldAlert, Wallet } from 'lucide-react';
 
 import { c3Call } from '@/c3Action';
-import { ErrorState, SectionCard, Skeleton, ToneBadge, useC3Data, type Tone } from '@/components/app';
+import { ErrorState, ModelComputing, ModelProvenance, SectionCard, ToneBadge, useC3Data, type Tone } from '@/components/app';
 
-import type { LabConstraints } from './types';
+import type { Evidence, LabConstraints } from './types';
 
 const fmtAmount = (kind: string, amount: number) => {
   if (kind === 'USD') return `$${Math.round(amount).toLocaleString()}`;
@@ -18,6 +19,9 @@ const fmtAmount = (kind: string, amount: number) => {
 };
 
 const dayTone = (days?: number | null): Tone => (days == null ? 'neutral' : days < 3 ? 'bad' : days < 14 ? 'warn' : 'neutral');
+
+/** Hover text: the exact quote of the lab text the field was extracted from, with its character offsets. */
+const ev = (e?: Evidence) => (e && e.start >= 0 ? `"${e.quote}" (chars ${e.start}–${e.end})` : undefined);
 
 function Group({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
   return (
@@ -33,15 +37,19 @@ function Group({ icon, title, children }: { icon: ReactNode; title: string; chil
 
 function Chip({ children, title }: { children: ReactNode; title?: string }) {
   return (
-    <span title={title} className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--c3-style-basic-border-border)] px-2 py-0.5 text-xs">
+    <span
+      title={title}
+      className="inline-flex max-w-full cursor-help items-center gap-1 rounded-md border border-dashed border-[var(--c3-style-basic-border-border)] px-2 py-0.5 text-xs"
+    >
       {children}
     </span>
   );
 }
 
 /**
- * "What the advisor knows about this lab": the lab context dump parsed into constraints by Advisor.extractConstraints
- * (LLM, cached per text; rules-based parser when no LLM is available). Evidence sentences show on hover.
+ * What LabContextExtractor extracted from the lab context: schema-validated fields, each with an evidence span (hover
+ * a chip for the exact quote). Fields stay UNCONFIRMED until the lab confirms them on the Lab Context page; the advisor
+ * treats unconfirmed fields as hints.
  */
 export default function LabKnowledge({ labId, labName }: { labId: string | null; labName?: string }) {
   const { data, loading, error, reload } = useC3Data<LabConstraints | null>(
@@ -49,45 +57,45 @@ export default function LabKnowledge({ labId, labName }: { labId: string | null;
     [labId],
   );
   const p = data?.preferences ?? {};
+  const pref = (field: string, value: unknown) => ev((p.evidence ?? []).find((e) => e.field === field && e.value === value));
+  const confirmed = data?.status === 'CONFIRMED';
   const empty =
     data && !data.budgets.length && !data.deadlines.length && !data.dataRestrictions.length && !(p.clusters ?? []).length && !(p.avoid ?? []).length;
   return (
     <SectionCard
-      title="What the advisor knows"
-      subtitle={labName ? `Parsed from the ${labName} context` : 'Parsed from the lab context'}
+      title="Lab context"
+      subtitle={labName ? `LabContextExtractor · ${labName}` : 'LabContextExtractor'}
       actions={
         data ? (
-          <span title={data.llmError ? `LLM unavailable: ${data.llmError}` : data.model ? `Model client ${data.model}` : undefined}>
-            <ToneBadge tone={data.source === 'llm' ? 'accent' : 'neutral'}>
-              {data.source === 'llm' ? (
-                <span className="inline-flex items-center gap-1">
-                  <Sparkles className="size-3" aria-hidden /> AI-parsed
-                </span>
-              ) : (
-                'Rules parser'
-              )}
-            </ToneBadge>
+          <span title={data.llmError ? `LLM unavailable, rules parser used: ${data.llmError}` : undefined}>
+            <ToneBadge tone={confirmed ? 'good' : 'warn'}>{confirmed ? 'Confirmed by lab' : 'Unconfirmed'}</ToneBadge>
           </span>
+        ) : undefined
+      }
+      footer={
+        data ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--c3-style-basic-fg-secondary)]">
+            <ModelProvenance component="LabContextExtractor" provenance={data.provenance} compact />
+            {data.validation && !data.validation.valid && (
+              <span title={data.validation.errors.join('\n')}>{data.validation.dropped} field(s) failed validation</span>
+            )}
+            <Link to="/context" className="font-medium text-[var(--c3-style-basic-fg-accent)] hover:underline">
+              {confirmed ? 'Review on Lab context' : 'Review & confirm'}
+            </Link>
+          </div>
         ) : undefined
       }
     >
       {!labId && <p className="text-sm text-[var(--c3-style-basic-fg-secondary)]">Pick a lab in the header.</p>}
-      {labId && loading && (
-        <div className="flex flex-col gap-2" aria-busy>
-          <Skeleton className="h-4 w-2/3" />
-          <Skeleton className="h-6 w-full" />
-          <Skeleton className="h-6 w-5/6" />
-          <Skeleton className="h-6 w-3/4" />
-        </div>
-      )}
+      {labId && loading && <ModelComputing component="LabContextExtractor" variant="card" />}
       {labId && error && <ErrorState message={error} onRetry={reload} />}
       {data && !loading && (
         <div className="flex flex-col gap-3">
-          {empty && <p className="text-sm text-[var(--c3-style-basic-fg-secondary)]">No constraints found yet. Add budgets, deadlines and data rules on the Lab Context page.</p>}
+          {empty && <p className="text-sm text-[var(--c3-style-basic-fg-secondary)]">Nothing extracted yet. Add budgets, deadlines and data rules on the Lab context page.</p>}
           {data.budgets.length > 0 && (
             <Group icon={<Wallet aria-hidden />} title="Budget">
               {data.budgets.slice(0, 5).map((b, i) => (
-                <Chip key={`b${i}`} title={b.evidence}>
+                <Chip key={`b${i}`} title={ev(b.evidence)}>
                   <span className="font-semibold tabular-nums">{fmtAmount(b.kind, b.amount)}</span>
                   {b.scope && <span className="truncate text-[var(--c3-style-basic-fg-secondary)]">{b.scope}</span>}
                 </Chip>
@@ -97,7 +105,7 @@ export default function LabKnowledge({ labId, labName }: { labId: string | null;
           {data.deadlines.length > 0 && (
             <Group icon={<CalendarClock aria-hidden />} title="Deadlines">
               {data.deadlines.slice(0, 5).map((d, i) => (
-                <Chip key={`d${i}`} title={d.evidence}>
+                <Chip key={`d${i}`} title={ev(d.evidence)}>
                   <span className="truncate font-medium">{d.label}</span>
                   <ToneBadge tone={dayTone(d.daysAway)}>
                     {d.daysAway != null && d.daysAway >= 0 ? `${Math.max(0, Math.round(d.daysAway))} d` : d.date.substring(0, 10)}
@@ -106,27 +114,31 @@ export default function LabKnowledge({ labId, labName }: { labId: string | null;
               ))}
             </Group>
           )}
-          {((p.clusters ?? []).length > 0 || (p.gpuTypes ?? []).length > 0 || (p.avoid ?? []).length > 0 || p.quietHours) && (
-            <Group icon={<Cpu aria-hidden />} title="Preferences">
+          {((p.clusters ?? []).length > 0 || (p.gpuTypes ?? []).length > 0 || (p.avoid ?? []).length > 0 || p.quietHours || (data.approvals ?? []).length > 0) && (
+            <Group icon={<Cpu aria-hidden />} title="Preferences & approvals">
               {(p.clusters ?? []).map((c) => (
-                <Chip key={`c${c}`}>Prefers {c}</Chip>
+                <Chip key={`c${c}`} title={pref('clusters', c)}>
+                  Prefers {c}
+                </Chip>
               ))}
               {(p.gpuTypes ?? []).map((g) => (
-                <Chip key={`g${g}`}>{g}</Chip>
+                <Chip key={`g${g}`} title={pref('gpuTypes', g)}>
+                  {g}
+                </Chip>
               ))}
               {(p.avoid ?? []).map((a) => (
-                <Chip key={`a${a}`}>
+                <Chip key={`a${a}`} title={pref('avoid', a)}>
                   <span className="text-[var(--c3-style-basic-fg-danger)]">Avoid</span> {a}
                 </Chip>
               ))}
-              {p.quietHours && <Chip>Quiet {p.quietHours}</Chip>}
+              {p.quietHours && <Chip title={pref('quietHours', p.quietHours)}>Quiet {p.quietHours}</Chip>}
               {(data.approvals ?? []).map((a, i) => (
-                <Chip key={`ap${i}`} title={a.evidence}>
+                <Chip key={`ap${i}`} title={ev(a.evidence)}>
                   PI approval &gt; {fmtAmount(a.unit, a.threshold)}
                 </Chip>
               ))}
               {(data.memberCaps ?? []).map((m, i) => (
-                <Chip key={`m${i}`} title={m.evidence}>
+                <Chip key={`m${i}`} title={ev(m.evidence)}>
                   {m.who} cap {m.pct}%
                 </Chip>
               ))}
@@ -135,7 +147,7 @@ export default function LabKnowledge({ labId, labName }: { labId: string | null;
           {data.dataRestrictions.length > 0 && (
             <Group icon={<ShieldAlert aria-hidden />} title="Data restrictions">
               {data.dataRestrictions.map((r, i) => (
-                <span key={`r${i}`} title={r.evidence ?? r.description}>
+                <span key={`r${i}`} title={ev(r.evidence) ?? r.description}>
                   <ToneBadge tone="bad">{r.kind.replace(/_/g, ' ')}</ToneBadge>
                 </span>
               ))}

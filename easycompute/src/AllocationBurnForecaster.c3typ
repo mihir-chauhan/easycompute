@@ -1,0 +1,10 @@
+/**
+ * Allocation burn and run-out risk from the charge ledger with EWMA and baseline / low / high scenarios (MODEL_MAP).
+ */
+type AllocationBurnForecaster {
+
+  /**
+   * Per-allocation daily burn, committed units, scenarios and run-out dates.
+   */
+  forecast: function(labId: !string): json js-server
+}

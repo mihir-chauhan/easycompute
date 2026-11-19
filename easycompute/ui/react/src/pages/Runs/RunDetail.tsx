@@ -53,6 +53,7 @@ import { ackAlert, applyJobAction, fetchJobActions, fetchJobAlerts, fetchJobMetr
 import { ActivityRow, AlertTypeBadge, HeadNote, JobStateBadge, muted, Notice } from '@/features/lab/components';
 import { ACTION_LABEL, ALERT_TYPE_LABEL, formatShortDateTime, formatClock, formatDuration, formatInt, formatPct100, formatRelative, formatUsd, walltimeLeft } from '@/features/lab/format';
 import type { ActionType, Alert, JobMetric } from '@/features/lab/types';
+import { alertModel, ModelComputing, ModelProvenance, WhyFired } from '@/features/lab/models';
 import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { formatDateTime } from '@/lib/format';
@@ -250,13 +251,25 @@ const RunDetail: React.FC = () => {
       }
     >
       {actionError && <ErrorState message={actionError} />}
-      {note && !actionError && <Notice>{note}</Notice>}
+      {busy === 'tick' && (
+        <Notice>
+          <span className="flex flex-wrap gap-4">
+            <ModelComputing name="GPUUnderuseDetector" />
+            <ModelComputing name="GuardrailRuleEngine" detail="is evaluating every live run…" />
+          </span>
+        </Notice>
+      )}
+      {note && !actionError && busy !== 'tick' && <Notice>{note}</Notice>}
 
       {banner && live && (
         <div role="alert" className="flex flex-wrap items-center gap-4 rounded-[var(--ec-card-radius,8px)] border border-[var(--c3-style-basic-border-danger)] bg-[var(--c3-style-basic-bg-danger)] px-5 py-4">
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">{`${ALERT_TYPE_LABEL[banner.alertType] ?? banner.alertType} · ${formatClock(banner.detectedAt)}`}</div>
             <div className={`mt-0.5 text-[13px] ${muted}`}>{banner.message}</div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <ModelProvenance name={alertModel(banner.alertType)} />
+              <WhyFired type={banner.alertType} />
+            </div>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
             {canAct && (
@@ -327,6 +340,12 @@ const RunDetail: React.FC = () => {
                       <div className="min-w-0">
                         <div className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">{ALERT_TYPE_LABEL[a.alertType] ?? a.alertType}</div>
                         <div className={`text-[13px] ${muted}`}>{a.message}</div>
+                        <div className="mt-1">
+                          <WhyFired type={a.alertType} />
+                        </div>
+                        <div className="mt-1">
+                          <ModelProvenance name={alertModel(a.alertType)} />
+                        </div>
                         <div className={`mt-0.5 text-[12px] ${muted}`}>
                           {a.status === 'OPEN' || a.status === 'ACKED'
                             ? `Suggested: ${a.recommendedAction ? ACTION_LABEL[a.recommendedAction] : 'review'}${a.status === 'ACKED' ? ' · acknowledged' : ''}`
@@ -368,6 +387,10 @@ const RunDetail: React.FC = () => {
                         <span className={`text-xs ${muted}`}>{formatRelative(a.detectedAt)}</span>
                       </span>
                       <span className="text-[13px] text-[var(--c3-style-basic-fg-primary)]">{a.message}</span>
+                      <span className="flex flex-wrap items-center gap-2">
+                        <ModelProvenance name={alertModel(a.alertType)} />
+                        <WhyFired type={a.alertType} />
+                      </span>
                     </div>
                     {isOpen && (
                       <div className="flex shrink-0 flex-wrap gap-2">

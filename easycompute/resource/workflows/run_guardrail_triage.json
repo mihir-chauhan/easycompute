@@ -1,0 +1,211 @@
+{
+  "id": "run_guardrail_triage",
+  "name": "Run guardrail triage",
+  "description": "Triages one JobAlert: collects the alert, its Job, the last 4 JobMetric samples and the JobPrediction, asks an LLM (Model Hub client default-completions) for severity / root cause / recommended ActionType, then records a PENDING_APPROVAL ActionLogEntry and a GuardrailTriage row. Leave the alert id blank to triage the newest OPEN JobAlert. The JobAlert itself is never modified.",
+  "templates": [
+    "get_user_input_node_template_v2",
+    "code_execution_node_template",
+    "llm_node_template"
+  ],
+  "state": {
+    "alert_id": "builtins.str",
+    "alert_context": "builtins.dict",
+    "severity": "builtins.str",
+    "rootCause": "builtins.str",
+    "recommendedAction": "builtins.str",
+    "rationale": "builtins.str",
+    "triage_result": "builtins.dict"
+  },
+  "nodes": [
+    {
+      "name": "alert_id_input",
+      "template": "get_user_input_node_template_v2",
+      "kind": "START",
+      "description": "Input: the JobAlert id to triage (blank = newest OPEN JobAlert).",
+      "input_spec": null,
+      "output_spec": { "alert_id": "builtins.str" },
+      "llm_config_values": {
+        "description": "Enter the JobAlert id to triage (e.g. AL-0078). Leave blank, or type 'newest', to triage the newest OPEN JobAlert.",
+        "input_mode": "text"
+      }
+    },
+    {
+      "name": "load_alert_context",
+      "template": "code_execution_node_template",
+      "description": "Loads the JobAlert, its Job, the last 4 JobMetric rows and the JobPrediction (if any).",
+      "input_spec": { "alert_id": "builtins.str" },
+      "output_spec": { "alert_context": "builtins.dict" },
+      "code": [
+        "def _iso(v):",
+        "    return v.isoformat() if hasattr(v, 'isoformat') else (None if v is None else str(v))",
+        "",
+        "def _ref(o):",
+        "    return o.id if o is not None else None",
+        "",
+        "aid = (alert_id or '').strip()",
+        "if aid.lower() in ('', 'newest', 'latest', 'none', 'null', '-'):",
+        "    newest = c3.JobAlert.fetch(filter=\"status == 'OPEN'\", order='descending(detectedAt)', limit=1, include='id').objs",
+        "    if not newest:",
+        "        raise ValueError('No OPEN JobAlert found to triage')",
+        "    aid = newest[0].id",
+        "",
+        "found = c3.JobAlert.fetch(filter=c3.Filter.eq('id', aid), limit=1,",
+        "    include='id,alertType,severity,status,message,detectedAt,recommendedAction,job.id,lab.id').objs",
+        "if not found:",
+        "    raise ValueError('JobAlert ' + aid + ' not found')",
+        "alert = found[0]",
+        "job_id = _ref(alert.job)",
+        "",
+        "job_ctx = None",
+        "lab_id = _ref(alert.lab)",
+        "if job_id:",
+        "    jobs = c3.Job.fetch(filter=c3.Filter.eq('id', job_id), limit=1,",
+        "        include='id,state,cluster.id,partition.id,gpuType.id,allocGpus,timelimitHours,elapsedHours,costUsd,lab.id').objs",
+        "    if jobs:",
+        "        j = jobs[0]",
+        "        lab_id = lab_id or _ref(j.lab)",
+        "        job_ctx = {",
+        "            'id': j.id, 'state': j.state,",
+        "            'clusterId': _ref(j.cluster), 'partitionId': _ref(j.partition), 'gpuTypeId': _ref(j.gpuType),",
+        "            'allocGpus': j.allocGpus, 'timelimitHours': j.timelimitHours,",
+        "            'elapsedHours': j.elapsedHours, 'costUsd': j.costUsd,",
+        "        }",
+        "",
+        "metrics = []",
+        "prediction = None",
+        "if job_id:",
+        "    for m in c3.JobMetric.fetch(filter=c3.Filter.eq('job.id', job_id), order='descending(ts)', limit=4,",
+        "            include='gpuUtilPct,gpuMemPct,checkpointAgeMin,ts').objs:",
+        "        metrics.append({'ts': _iso(m.ts), 'gpuUtilPct': m.gpuUtilPct, 'gpuMemPct': m.gpuMemPct,",
+        "                        'checkpointAgeMin': m.checkpointAgeMin})",
+        "    preds = c3.JobPrediction.fetch(filter=c3.Filter.eq('job.id', job_id), order='descending(scoredAt)', limit=1,",
+        "        include='id,predictedHours,timelimitHours,walltimeRisk,modelId,scoredAt').objs",
+        "    if preds:",
+        "        p = preds[0]",
+        "        prediction = {'id': p.id, 'predictedHours': p.predictedHours, 'timelimitHours': p.timelimitHours,",
+        "                      'walltimeRisk': p.walltimeRisk, 'modelId': p.modelId, 'scoredAt': _iso(p.scoredAt)}",
+        "",
+        "outputs = {'alert_context': {",
+        "    'alertId': alert.id, 'jobId': job_id, 'labId': lab_id,",
+        "    'alert': {'alertType': alert.alertType, 'severity': alert.severity, 'status': alert.status,",
+        "              'message': alert.message, 'detectedAt': _iso(alert.detectedAt),",
+        "              'recommendedAction': alert.recommendedAction},",
+        "    'job': job_ctx,",
+        "    'lastMetrics': metrics,",
+        "    'prediction': prediction,",
+        "}}"
+      ]
+    },
+    {
+      "name": "triage_alert",
+      "template": "llm_node_template",
+      "description": "LLM triage of the alert context into severity, root cause, recommended ActionType and rationale.",
+      "input_spec": { "alert_context": "builtins.dict" },
+      "output_spec": {
+        "severity": "builtins.str",
+        "rootCause": "builtins.str",
+        "recommendedAction": "builtins.str",
+        "rationale": "builtins.str"
+      },
+      "init_kwargs": { "client_name": "default-completions" },
+      "llm_config_values": {
+        "instructions": "You are the guardrail triage engine of EasyCompute, a GPU cluster run monitor for university research labs. You receive alert_context: a JobAlert (alertType, severity, status, message, detectedAt, recommendedAction), its Slurm Job (state, cluster, partition, GPU type, allocated GPUs, time limit and elapsed hours, cost in USD), the last 4 JobMetric samples (GPU utilisation %, GPU memory %, minutes since last checkpoint, timestamp; newest first) and the duration JobPrediction if one exists (predictedHours vs timelimitHours, walltimeRisk). Decide how urgent the alert really is and what the single best next action is. Use CRITICAL when the run is likely to lose work or money soon (e.g. GPU memory near 100% with OOM risk, prediction exceeding the time limit with an old checkpoint, imminent preemption without a recent checkpoint); WARNING when action is advisable but not urgent; INFO when the signal is benign or already mitigated. recommendedAction must be exactly one of SUBMIT, CANCEL, EXTEND_WALLTIME, REQUEUE_STANDBY, CHECKPOINT_NOW, SCALE_DOWN, NOTIFY_PI, HOLD. Typical mapping: walltime risk -> EXTEND_WALLTIME (or CHECKPOINT_NOW if the checkpoint is stale); OOM risk -> CHECKPOINT_NOW or SCALE_DOWN; idle/low GPU utilisation -> SCALE_DOWN or CANCEL; preemption risk -> CHECKPOINT_NOW or REQUEUE_STANDBY; budget issues -> NOTIFY_PI or HOLD. rootCause: at most 30 words citing the concrete numbers. rationale: at most 40 words explaining why the action fits.",
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": ["CRITICAL", "WARNING", "INFO"],
+              "description": "Triage severity: CRITICAL, WARNING or INFO."
+            },
+            "rootCause": {
+              "type": "string",
+              "description": "Most likely root cause of the alert, at most 30 words, citing concrete metric values."
+            },
+            "recommendedAction": {
+              "type": "string",
+              "enum": ["SUBMIT", "CANCEL", "EXTEND_WALLTIME", "REQUEUE_STANDBY", "CHECKPOINT_NOW", "SCALE_DOWN", "NOTIFY_PI", "HOLD"],
+              "description": "Exactly one ActionType value to take next."
+            },
+            "rationale": {
+              "type": "string",
+              "description": "Why this action is the right next step, at most 40 words."
+            }
+          },
+          "required": ["severity", "rootCause", "recommendedAction", "rationale"]
+        }
+      }
+    },
+    {
+      "name": "record_triage",
+      "template": "code_execution_node_template",
+      "description": "Creates a PENDING_APPROVAL ActionLogEntry (actor AUTOPILOT) and upserts the GuardrailTriage row (id = alert id). Does not modify the JobAlert.",
+      "input_spec": {
+        "alert_context": "builtins.dict",
+        "severity": "builtins.str",
+        "rootCause": "builtins.str",
+        "recommendedAction": "builtins.str",
+        "rationale": "builtins.str"
+      },
+      "output_spec": { "triage_result": "builtins.dict" },
+      "code": [
+        "import datetime",
+        "",
+        "SEVERITIES = ('CRITICAL', 'WARNING', 'INFO')",
+        "ACTIONS = ('SUBMIT', 'CANCEL', 'EXTEND_WALLTIME', 'REQUEUE_STANDBY', 'CHECKPOINT_NOW', 'SCALE_DOWN', 'NOTIFY_PI', 'HOLD')",
+        "ctx = alert_context or {}",
+        "alert_info = ctx.get('alert') or {}",
+        "aid = ctx['alertId']",
+        "job_id = ctx.get('jobId')",
+        "lab_id = ctx.get('labId')",
+        "",
+        "sev = (severity or '').strip().upper()",
+        "if sev not in SEVERITIES:",
+        "    sev = alert_info.get('severity') if alert_info.get('severity') in SEVERITIES else 'WARNING'",
+        "act = (recommendedAction or '').strip().upper()",
+        "if act not in ACTIONS:",
+        "    act = alert_info.get('recommendedAction') if alert_info.get('recommendedAction') in ACTIONS else 'NOTIFY_PI'",
+        "root = ' '.join((rootCause or '').split()[:30])",
+        "why = ' '.join((rationale or '').split()[:40])",
+        "now = datetime.datetime.now(datetime.timezone.utc)",
+        "",
+        "ex_id = None",
+        "try:",
+        "    exs = c3.Genai.WorkflowExecution.fetch(filter=c3.Filter.eq('workflow.id', 'run_guardrail_triage'),",
+        "        order='descending(createdAt)', limit=5, include='id,status').objs",
+        "    running = [e for e in exs if str(e.status or '').lower() in ('running', 'pending', 'interrupted')]",
+        "    ex_id = (running[0] if running else (exs[0] if exs else None)).id if exs else None",
+        "except Exception:",
+        "    ex_id = None",
+        "",
+        "ale_fields = {'actionType': act, 'actor': 'AUTOPILOT', 'actedAt': now, 'outcome': 'PENDING_APPROVAL',",
+        "              'detail': 'Guardrail triage ' + aid + ': ' + root + ' (' + sev + ')'}",
+        "if job_id:",
+        "    ale_fields['job'] = c3.Job(id=job_id)",
+        "if lab_id:",
+        "    ale_fields['lab'] = c3.Lab(id=lab_id)",
+        "ale = c3.ActionLogEntry(**ale_fields).create()",
+        "",
+        "gt_fields = {'id': aid, 'alert': c3.JobAlert(id=aid), 'severity': sev, 'rootCause': root,",
+        "             'recommendedAction': act, 'rationale': why, 'actionLogEntry': c3.ActionLogEntry(id=ale.id),",
+        "             'triagedAt': now}",
+        "if job_id:",
+        "    gt_fields['job'] = c3.Job(id=job_id)",
+        "if ex_id:",
+        "    gt_fields['workflowExecutionId'] = ex_id",
+        "gt = c3.GuardrailTriage(**gt_fields).upsert()",
+        "",
+        "outputs = {'triage_result': {",
+        "    'guardrailTriageId': gt.id, 'actionLogEntryId': ale.id, 'alertId': aid, 'jobId': job_id, 'labId': lab_id,",
+        "    'severity': sev, 'rootCause': root, 'recommendedAction': act, 'rationale': why,",
+        "    'outcome': 'PENDING_APPROVAL', 'workflowExecutionId': ex_id, 'triagedAt': now.isoformat(),",
+        "}}"
+      ]
+    }
+  ],
+  "edges": [
+    ["alert_id_input", "load_alert_context"],
+    ["load_alert_context", "triage_alert"],
+    ["triage_alert", "record_triage"]
+  ]
+}

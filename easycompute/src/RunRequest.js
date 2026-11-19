@@ -9,6 +9,10 @@ var HOUR_MS = 3600 * 1000;
 /** Workloads that checkpoint, so a run longer than the walltime limit can be split into chained jobs. */
 var CHECKPOINTABLE = ['TRAINING', 'FINETUNE', 'SIMULATION'];
 var SEVERITY_ORDER = { FAIL: 0, WARN: 1, PASS: 2 };
+/** ClusterPolicyEngine rule-set version: the latest RCAC policy change encoded (Gautschi-AI QOS, 2026-11-02). */
+var POLICY_VERSION = 'rcac-2026-11-02';
+/** Anvil partition categories the MODEL_MAP quantile models were trained on. */
+var ANVIL_PARTITIONS = ['shared', 'standard', 'gpu', 'gpu-debug', 'highmem', 'wide', 'debug'];
 
 // ---------------------------------------------------------------- small helpers
 
@@ -97,11 +101,10 @@ function csv(text) {
 
 /** A `json` value returned by another type's method, as a plain JS object (it may arrive boxed or as a string). */
 function plainJson(v) {
-  if (v == null || typeof v.a100HoursP50 !== 'undefined') return v;
-  if (v.value != null && typeof v.value.a100HoursP50 !== 'undefined') return v.value;
-  var text = typeof v.toJsonString === 'function' ? v.toJsonString() : String(v);
-  var parsed = JSON.parse(text);
-  return parsed != null && parsed.value != null && parsed.a100HoursP50 === undefined ? parsed.value : parsed;
+  if (v == null) return v;
+  if (typeof v === 'string') return JSON.parse(v);
+  if (typeof v.type === 'string' && /^Boxed/.test(v.type) && v.value != null) return v.value;
+  return v;
 }
 
 // ---------------------------------------------------------------- context loading
@@ -181,10 +184,21 @@ function loadContext(id) {
     labId
   );
   prediction = plainJson(prediction);
-  var memNeedGb = num(prediction.memoryNeedGb, 0);
-  if (/q?lora/i.test(String(req.description || '') + ' ' + String(req.name || '')) && req.workloadType == 'FINETUNE') {
-    memNeedGb = round(num(req.modelParamsB, 0) * 2.6, 1);
-  }
+  var advice = plainJson(
+    GPUShapeAdvisor.advise(
+      String(req.workloadType || 'TRAINING'),
+      num(req.modelParamsB, 0),
+      num(req.datasetGb, 0),
+      req.requestedGpus == null ? null : Number(req.requestedGpus),
+      req.requestedGpuType != null ? String(req.requestedGpuType.id) : null,
+      String(req.name || '') + ' ' + String(req.description || '')
+    )
+  );
+  var shapes = {};
+  (advice.shapes || []).forEach(function (sh) {
+    shapes[sh.gpuTypeId] = sh;
+  });
+  var memNeedGb = num(advice.memoryNeedGb, 0);
 
   // work in A100-40GB GPU-hours (or core-hours for CPU work); blend the user's own estimate when given
   var work = num(prediction.a100HoursP50, 1);
@@ -215,6 +229,8 @@ function loadContext(id) {
     wantsCpu: wantsCpu,
     prediction: prediction,
     memNeedGb: memNeedGb,
+    shapes: shapes,
+    shapeAdvice: advice,
     work: work,
     workP90: workP90,
     workBasis: workBasis,
@@ -305,7 +321,7 @@ function scalingEfficiency(gpus, nodes) {
  * Models one (partition, GPU count) option: duration, walltime (chained when needed), wait, cost, deadline, risk.
  * Returns null when the option is physically impossible (memory, walltime without checkpointing).
  */
-function modelCandidate(ctx, p, gpus) {
+function modelCandidate(ctx, p, gpus, q) {
   var req = ctx.req;
   var cluster = ctx.clusters[p.cluster.id];
   if (cluster == null) return null;
@@ -319,6 +335,13 @@ function modelCandidate(ctx, p, gpus) {
   var capacity = isGpu ? gpus * rel * eff : nodes * coresPerNode * eff;
   var duration = ctx.work / capacity;
   var durationP90 = ctx.workP90 / capacity;
+  var runtimeSource = 'heuristic';
+  if (q && q.runtime) {
+    // AnvilRuntimeQ50Q90: P50/P90 of historical Anvil jobs with this request shape
+    duration = Math.max(0.05, q.runtime.p50);
+    durationP90 = Math.max(duration, q.runtime.p90);
+    runtimeSource = 'model';
+  }
   if (req.workloadType == 'INTERACTIVE') {
     duration = Math.max(1, num(req.requestedWalltimeHours, 4));
     durationP90 = duration;
@@ -339,9 +362,21 @@ function modelCandidate(ctx, p, gpus) {
   var pressure = 1 + Math.max(0, (util - 80) / 20);
   var wait = base * pressure * (1 + 0.25 * (Math.log(Math.max(1, gpus)) / Math.LN2)) * (nodes > 1 ? 1.3 : 1);
   if (chained > 1) wait = wait * 1.5;
+  var waitP90 = wait * 2;
+  var waitSource = 'partition';
+  var waitHistory = q && q.waitHistory ? q.waitHistory : null;
   var waitReason =
     (p.name || p.id) + ' is ' + Math.round(util) + '% busy with ' + num(p.currentQueueDepth, 0) + ' jobs queued (typical wait ' +
     fmtHours(base) + ')' + (gpus > 1 ? '; ' + gpus + (isGpu ? ' GPUs' : ' nodes') + (nodes > 1 && isGpu ? ' across ' + nodes + ' nodes' : '') + ' take longer to schedule' : '') + '.';
+  if (waitHistory) waitReason += ' Historically (AnvilQueueWaitQ50Q90, Anvil 2021, low confidence, not live) similar jobs waited P50 ' + fmtHours(waitHistory.p50) + ' / P90 ' + fmtHours(waitHistory.p90) + '.';
+  var nodeShareGb = isGpu ? Math.max(8, Math.round(((num(p.memPerNodeGb, 256) * Math.min(gpus, gpusPerNode)) / gpusPerNode) * 0.9)) : Math.round(num(p.memPerNodeGb, 256) * 0.9);
+  var memRequestGb = nodeShareGb;
+  var memSource = 'heuristic';
+  if (q && q.mem) {
+    memRequestGb = Math.min(nodeShareGb, Math.max(4, Math.ceil(q.mem.p90 * 1.15)));
+    memSource = 'model';
+  }
+  var cpuEvidence = q && q.cpu ? 'AnvilTaskCPUQ50Q90 (historical): P90 of similar Anvil batch tasks ' + round(q.cpu.p90, 1) + ' core-equivalents; requested ' + (isGpu ? Math.floor(coresPerNode / gpusPerNode) * gpus : nodes * coresPerNode) + '.' : null;
 
   var rates = unitRates(cluster, p, gpuType);
   var resourceHours = isGpu ? gpus * duration : nodes * coresPerNode * duration;
@@ -359,6 +394,14 @@ function modelCandidate(ctx, p, gpus) {
     gpus: isGpu ? gpus : 0,
     nodes: nodes,
     duration: duration,
+    durationP90: durationP90,
+    runtimeSource: runtimeSource,
+    waitP90: waitP90,
+    waitSource: waitSource,
+    memRequestGb: memRequestGb,
+    memSource: memSource,
+    cpuEvidence: cpuEvidence,
+    shape: isGpu ? ctx.shapes[gpuType.id] || null : null,
     walltime: walltime,
     chained: chained,
     wait: wait,
@@ -375,20 +418,17 @@ function modelCandidate(ctx, p, gpus) {
   };
 }
 
-/** GPU counts worth considering on a partition. */
+/** GPU counts worth considering on a partition: GPUShapeAdvisor's options, capped by the partition's limits. */
 function gpuOptions(ctx, p) {
-  var req = ctx.req;
   var gpuType = p.gpuType ? ctx.gpuTypes[p.gpuType.id] : null;
   if (gpuType == null) return [1, 2, 4]; // CPU: node counts
-  var perGpu = num(gpuType.memoryGb, 40) * 0.9;
-  var minGpus = ctx.memNeedGb > 0 ? Math.max(1, Math.ceil(ctx.memNeedGb / perGpu)) : 1;
+  var sh = ctx.shapes[gpuType.id];
   var cap = Math.min(num(p.maxGpusPerJob, 64) || 64, num(p.gpusPerNode, 1) * (num(p.maxNodesPerJob, 1) || 1), 64);
-  if (req.requestedGpus > 0) return [Number(req.requestedGpus)];
-  var out = [];
-  [minGpus, minGpus * 2, minGpus * 4].forEach(function (g) {
-    if (g <= cap && out.indexOf(g) < 0) out.push(g);
+  if (sh == null) return [ctx.req.requestedGpus > 0 ? Number(ctx.req.requestedGpus) : 1];
+  var out = sh.options.filter(function (g) {
+    return g <= cap || ctx.req.requestedGpus > 0;
   });
-  if (!out.length && minGpus > cap) out.push(minGpus); // shown as a memory-fit failure
+  if (!out.length) out.push(sh.minGpus); // shown as a memory-fit / limit failure
   return out;
 }
 
@@ -733,19 +773,103 @@ function warns(results) {
   });
 }
 
-/** Every modeled (partition, gpus) option with its rule results. */
-function allOptions(ctx, restrict) {
-  var out = [];
-  candidatePartitions(ctx, restrict).forEach(function (p) {
-    gpuOptions(ctx, p).forEach(function (g) {
-      var c = modelCandidate(ctx, p, g);
-      if (c == null) return;
-      c.results = evaluateCandidate(ctx, c);
-      c.blocked = blocks(c.results).length > 0;
-      out.push(c);
-    });
+/** MODEL_MAP quantile-model features for one option (API.md section 7). */
+function modelFeatures(ctx, p, gpus) {
+  var gpuType = p.gpuType ? ctx.gpuTypes[p.gpuType.id] : null;
+  var isGpu = gpuType != null;
+  var gpusPerNode = Math.max(1, num(p.gpusPerNode, 1));
+  var coresPerNode = Math.max(1, num(p.coresPerNode, 64));
+  var nodes = isGpu ? Math.ceil(gpus / gpusPerNode) : Math.max(1, gpus);
+  var part = slurmPartitionName(p);
+  var d = new Date(ctx.now);
+  var hour = easternHour(ctx.now);
+  var wall = ctx.req.requestedWalltimeHours ? Number(ctx.req.requestedWalltimeHours) : Math.min(num(p.maxWalltimeHours, 48), Math.max(1, (ctx.workP90 / Math.max(1, isGpu ? gpus : nodes * coresPerNode / 64)) * 1.2));
+  return {
+    partition: ANVIL_PARTITIONS.indexOf(part) >= 0 ? part : 'other',
+    reqCpus: isGpu ? Math.floor(coresPerNode / gpusPerNode) * gpus : nodes * coresPerNode,
+    reqNodes: nodes,
+    reqMemGiB: isGpu ? Math.round((num(p.memPerNodeGb, 256) * Math.min(gpus, gpusPerNode)) / gpusPerNode) * nodes : num(p.memPerNodeGb, 256) * nodes,
+    reqGpus: isGpu ? gpus : 0,
+    walltimeHours: round(wall, 2),
+    submitHour: hour,
+    submitWeekday: (d.getUTCDay() + 6) % 7,
+    submitMonth: d.getUTCMonth() + 1,
+  };
+}
+
+/** Champion P50/P90 for every option, one batch call per model; null entries when an artifact is not loaded. */
+function championPredictions(ctx, opts) {
+  var feats = opts.map(function (o) {
+    return modelFeatures(ctx, o.p, o.g);
+  });
+  var out = { runtime: null, wait: null, mem: null, cpu: null, provenance: {} };
+  [['runtime', 'AnvilRuntimeQ50Q90'], ['wait', 'AnvilQueueWaitQ50Q90'], ['mem', 'AnvilHostMemoryQ50Q90'], ['cpu', 'AnvilTaskCPUQ50Q90']].forEach(function (m) {
+    var r = plainJson(QuantileModel.predictBatch(m[1], feats));
+    out.provenance[m[0]] = r.provenance;
+    if (r.available && r.predictions) out[m[0]] = r.predictions;
   });
   return out;
+}
+
+/** Every modeled (partition, gpus) option with its rule results (ClusterPolicyEngine) and champion predictions. */
+function allOptions(ctx, restrict) {
+  var opts = [];
+  candidatePartitions(ctx, restrict).forEach(function (p) {
+    gpuOptions(ctx, p).forEach(function (g) {
+      opts.push({ p: p, g: g });
+    });
+  });
+  var preds = ctx.champions || (ctx.champions = championPredictions(ctx, opts));
+  var predIndex = ctx.championIndex || (ctx.championIndex = {});
+  if (!ctx.championKeys) {
+    ctx.championKeys = true;
+    opts.forEach(function (o, i) {
+      predIndex[o.p.id + ':' + o.g] = i;
+    });
+  }
+  var out = [];
+  opts.forEach(function (o) {
+    var i = predIndex[o.p.id + ':' + o.g];
+    var q = null;
+    if (i != null) {
+      // trained on Anvil sacct history: used for Anvil partitions with enough support only (ml-trainer guidance)
+      var onAnvil = String(o.p.cluster.id) == 'anvil';
+      var usable = function (arr) {
+        return arr && onAnvil && arr[i] && !arr[i].lowSupport ? arr[i] : null;
+      };
+      q = { runtime: usable(preds.runtime), waitHistory: usable(preds.wait), mem: usable(preds.mem), cpu: usable(preds.cpu) };
+    }
+    var c = modelCandidate(ctx, o.p, o.g, q);
+    if (c == null) return;
+    c.results = evaluateCandidate(ctx, c);
+    c.blocked = blocks(c.results).length > 0;
+    out.push(c);
+  });
+  return out;
+}
+
+/** ClusterPolicyEngine provenance (versioned deterministic rules). */
+function policyProvenance(ctx) {
+  return { component: 'ClusterPolicyEngine', version: POLICY_VERSION, method: 'versioned deterministic rules (' + ctx.policies.length + ' active policies + built-in partition/account/memory checks); nothing waives them', status: 'DETERMINISTIC', trainingPeriod: null, sampleSupport: ctx.policies.length, historicalOnly: false, computedAt: new Date(ctx.now).toISOString() };
+}
+
+/** Provenance of one option's duration / wait / memory / CPU estimates: champion model or the labeled fallback. */
+function estimateProvenance(ctx, c) {
+  var pv = ctx.champions ? ctx.champions.provenance : {};
+  var at = new Date(ctx.now).toISOString();
+  var fallback = function (component, method, note, support) {
+    return { component: component, version: 'fallback', method: method, status: 'FALLBACK_HEURISTIC', trainingPeriod: null, sampleSupport: support == null ? null : support, historicalOnly: true, computedAt: at, note: note };
+  };
+  var why = String(c.cluster.id) != 'anvil' ? 'Trained on Anvil only; ' + c.cluster.name + ' uses the heuristic.' : 'Too few similar Anvil jobs (or artifact not loaded); heuristic used.';
+  var runtime = c.runtimeSource == 'model' && pv.runtime ? pv.runtime : fallback('AnvilRuntimeQ50Q90', 'history median of similar completed jobs scaled by GPU throughput and model size', why, ctx.prediction ? num(ctx.prediction.sampleSize, null) : null);
+  var wait = fallback('AnvilQueueWaitQ50Q90', 'live partition average wait x utilization pressure x job size', 'Queue-wait model is historical and low confidence (no backlog snapshots): shown as text on Anvil plans, not used as the estimate.', null);
+  if (pv.wait && pv.wait.status != 'FALLBACK_HEURISTIC' && String(c.cluster.id) == 'anvil') {
+    wait = JSON.parse(JSON.stringify(pv.wait));
+    wait.note = 'Historical P50/P90 shown in the wait reason; the estimate itself uses live partition statistics.';
+  }
+  var mem = c.memSource == 'model' && pv.mem ? pv.mem : fallback('AnvilHostMemoryQ50Q90', 'node memory proportional to GPUs requested', why, null);
+  var cpu = c.cpuEvidence && pv.cpu ? pv.cpu : fallback('AnvilTaskCPUQ50Q90', 'cores proportional to GPUs requested', why, null);
+  return [runtime, wait, mem, cpu];
 }
 
 // ---------------------------------------------------------------- checkRules
@@ -787,6 +911,7 @@ function checkRules() {
   });
 
   var nowDt = toDt(ctx.now);
+  var policyProv = policyProvenance(ctx);
   var rows = order.map(function (key) {
     var e = byKey[key];
     var r = e.r;
@@ -807,6 +932,7 @@ function checkRules() {
       msg = 'Rules out ' + e.fails.length + ' of ' + total + ' options (' + e.fails.slice(0, 4).join(', ') + (e.fails.length > 4 ? ', ...' : '') + '). ' + e.firstFailMsg;
     }
     return RuleCheck.make({
+      provenance: policyProv,
       id: req.id + '-' + key,
       runRequest: { id: req.id },
       policy: r.policy ? { id: r.policy.id } : null,
@@ -826,6 +952,7 @@ function checkRules() {
   if (!reps.length) {
     rows.push(
       RuleCheck.make({
+        provenance: policyProv,
         id: req.id + '-NO_CANDIDATES',
         runRequest: { id: req.id },
         outcome: 'FAIL',
@@ -846,13 +973,21 @@ function checkRules() {
     return !c.blocked;
   });
   var status = feasible.length ? 'CHECKED' : 'REJECTED';
-  // a failing lab rule that asks for PI approval (e.g. runs above 500 GPU-hours) holds submission until decided
+  // a lab rule that asks for PI approval (e.g. runs above 500 GPU-hours) holds submission when every otherwise
+  // feasible option violates it
   var approvalRule = null;
-  order.forEach(function (key) {
-    var e = byKey[key];
-    var pol = e.r.policy;
-    if (approvalRule || !e.fails.length || e.passes.length || e.r.severity == 'INFO' || pol == null) return;
-    if (/approv/i.test(String(pol.title || '') + ' ' + String(pol.description || '') + ' ' + String(pol.limitText || ''))) approvalRule = e;
+  feasible.forEach(function (c, idx) {
+    c.results.forEach(function (r) {
+      var pol = r.policy;
+      if (r.ok || r.severity == 'INFO' || pol == null) return;
+      if (!/approv/i.test(String(pol.title || '') + ' ' + String(pol.description || '') + ' ' + String(pol.limitText || ''))) return;
+      var all = feasible.every(function (o) {
+        return o.results.some(function (x) {
+          return x.key == r.key && !x.ok;
+        });
+      });
+      if (all && approvalRule == null) approvalRule = { r: r, firstFailMsg: r.msg };
+    });
   });
   var approval = req.approvalStatus == 'APPROVED' || req.approvalStatus == 'REJECTED' ? String(req.approvalStatus) : approvalRule ? 'PENDING' : 'NOT_REQUIRED';
   var upd = { id: req.id, status: req.approvalStatus == 'REJECTED' ? 'REJECTED' : status, approvalStatus: approval };
@@ -899,7 +1034,7 @@ function sbatchScript(ctx, c, label) {
   var gpusPerNode = Math.max(1, num(c.p.gpusPerNode, 1));
   var coresPerNode = num(c.p.coresPerNode, 64);
   var cpt = c.isGpu ? Math.max(1, Math.floor(coresPerNode / gpusPerNode)) : 1;
-  var mem = c.isGpu ? Math.max(8, Math.round(((num(c.p.memPerNodeGb, 256) * gpn) / gpusPerNode) * 0.9)) : Math.round(num(c.p.memPerNodeGb, 256) * 0.9);
+  var mem = Math.round(c.memRequestGb);
   var checkpointing = c.p.preemptible || c.chained > 1 || c.walltime > 4;
   var rcac = c.cluster.billing == 'IN_HOUSE_NODE_SHARE'; // RCAC community clusters: account + partition + QOS on every job
   var scratch = cid == 'anvil' ? '$SCRATCH' : cid == 'aws-p4d' ? '/fsx' : '$RCAC_SCRATCH';
@@ -1007,12 +1142,15 @@ function recommendPlans() {
     minC = Math.min(minC, c.costUsd);
   });
   var preferred = csv(ctx.lab.preferredClusters);
+  var fair = plainJson(LabFairShareAllocator.projectWeights(ctx.labId, req.project ? String(req.project.id) : null));
+  var shift = num(fair.costWeightShift, 0);
   options.forEach(function (c) {
     // log ratios to the best option (0 = best, 1 = 4x worse or more): small absolute gaps stay small
     var f = Math.min(1, Math.log(Math.max(c.finishHours, 0.01) / Math.max(minF, 0.01)) / Math.log(4));
     var k = Math.min(1, Math.log((c.costUsd + 1) / (minC + 1)) / Math.log(4));
-    var s = 100 * (1 - (0.45 * f + 0.3 * k + 0.15 * c.preemptionRisk + 0.1 * Math.min(1, warns(c.results).length / 3)));
+    var s = 100 * (1 - ((0.45 - shift) * f + (0.3 + shift) * k + 0.15 * c.preemptionRisk + 0.1 * Math.min(1, warns(c.results).length / 3)));
     if (c.wait > 12) s -= 5;
+    if (c.shape && c.shape.fit == 'POOR') s -= 8;
     if (!c.meetsDeadline) s -= 30;
     if (preferred.indexOf(String(c.cluster.id)) >= 0) s += 3;
     if (req.requestedCluster != null && req.requestedCluster.id == c.cluster.id) s += 4;
@@ -1050,6 +1188,7 @@ function recommendPlans() {
   picks.sort(function (a, b) {
     return b.c.score - a.c.score;
   });
+  var policyProv = policyProvenance(ctx);
   var plans = picks.map(function (pk, i) {
     var c = pk.c;
     return RunPlan.make({
@@ -1083,6 +1222,12 @@ function recommendPlans() {
       finishBy: toDt(ctx.now + c.finishHours * HOUR_MS),
       deadlineSlackHours: c.slack == null ? null : round(c.slack, 1),
       ruleWarnings: warns(c.results).length,
+      estDurationP90Hours: round(c.durationP90, 2),
+      estWaitP90Hours: round(c.waitP90, 2),
+      memRequestGb: round(c.memRequestGb, 0),
+      cpuEvidence: c.cpuEvidence,
+      shapeReason: c.shape ? 'GPUShapeAdvisor (' + c.shape.fit + '): ' + c.shape.reason : c.isGpu ? null : 'CPU-only work: no GPU requested.',
+      provenance: [policyProv, ctx.shapeAdvice.provenance].concat(estimateProvenance(ctx, c)).concat([fair.provenance]),
     });
   });
   RunPlan.upsertBatch(plans);

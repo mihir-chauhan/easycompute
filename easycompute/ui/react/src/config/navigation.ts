@@ -9,7 +9,7 @@ import type { ShellNavItem } from '@/components/app/AppShell';
 
 /** Lab-view side nav, grouped like the mockup. Paths must match routes in App.tsx. */
 export const labNav = (liveCount?: number): ShellNavItem[] => [
-  { path: '/', label: 'Overview', icon: House },
+  { path: '/dashboard', label: 'Overview', icon: House },
   { path: '/context', label: 'Lab context', icon: FileText, group: 'Before a run' },
   { path: '/policies', label: 'Policies & rules', icon: ShieldCheck, group: 'Before a run' },
   { path: '/plan', label: 'Launch planner', icon: Rocket, group: 'Before a run' },

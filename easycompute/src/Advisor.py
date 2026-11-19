@@ -9,16 +9,17 @@ import re
 import time
 import uuid
 
-AGENT_NAME = "EasyCompute Advisor"
+AGENT_NAME = "PolicyRAGAdvisor"
 CATEGORY = "Research Computing"
 # Model Hub completion client; default-completions = Bedrock Claude Sonnet 5 (CLUSTER config, works out of the box).
 LLM_CLIENT_NAME = "default-completions"
-# Tried in order by extractConstraints.
+# Tried in order by extractConstraints (LabContextExtractor).
 EXTRACT_CLIENT_NAMES = ["default-completions", "claude-sonnet-4.6"]
 # Platform-provided Kv session store (seeded by genaiPlatform) that holds conversation checkpoints by session id.
 SESSION_STORE_ID = "langchain_agent_session_store"
-# Tool methods on Advisor and their parameters (a tool whose schema no longer matches is recreated).
+# Read-only tool methods on Advisor and their parameters (a tool whose schema no longer matches is recreated).
 CUSTOM_TOOLS = {
+    "retrieveSources": ["query", "labId", "clusterId", "limit"],
     "labContext": ["labId"],
     "labSummary": ["labId"],
     "listPolicies": ["labId", "clusterId", "kind"],
@@ -30,12 +31,16 @@ CUSTOM_TOOLS = {
     "liveJobs": ["labId", "state"],
     "jobHealth": ["jobId"],
     "universityOverview": [],
-    "proposeRunSubmission": ["runRequestId", "planId", "reason"],
-    "proposeJobAction": ["jobId", "actionType", "reason"],
 }
 # Expected argsSchema descriptions (= the @param text of each tool method in Advisor.c3typ, whitespace-normalised), so a
 # doc change also refreshes the tool. Generated from the c3typ; keep in sync (a selftest checks it).
 TOOL_PARAM_DOCS = {
+    "retrieveSources": {
+        "query": "Words to look up, e.g. preemptible walltime gautschi checkpoint.",
+        "labId": "The lab id (adds its rules, context and projects).",
+        "clusterId": "Optional cluster to focus on: anvil, gilbreth, gautschi, negishi, bell or aws-p4d.",
+        "limit": "Number of passages, 1 to 10 (default 6)."
+    },
     "labContext": {
         "labId": "The lab id, e.g. as given in the conversation context."
     },
@@ -74,93 +79,77 @@ TOOL_PARAM_DOCS = {
     "jobHealth": {
         "jobId": "The job id as returned by liveJobs."
     },
-    "universityOverview": {},
-    "proposeRunSubmission": {
-        "runRequestId": "The runRequestId returned by evaluateRun.",
-        "planId": "The planId of the chosen plan returned by evaluateRun.",
-        "reason": "Why this plan, in one sentence."
-    },
-    "proposeJobAction": {
-        "jobId": "The job id as returned by liveJobs.",
-        "actionType": "EXTEND_WALLTIME, CANCEL, CHECKPOINT_NOW, REQUEUE_STANDBY, SCALE_DOWN, NOTIFY_PI or HOLD.",
-        "reason": "Why, in one sentence citing the metric or alert."
-    }
+    "universityOverview": {}
 }
 GENERIC_TOOL_IDS = []
 
-SYSTEM_PROMPT = """You are the EasyCompute Advisor, the AI assistant of a Purdue research-computing app. You help a
-research lab plan and run GPU/HPC jobs across Purdue clusters (Anvil = NSF ACCESS, billed in SUs; Gilbreth, Gautschi,
-Negishi, Bell = RCAC community clusters, in-house node shares; aws-p4d = third-party cloud, billed hourly in USD) within
-its budget, deadlines, preferences and data restrictions, and you watch its running jobs.
+SYSTEM_PROMPT = """You are PolicyRAGAdvisor, the AI advisor of EasyCompute, a Purdue research-computing app. You explain
+how a lab can run its GPU/HPC work on Purdue clusters (Anvil = NSF ACCESS, billed in SUs/credits; Gilbreth, Gautschi,
+Negishi = RCAC community clusters; Bell is retired; aws-p4d = third-party cloud) within Purdue/RCAC rules, its budget,
+deadlines, preferences and data restrictions, and what its running jobs are doing.
 
-Every message starts with a [Context] line naming the lab the user is looking at (labId) and today, and usually a
-[Lab facts] line with its allocations left, next deadlines (with projectId), live jobs / open alerts and data
-restrictions. Use that labId for every tool call unless the user names another lab. Answer from [Lab facts] directly
-when they suffice (e.g. "how much is left", "when is our next deadline"): call no tool then.
+Every message starts with a [Context] line (labId, today) and usually a [Lab facts] line (allocations left, next
+deadlines with projectId, live jobs / open alerts, data restrictions). Use that labId for every tool call unless the user
+names another lab. Answer from [Lab facts] directly when they suffice; then cite [<labId>].
 
-Tools:
-- labContext: full lab profile and constraints parsed from the lab's context dump (preferred / avoided clusters and
-  GPUs, approval thresholds, notes). Only call it when [Lab facts] is not enough.
-- evaluateRun: what-if check of a planned run. It runs the real rule checks and returns 3 ranked plans (Fastest,
-  Cheapest, Balanced) with estimated wait, duration, finish time, cost and meetsDeadline. Use it for every "can we
-  finish X by Y", "where should we run", "how much will it cost" question. Pass project (e.g. "NeurIPS") so the project
-  deadline is used, the workloadType (FINETUNE for fine-tunes), and deadline when the user names a day ("Friday").
-  Its result already includes the allocations left: do not call labContext after it.
-- predictDuration: duration estimate from past jobs.
-- listPolicies: university / cluster / partition / lab rules.
-- liveJobs and jobHealth: running jobs, GPU utilization, checkpoint age, walltime left, open alerts, suggested actions.
-- labSummary: the lab dashboard numbers. universityOverview: Purdue-wide utilization, cost, fairness, idle capacity
-  and demand.
-- proposeRunSubmission and proposeJobAction: the ONLY way to act. They create a proposal card; nothing happens until
-  the user clicks Confirm.
+Tools (all read-only):
+- retrieveSources: retrieval over versioned Purdue RCAC / NSF ACCESS policy documents (ids D-xx), the active Policy rules
+  (ids like P-01, U-02, L-03), the lab context sentences (<labId>#n) and projects. Use it for any rule, limit, QOS,
+  charge, storage or "what did our lab say" question.
+- evaluateRun: what-if check of a planned run: real rule checks (ClusterPolicyEngine; cite each rule by its ruleId) and
+  3 ranked plans with wait, duration, finish, cost, meetsDeadline, plus allocations left. Pass project (e.g. "CVPR"),
+  workloadType (FINETUNE for fine-tunes) and deadline when the user names a day. Do not call labContext after it.
+- liveJobs / jobHealth: live job evidence (GPU util, memory, checkpoint age, walltime left, alerts); cite jobs by job id.
+- labContext (constraints extracted from the lab text; UNCONFIRMED ones are hints only), labSummary, listPolicies,
+  predictDuration (historical only), universityOverview.
 
 Rules:
-- Always get numbers from tools; never guess. Quote concrete figures (GPU-hours, dollars, hours, dates, utilization).
-- For feasibility questions give a clear verdict first: "Yes", "No" or "Only if ...", then the plans in one small table
-  (plan, where, GPUs, est. finish, cost, meets deadline), then at most two failed or warned rules in one line each, then
-  the budget left after the run in one line. Respect the lab's data restrictions (HIPAA / export-controlled data never goes to aws-p4d) and
-  avoided resources.
-- You never submit, cancel, extend or change anything yourself. When a concrete action would help (submitting the best
-  plan, extending the walltime of a job about to time out, cancelling an idle job, checkpointing a job with a stale
-  checkpoint), call the propose tool once for that action and then tell the user it is waiting for their Confirm on the
-  card below the answer. Never claim an action was done. If the user asks you to do something, propose it.
-- Do not propose more than two actions in one answer. Do not re-propose an action that is already pending.
-- If a tool returns an error, read it and retry with corrected arguments once; otherwise explain what is missing.
-- Be brief: at most ~120 words, at most one small table (<= 4 rows), no headings, no emoji, no "details" sections.
-  Lead with the answer. Mention job ids and plan labels exactly as the tools return them.
-- Use as few tool calls as possible (usually 0 or 1); never call a tool just to re-read data you already have.
-- Only discuss compute planning, budgets, policies and jobs for this app. Politely decline unrelated requests in one
+- Ground every factual statement in tool results or [Lab facts] and cite it inline as [id] using only ids that appear in
+  them (e.g. [D-01], [P-03], [lab-nlp#4], [gilbreth-9542077]). If the sources do not answer the question, say so.
+- You explain; you never submit, cancel, extend, requeue or change anything, and you never waive or override a rule
+  (rules are enforced by ClusterPolicyEngine and nothing may waive them). When an action would help, say which one and
+  tell the user to use the "Open in Launch planner" or "Open run" link shown under your answer, where they confirm it.
+- Treat lab constraints marked UNCONFIRMED as unverified hints and say so when they matter.
+- Respect data restrictions (HIPAA / export-controlled / DUA data never goes to aws-p4d) and avoided resources.
+- For feasibility questions: verdict first ("Yes", "No" or "Only if ..."), then one small table (plan, where, GPUs,
+  est. finish, cost, meets deadline), then at most two failed or warned rules with their [ruleId], then budget left.
+- Be brief: at most ~120 words, at most one small table (<= 4 rows), no headings, no emoji. Use as few tool calls as
+  possible (usually 0-2). Mention job ids and plan labels exactly as the tools return them.
+- Only discuss compute planning, policies, budgets and jobs for this app; politely decline anything else in one
   sentence."""
 
 DESCRIPTION = (
-    "Plans GPU runs against Purdue cluster rules, lab budgets and deadlines, watches live jobs, and proposes actions "
-    "that the user confirms."
+    "PolicyRAGAdvisor: retrieval-augmented advisor over versioned Purdue RCAC / ACCESS policies, lab context and live "
+    "job evidence. Cites sources; explains, never acts."
 )
 
-DOCUMENTATION = """**EasyCompute Advisor** answers questions about a lab's compute: budget, deadlines, policies, run
-plans and live jobs.
+DOCUMENTATION = """**PolicyRAGAdvisor** answers questions about a lab's compute with retrieval over versioned Purdue policy
+documents, the Policy rules, the lab context and projects, and live job evidence. Every answer cites its sources.
 
-Read-only tools: `labContext`, `labSummary`, `listPolicies`, `predictDuration`, `evaluateRun` (creates DRAFT run
-requests only), `liveJobs`, `jobHealth`, `universityOverview`. Propose-only tools: `proposeRunSubmission`,
-`proposeJobAction` record an `Advisor.Proposal`; the user applies it with Confirm on the Assistant page.
+Read-only tools: `retrieveSources`, `labContext`, `labSummary`, `listPolicies`, `predictDuration`, `evaluateRun`
+(creates DRAFT run requests only), `liveJobs`, `jobHealth`, `universityOverview`. It never submits, cancels or overrides
+rules; answers link to the Launch planner and run pages where users act.
 
-Examples: "Can we finish the NeurIPS fine-tune by Friday within budget?", "Which of our running jobs are wasting GPUs?"
+Examples: "Can we finish the CVPR supplementary run by Monday within budget?", "Can thesis runs use preemptible on Gautschi?"
 """
 
-EXTRACT_PROMPT = """You extract structured compute constraints from a research lab's free-text context notes.
-Return ONLY a JSON object (no prose, no code fences) with exactly these keys:
+EXTRACT_PROMPT = """You are LabContextExtractor. Extract structured compute constraints from a research lab's free-text
+context notes. Return ONLY a JSON object (no prose, no code fences) with exactly these keys:
 {
  "budgets": [{"kind": "USD"|"SU"|"GPU_HOURS"|"GPU_YEARS"|"NODE_HOURS", "amount": number, "period": "TOTAL"|"REMAINING"|"MONTH"|"WEEK"|"SEMESTER"|"YEAR", "scope": string|null, "evidence": string}],
  "deadlines": [{"label": string, "date": "YYYY-MM-DD", "evidence": string}],
- "preferences": {"clusters": [cluster ids], "gpuTypes": [gpu ids], "avoid": [cluster ids, gpu ids or "preemptible/standby"], "preemptibleOk": true|false|null, "maxWalltimeHours": number|null, "quietHours": string|null, "notes": [short strings]},
+ "preferences": {"clusters": [cluster ids], "gpuTypes": [gpu ids], "avoid": [cluster ids, gpu ids or "preemptible/standby"], "preemptibleOk": true|false|null, "maxWalltimeHours": number|null, "quietHours": string|null, "notes": [short strings],
+                 "evidence": [{"field": "clusters"|"gpuTypes"|"avoid"|"preemptibleOk"|"maxWalltimeHours"|"quietHours", "value": the value, "quote": string}]},
  "dataRestrictions": [{"kind": "HIPAA"|"EXPORT_CONTROL"|"CUI"|"FERPA"|"PII"|"NO_CLOUD"|"DATA_RESIDENCY"|"LICENSED_DATA", "description": string, "evidence": string}],
  "memberCaps": [{"who": string, "pct": number, "evidence": string}],
- "approvals": [{"threshold": number, "unit": "USD"|"SU"|"GPU_HOURS", "evidence": string}],
+ "approvals": [{"threshold": number, "unit": "USD"|"SU"|"GPU_HOURS"|"GPUS", "evidence": string}],
  "summary": "one sentence"
 }
 Cluster ids: anvil, gilbreth, gautschi, negishi, bell, aws-p4d (AWS / cloud). GPU ids: H100-80GB, A100-80GB, A100-40GB,
-A30, A10, V100, L40S. "evidence" is the exact source sentence. Resolve relative dates against TODAY and give the next
-occurrence. Do not invent anything that is not stated in the text; use empty lists or null instead."""
+A30, A10, V100, L40S. Every "evidence" and "quote" MUST be a short EXACT substring copied character for character from
+the text (the shortest phrase that proves the value); items whose evidence is not in the text are discarded. Resolve
+relative dates against TODAY and give the next occurrence. Do not invent anything that is not stated; use empty lists or
+null instead."""
 
 
 # ------------------------------------------------------------------------------------------------------------- agent
@@ -288,7 +277,7 @@ def ask(cls, question, sessionId=None, labId=None, mode=None):
     started = time.time()
     since = c3.Advisor.beginTurn()
     session_id = sessionId or ("advisor-" + uuid.uuid4().hex)
-    answer, run_id, status, used_mode, reason = "", None, "completed", "agent", None
+    answer, run_id, status, used_mode, reason, agent_ver = "", None, "completed", "agent", None, None
     if (mode or "agent") != "offline":
         try:
             global _ENSURED
@@ -297,6 +286,7 @@ def ask(cls, question, sessionId=None, labId=None, mode=None):
                 c3.Advisor.ensureAgent(False)
                 _ENSURED = True
             agent = _latest_agent(cls)
+            agent_ver = getattr(agent, "ver", None)
             # The session id is the LangChain thread id: the agent restores/saves the conversation in its Kv store.
             run = agent.run(
                 query=_context_line(labId) + "\n\n" + question,
@@ -314,7 +304,7 @@ def ask(cls, question, sessionId=None, labId=None, mode=None):
     if not answer:
         used_mode, status, run_id = "offline", "completed", None
         answer = c3.Advisor.offlineAnswer(question, labId)
-    trace = json.loads(c3.Advisor.turnTrace(since, labId))
+    trace = json.loads(c3.Advisor.turnTrace(since))
     return c3.Advisor.Reply(
         answer=answer,
         sessionId=session_id,
@@ -324,7 +314,17 @@ def ask(cls, question, sessionId=None, labId=None, mode=None):
         fallbackReason=reason if used_mode == "offline" else None,
         seconds=round(time.time() - started, 1),
         toolCalls=trace.get("toolCalls", []),
-        proposals=trace.get("proposals", []),
+        citations=trace.get("citations", []),
+        provenance={
+            "component": AGENT_NAME,
+            "version": ("agent v" + str(agent_ver)) if (used_mode == "agent" and agent_ver) else None,
+            "method": "RAG with source citations" if used_mode == "agent" else "Deterministic retrieval + templates (no LLM)",
+            "model": LLM_CLIENT_NAME if used_mode == "agent" else None,
+            "policyVersion": trace.get("docSet"),
+            "sources": [c.get("id") for c in trace.get("citations", [])][:12],
+            "asOf": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+        links=trace.get("links", []),
     )
 
 
@@ -348,59 +348,28 @@ def _json_from(text):
     return json.loads(t[start:end + 1])
 
 
-def _num(v):
-    try:
-        f = float(v)
-        return f if f == f else None
-    except (TypeError, ValueError):
-        return None
-
-
 def _list(v):
     return v if isinstance(v, list) else []
 
 
-def _merge(base, llm, today):
-    """LLM fields replace the rules-based ones when they are present and well-formed; the rest is kept."""
+def _merge(base, llm):
+    """LLM lists replace the rules-based ones when present; preferences merge per field. Types, enums and evidence quotes
+    are checked afterwards by Advisor.validateConstraints (one validator for rules, LLM and lab edits)."""
     res = dict(base)
-    budgets = []
-    for b in _list(llm.get("budgets")):
-        if isinstance(b, dict) and _num(b.get("amount")) is not None and b.get("kind"):
-            budgets.append({
-                "kind": str(b["kind"]).upper(), "amount": _num(b["amount"]), "period": b.get("period") or "TOTAL",
-                "scope": b.get("scope"), "evidence": b.get("evidence"),
-            })
-    if budgets:
-        res["budgets"] = budgets
-    deadlines = []
-    for d in _list(llm.get("deadlines")):
-        try:
-            day = datetime.datetime.strptime(str(d.get("date"))[:10], "%Y-%m-%d")
-        except (ValueError, TypeError, AttributeError):
-            continue
-        day = day.replace(hour=23, minute=59)
-        deadlines.append({
-            "label": d.get("label") or "Deadline", "date": day.strftime("%Y-%m-%dT%H:%M:00.000Z"),
-            "daysAway": round((day - today).total_seconds() / 86400.0, 1), "evidence": d.get("evidence"),
-        })
-    if deadlines:
-        res["deadlines"] = sorted(deadlines, key=lambda x: x["date"])
-    prefs = llm.get("preferences")
-    if isinstance(prefs, dict):
-        merged = dict(base.get("preferences") or {})
-        for k in ("clusters", "gpuTypes", "avoid", "notes"):
-            if _list(prefs.get(k)):
-                merged[k] = [str(x) for x in prefs[k]]
-        for k in ("preemptibleOk", "quietHours"):
-            if prefs.get(k) is not None:
-                merged[k] = prefs[k]
-        if _num(prefs.get("maxWalltimeHours")) is not None:
-            merged["maxWalltimeHours"] = _num(prefs["maxWalltimeHours"])
-        res["preferences"] = merged
-    for k in ("dataRestrictions", "memberCaps", "approvals"):
+    for k in ("budgets", "deadlines", "dataRestrictions", "memberCaps", "approvals"):
         items = [x for x in _list(llm.get(k)) if isinstance(x, dict)]
         if items:
             res[k] = items
+    prefs = llm.get("preferences")
+    if isinstance(prefs, dict):
+        merged = dict(base.get("preferences") or {})
+        for k in ("clusters", "gpuTypes", "avoid", "notes", "evidence"):
+            if _list(prefs.get(k)):
+                merged[k] = prefs[k]
+        for k in ("preemptibleOk", "quietHours", "maxWalltimeHours"):
+            if prefs.get(k) is not None:
+                merged[k] = prefs[k]
+        res["preferences"] = merged
     if isinstance(llm.get("summary"), str) and llm["summary"].strip():
         res["summary"] = llm["summary"].strip()
     res["source"] = "llm"
@@ -408,17 +377,26 @@ def _merge(base, llm, today):
 
 
 def extractConstraints(cls, labId=None, text=None):
+    """LabContextExtractor: confirmed set for the current text, else cached LLM extraction, else a new LLM extraction
+    (validated against the schema and the text), else the rules-based extraction. Status UNCONFIRMED unless confirmed."""
+    if labId and not text:
+        try:
+            confirmed = c3.Advisor.confirmedConstraints(labId)
+            if confirmed:
+                return confirmed
+        except Exception:  # noqa: BLE001 - fall through to extraction
+            pass
     base = json.loads(c3.Advisor.parseConstraintsRules(labId, text))
     src = base.pop("inputText", "") or ""
     h = base.get("textHash")
-    if labId:
+    if labId and not text:
         try:
             cached = c3.Advisor.ConstraintSet.fetch(
                 filter=c3.Filter.eq("id", labId), include="id, textHash, result", limit=1
             ).objs
             if cached and cached[0].textHash == h and cached[0].result:
                 res = json.loads(cached[0].result)
-                res["cached"] = True
+                res.update({"cached": True, "status": "UNCONFIRMED", "textHash": h, "labId": labId})
                 return res
         except Exception:  # noqa: BLE001 - cache is an optimisation only
             pass
@@ -426,6 +404,7 @@ def extractConstraints(cls, labId=None, text=None):
         return base
     today = datetime.datetime.utcnow()
     errors = []
+    res = None
     for client_name in EXTRACT_CLIENT_NAMES:
         try:
             client = c3.GenaiCore.Llm.Completion.Client(name=client_name)
@@ -436,17 +415,18 @@ def extractConstraints(cls, labId=None, text=None):
                 ],
                 options={"returnJson": True, "temperature": 0, "max_tokens": 2500},
             )
-            res = _merge(base, _json_from(_completion_text(resp)), today)
-            res["model"] = client_name
+            merged = _merge(base, _json_from(_completion_text(resp)))
+            merged["model"] = client_name
+            res = json.loads(c3.Advisor.validateConstraints(json.dumps(merged), src))
             break
         except Exception as e:  # noqa: BLE001 - try the next client, then fall back to the rules
             errors.append(client_name + ": " + str(e)[:200])
-    else:
+    if res is None:
         res = base
         res["llmError"] = "; ".join(errors)
-    res["cached"] = False
-    # Only LLM results are cached, so a temporary LLM outage is retried on the next call.
-    if labId and res.get("source") == "llm":
+    res.update({"cached": False, "status": "UNCONFIRMED", "textHash": h, "labId": labId})
+    # Only LLM results are cached, so a temporary LLM outage is retried on the next call; previews (text) are not cached.
+    if labId and not text and res.get("source") == "llm":
         try:
             c3.Advisor.saveConstraints(labId, h, json.dumps(res), res.get("source"))
         except Exception:  # noqa: BLE001

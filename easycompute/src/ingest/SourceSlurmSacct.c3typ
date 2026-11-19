@@ -1,0 +1,139 @@
+/**
+ * One raw row of the daily Slurm accounting export (`sacct --parsable` style CSV) delivered to the
+ * `SlurmSacctFeed` {@link FileSourceCollection}. Every column is kept as text so a malformed value never fails the
+ * file; {@link EasyComputeIngest#slurmToCanonical} parses and validates it into a {@link CanonicalSlurmJob}.
+ */
+type SourceSlurmSacct mixes Source {
+
+  /**
+   * Slurm JobID (unique per cluster).
+   */
+  @ser(name="JobID")
+  jobIdRaw: string
+
+  /**
+   * Cluster id, a {@link ComputeCluster} id (for example "gautschi").
+   */
+  @ser(name="Cluster")
+  clusterRaw: string
+
+  /**
+   * Slurm partition passed to `sbatch -p` (matched against {@link Partition#slurmPartition}).
+   */
+  @ser(name="Partition")
+  partitionRaw: string
+
+  /**
+   * Slurm QOS (matched against {@link Partition#qos}).
+   */
+  @ser(name="QOS")
+  qosRaw: string
+
+  /**
+   * Slurm account charged; mapped to a {@link Lab} through {@link Lab#slurmAccounts}.
+   */
+  @ser(name="Account")
+  accountRaw: string
+
+  /**
+   * Pseudonymized username.
+   */
+  @ser(name="User")
+  userRaw: string
+
+  /**
+   * Slurm job name.
+   */
+  @ser(name="JobName")
+  jobNameRaw: string
+
+  /**
+   * Slurm state, possibly with a suffix ("CANCELLED by 0").
+   */
+  @ser(name="State")
+  stateRaw: string
+
+  /**
+   * Slurm exit code ("0:0").
+   */
+  @ser(name="ExitCode")
+  exitCodeRaw: string
+
+  /**
+   * Submit time, UTC without zone (`YYYY-MM-DDTHH:MM:SS`).
+   */
+  @ser(name="Submit")
+  submitRaw: string
+
+  /**
+   * Start time, UTC without zone, or "Unknown".
+   */
+  @ser(name="Start")
+  startRaw: string
+
+  /**
+   * End time, UTC without zone, or "Unknown".
+   */
+  @ser(name="End")
+  endRaw: string
+
+  /**
+   * Time limit in hours.
+   */
+  @ser(name="TimelimitHours")
+  timelimitHoursRaw: string
+
+  /**
+   * Elapsed run time in hours.
+   */
+  @ser(name="ElapsedHours")
+  elapsedHoursRaw: string
+
+  /**
+   * Allocated CPU cores.
+   */
+  @ser(name="AllocCPUS")
+  allocCpusRaw: string
+
+  /**
+   * Allocated nodes.
+   */
+  @ser(name="NNodes")
+  nNodesRaw: string
+
+  /**
+   * Allocated trackable resources ("billing=..,cpu=..,gres/gpu:h100-80gb=8,gres/gpu=8,mem=..,node=..").
+   */
+  @ser(name="AllocTRES")
+  allocTresRaw: string
+
+  /**
+   * Requested memory in GB.
+   */
+  @ser(name="ReqMemGB")
+  reqMemGbRaw: string
+
+  /**
+   * Peak resident memory in GB.
+   */
+  @ser(name="MaxRSSGB")
+  maxRssGbRaw: string
+
+  /**
+   * Allocated node list.
+   */
+  @ser(name="NodeList")
+  nodeListRaw: string
+
+  /**
+   * Workload characterization key, used as the {@link Project} id.
+   */
+  @ser(name="WCKey")
+  wcKeyRaw: string
+
+  /**
+   * `key=value;...` site annotations (workload, gpu_util, cpu_eff, mem_eff, cost_units, cost_usd, run_request).
+   */
+  @ser(name="AdminComment")
+  adminCommentRaw: string
+}

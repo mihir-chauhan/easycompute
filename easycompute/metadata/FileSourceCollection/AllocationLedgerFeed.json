@@ -1,0 +1,6 @@
+{
+  "name": "AllocationLedgerFeed",
+  "description": "Daily allocation ledger CSV -> SourceAllocationLedger -> CanonicalAllocationLedger -> Allocation (valid rows) / IngestRejection (rejected rows).",
+  "sourceSystem": "EasyComputeFeeds",
+  "source": "SourceAllocationLedger"
+}

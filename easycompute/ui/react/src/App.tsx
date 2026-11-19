@@ -7,33 +7,37 @@
  * This material may be covered by one or more patents or pending patent applications.
  */
 
-import React, { useEffect, useState } from 'react';
-import { Route, Routes } from 'react-router-dom';
-import ErrorReporterProvider from './components/ErrorBoundary/ErrorBoundary';
-import AppShell, { AppShellProvider, useAppShell, type ShellLab } from './components/app/AppShell';
-import { c3Call } from './c3Action';
-import { ADMIN_NAV, labNav } from './config/navigation';
-import { fetchLabs } from './features/lab/api';
-import { setCurrentLabId } from './features/lab/useCurrentLab';
+import React, { useEffect, useState } from "react";
+import { Route, Routes } from "react-router-dom";
+import ErrorReporterProvider from "./components/ErrorBoundary/ErrorBoundary";
+import AppShell, {
+  AppShellProvider,
+  useAppShell,
+  type ShellLab,
+} from "./components/app/AppShell";
+import { c3Call } from "./c3Action";
+import { ADMIN_NAV, labNav } from "./config/navigation";
+import { fetchLabs } from "./features/lab/api";
+import { setCurrentLabId } from "./features/lab/useCurrentLab";
 // <routes-imports> (generated from routes.*.json by the integrator)
-import LabHome from './pages/LabHome/LabHome';
-import LabContext from './pages/LabContext/LabContext';
-import AdminPolicies from './pages/AdminPolicies/AdminPolicies';
-import PlanRun from './pages/PlanRun/PlanRun';
-import RunList from './pages/Runs/RunList';
-import RunDetail from './pages/Runs/RunDetail';
-import LiveMonitor from './pages/Runs/LiveMonitor';
-import History from './pages/History/History';
-import Guardrails from './pages/Guardrails/Guardrails';
-import AssistantPage from './pages/Assistant/AssistantPage';
-import AdminOverview from './pages/AdminOverview/AdminOverview';
-import AdminClusters from './pages/AdminClusters/AdminClusters';
-import AdminClusterDetail from './pages/AdminClusters/AdminClusterDetail';
-import AdminLabs from './pages/AdminLabs/AdminLabs';
-import AdminData from './pages/AdminData/AdminData';
-import AdminUsers from './pages/AdminUsers/AdminUsers';
+import Home from "./pages/Home/Home";
+import LabHome from "./pages/LabHome/LabHome";
+import LabContext from "./pages/LabContext/LabContext";
+import AdminPolicies from "./pages/AdminPolicies/AdminPolicies";
+import PlanRun from "./pages/PlanRun/PlanRun";
+import RunList from "./pages/Runs/RunList";
+import RunDetail from "./pages/Runs/RunDetail";
+import LiveMonitor from "./pages/Runs/LiveMonitor";
+import History from "./pages/History/History";
+import Guardrails from "./pages/Guardrails/Guardrails";
+import AssistantPage from "./pages/Assistant/AssistantPage";
+import AdminOverview from "./pages/AdminOverview/AdminOverview";
+import AdminClusters from "./pages/AdminClusters/AdminClusters";
+import AdminClusterDetail from "./pages/AdminClusters/AdminClusterDetail";
+import AdminLabs from "./pages/AdminLabs/AdminLabs";
+import AdminData from "./pages/AdminData/AdminData";
+import AdminUsers from "./pages/AdminUsers/AdminUsers";
 // </routes-imports>
-
 
 /** Mirrors the shell's current lab into the lab pages' `useCurrentLab` (features/lab), so both stay in step. */
 function LabSync() {
@@ -50,7 +54,11 @@ function useLiveCount(labId: string | null): number | undefined {
   useEffect(() => {
     if (!labId) return undefined;
     let cancelled = false;
-    c3Call('Job', 'fetchCount', 'Job', [{ filter: `lab.id == "${labId}" && isLive == true && state == "RUNNING"` }])
+    c3Call("Job", "fetchCount", "Job", [
+      {
+        filter: `lab.id == "${labId}" && isLive == true && state == "RUNNING"`,
+      },
+    ])
       .then((n) => {
         if (!cancelled) setCount(Number(n) || 0);
       })
@@ -100,38 +108,51 @@ export default function App() {
     <ErrorReporterProvider>
       <AppShellProvider labs={labs}>
         <LabSync />
-        <Shell>
-          <Routes>
-            {/* <routes> */}
-                <Route path="/" element={<LabHome />} />
-                <Route path="/context" element={<LabContext />} />
-                <Route path="/policies" element={<AdminPolicies />} />
-                <Route path="/plan" element={<PlanRun />} />
-                <Route path="/runs" element={<RunList />} />
-                <Route path="/runs/:id" element={<RunDetail />} />
-                <Route path="/monitor" element={<LiveMonitor />} />
-                <Route path="/history" element={<History />} />
-                <Route path="/guardrails" element={<Guardrails />} />
-                <Route path="/assistant" element={<AssistantPage />} />
-                <Route path="/admin" element={<AdminOverview />} />
-                <Route path="/admin/clusters" element={<AdminClusters />} />
-                <Route path="/admin/clusters/:id" element={<AdminClusterDetail />} />
-                <Route path="/admin/policies" element={<AdminPolicies />} />
-                <Route path="/admin/labs" element={<AdminLabs />} />
-                <Route path="/admin/data" element={<AdminData />} />
-                <Route path="/admin/users" element={<AdminUsers />} />
-                <Route path="/members" element={<AdminUsers />} />
-                {/* </routes> */}
-            <Route
-              path="*"
-              element={
-                <div className="flex h-full items-center justify-center p-8 text-center text-[var(--c3-style-basic-fg-neutral)]">
-                  <p>Page not found.</p>
-                </div>
-              }
-            />
-          </Routes>
-        </Shell>
+        <Routes>
+          {/* <bare-routes> */}
+          <Route path="/" element={<Home />} />
+          {/* </bare-routes> */}
+          <Route
+            path="*"
+            element={
+              <Shell>
+                <Routes>
+                  {/* <routes> */}
+                  <Route path="/dashboard" element={<LabHome />} />
+                  <Route path="/context" element={<LabContext />} />
+                  <Route path="/policies" element={<AdminPolicies />} />
+                  <Route path="/plan" element={<PlanRun />} />
+                  <Route path="/runs" element={<RunList />} />
+                  <Route path="/runs/:id" element={<RunDetail />} />
+                  <Route path="/monitor" element={<LiveMonitor />} />
+                  <Route path="/history" element={<History />} />
+                  <Route path="/guardrails" element={<Guardrails />} />
+                  <Route path="/assistant" element={<AssistantPage />} />
+                  <Route path="/admin" element={<AdminOverview />} />
+                  <Route path="/admin/clusters" element={<AdminClusters />} />
+                  <Route
+                    path="/admin/clusters/:id"
+                    element={<AdminClusterDetail />}
+                  />
+                  <Route path="/admin/policies" element={<AdminPolicies />} />
+                  <Route path="/admin/labs" element={<AdminLabs />} />
+                  <Route path="/admin/data" element={<AdminData />} />
+                  <Route path="/admin/users" element={<AdminUsers />} />
+                  <Route path="/members" element={<AdminUsers />} />
+                  {/* </routes> */}
+                  <Route
+                    path="*"
+                    element={
+                      <div className="flex h-full items-center justify-center p-8 text-center text-[var(--c3-style-basic-fg-neutral)]">
+                        <p>Page not found.</p>
+                      </div>
+                    }
+                  />
+                </Routes>
+              </Shell>
+            }
+          />
+        </Routes>
       </AppShellProvider>
     </ErrorReporterProvider>
   );

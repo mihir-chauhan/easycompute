@@ -18,7 +18,10 @@ import {
   KpiRow,
   KpiRowSkeleton,
   KpiTile,
+  ModelComputing,
+  ModelProvenance,
   Note,
+  provenanceFor,
   PageFrame,
   PageTabs,
   Pill,
@@ -63,6 +66,9 @@ const TITLE_OPTIONS: Array<{ value: AppRole; label: string }> = [
 ];
 const titleLabel = (r: AppRole) => (r === 'UNIVERSITY_ADMIN' ? 'RCAC staff' : TITLE_OPTIONS.find((o) => o.value === r)?.label ?? humanize(r));
 const appRoleOf = (u: AppUserRow): EcRole => roleFromMember(u.role);
+/** MODEL_MAP component that raised an approval request. */
+const modelFor = (a: ApprovalItem): string =>
+  a.kind === 'RUN_APPROVAL' ? 'ClusterPolicyEngine' : a.kind === 'WALLTIME_EXTENSION' ? 'GuardrailRuleEngine' : /SCALE|IDLE|UNDER/i.test(a.kind) ? 'GPUUnderuseDetector' : 'GuardrailRuleEngine';
 const STATUS_TONE: Record<string, Tone> = { ACTIVE: 'good', INVITED: 'info', DISABLED: 'neutral' };
 
 const timeAgo = (iso?: string) => {
@@ -433,7 +439,9 @@ export default function AdminUsers() {
                     </span>
                   }
                   action={
-                    canApprove ? (
+                    busy === a.id ? (
+                      <ModelComputing component={modelFor(a)} verb={a.kind === 'RUN_APPROVAL' ? 'is re-checking the plan' : 'is applying the decision'} />
+                    ) : canApprove ? (
                       <>
                         <Button size="sm" disabled={busy === a.id} onClick={() => run(a.id, () => decideApproval(a, true, `Approved by ${approver}`))}>
                           Approve
@@ -449,6 +457,9 @@ export default function AdminUsers() {
                 >
                   {a.detail}
                   {a.amount != null ? <span className="ml-1 tabular-nums text-[var(--ec-fg)]">({a.amount.toLocaleString('en-US')} {a.unit})</span> : null}
+                  <span className="mt-1.5 flex">
+                    <ModelProvenance component={modelFor(a)} provenance={provenanceFor(a, modelFor(a))} compact />
+                  </span>
                   <span className="mt-1 block text-xs text-[var(--ec-fg-3)]">
                     {[a.labName, a.requestedBy && `requested by ${a.requestedBy}`, a.jobId ?? a.runRequestId, timeAgo(a.requestedAt ?? undefined)].filter(Boolean).join(' · ')}
                   </span>

@@ -1,5 +1,6 @@
 [
-  { "path": "/", "element": "pages/LabHome/LabHome", "export": "default", "navLabel": "Overview", "icon": "House", "section": "lab", "group": "Overview" },
+  { "path": "/", "element": "pages/Home/Home", "export": "default", "section": "lab", "shell": false, "note": "one-box launch hero: render OUTSIDE AppShell chrome but INSIDE AppShellProvider" },
+  { "path": "/dashboard", "element": "pages/LabHome/LabHome", "export": "default", "navLabel": "Overview", "icon": "House", "section": "lab", "group": "Overview" },
   { "path": "/context", "element": "pages/LabContext/LabContext", "export": "default", "navLabel": "Lab context", "icon": "FileText", "section": "lab", "group": "Before a run" },
   { "path": "/plan", "element": "pages/PlanRun/PlanRun", "export": "default", "navLabel": "Launch planner", "icon": "Rocket", "section": "lab", "group": "Before a run" },
   { "path": "/runs", "element": "pages/Runs/RunList", "export": "default", "navLabel": "Runs", "icon": "List", "section": "lab", "group": "Before a run" },

@@ -1,6 +1,7 @@
 /**
- * Cached result of {@link Advisor#extractConstraints} for a lab. The id is the lab id; the row is reused while the
- * context text hash is unchanged, so the LLM is called once per edit of the context dump.
+ * LabContextExtractor state of a lab (id = lab id): the cached LLM extraction of the current context text (reused while
+ * the text hash is unchanged) and the set the lab confirmed ({@link Advisor#confirmConstraints}). Extracted fields stay
+ * unconfirmed until the lab confirms them for that exact text.
  */
 entity type Advisor.ConstraintSet {
 
@@ -23,4 +24,19 @@ entity type Advisor.ConstraintSet {
    * When the text was parsed.
    */
   parsedAt: datetime
+
+  /**
+   * Hash of the context text the lab confirmed; the confirmation applies only while the text is unchanged.
+   */
+  confirmedHash: string
+
+  /**
+   * The constraints the lab confirmed (possibly edited), validated, as JSON text.
+   */
+  confirmedResult: string
+
+  /**
+   * When the lab confirmed the constraints.
+   */
+  confirmedAt: datetime
 }

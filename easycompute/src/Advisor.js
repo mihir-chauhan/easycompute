@@ -11,7 +11,6 @@ var log = Logger.for('Advisor');
 // ---------------------------------------------------------------------------------------------------------------
 
 var WORKLOAD_TYPES = ['TRAINING', 'FINETUNE', 'INFERENCE', 'SIMULATION', 'DATA_PROCESSING', 'INTERACTIVE'];
-var JOB_ACTIONS = ['EXTEND_WALLTIME', 'CANCEL', 'CHECKPOINT_NOW', 'REQUEUE_STANDBY', 'SCALE_DOWN', 'NOTIFY_PI', 'HOLD'];
 var JOB_STATES = ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED', 'OUT_OF_MEMORY', 'PREEMPTED'];
 var MAX_RESULT = 7000;
 var DAY_MS = 86400000;
@@ -124,8 +123,12 @@ function canonicalOf(value, allowed, param) {
   throw new Error('Unknown ' + param + ' "' + value + '". Use one of: ' + allowed.join(', '));
 }
 
-/** Runs one tool body, records an Advisor.ToolCall row and returns the JSON text (or a JSON error the agent can read). */
-function traced(tool, labId, args, summaryFn, body, render) {
+/**
+ * Runs one tool body, records an Advisor.ToolCall row (with the citations and deep links the body returned) and returns
+ * the JSON text for the agent (or a JSON error it can read). Bodies may return `citations` (kept in the result so the
+ * agent can cite them by id) and `_links` (deep links for the page only, stripped from the result).
+ */
+function traced(tool, labId, args, summaryFn, body) {
   var started = Date.now();
   var ok = true;
   var data;
@@ -136,6 +139,9 @@ function traced(tool, labId, args, summaryFn, body, render) {
     data = { error: String(e && e.message ? e.message : e) };
   }
   var summary = ok ? summaryFn(data) : 'Error: ' + data.error;
+  var links = (data && data._links) || [];
+  if (data && data._links) delete data._links;
+  var citations = (data && data.citations) || [];
   try {
     Advisor.ToolCall.make({
       name: tool,
@@ -145,11 +151,21 @@ function traced(tool, labId, args, summaryFn, body, render) {
       ok: ok,
       millis: Date.now() - started,
       calledAt: DateTime.now(),
+      evidence: citations.length || links.length ? JSON.stringify({ citations: citations.slice(0, 20), links: links.slice(0, 10) }) : null,
     }).create();
   } catch (e3) {
     log.warn('Could not record tool call {}: {}', tool, e3);
   }
-  return ok && render ? render(data) : out(data);
+  return out(data);
+}
+
+/** A citation the agent can quote by id and the page shows as a chip. kind: DOC, POLICY, LAB, PROJECT, JOB, DATA. */
+function cite(kind, id, title, url, extra) {
+  var c = { id: String(id), kind: kind, title: str(title).substring(0, 140), url: url || null };
+  if (extra) Object.keys(extra).forEach(function (k) {
+    if (extra[k] !== null && extra[k] !== undefined) c[k] = extra[k];
+  });
+  return c;
 }
 
 function requireLab(labId) {
@@ -628,35 +644,279 @@ function textHash(s) {
   return ('0000000' + h.toString(16)).slice(-8) + '-' + s.length;
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// LabContextExtractor: schema-constrained extraction with evidence spans. Every extracted item carries
+// evidence {quote, start, end} = an exact substring of the lab text and its character offsets; items whose quote is not
+// in the text, or that break the schema, are dropped and reported in `validation`. Results stay UNCONFIRMED until the lab
+// confirms them (confirmConstraints); the advisor treats unconfirmed fields as hints only.
+// ---------------------------------------------------------------------------------------------------------------
+
+var EXTRACTOR = { component: 'LabContextExtractor', version: '1.1' };
+var BUDGET_KINDS = ['USD', 'SU', 'GPU_HOURS', 'GPU_YEARS', 'NODE_HOURS'];
+var PERIODS = ['TOTAL', 'REMAINING', 'MONTH', 'WEEK', 'SEMESTER', 'YEAR'];
+var RESTRICTION_KINDS = ['HIPAA', 'EXPORT_CONTROL', 'CUI', 'FERPA', 'PII', 'NO_CLOUD', 'DATA_RESIDENCY', 'LICENSED_DATA'];
+var APPROVAL_UNITS = ['USD', 'SU', 'GPU_HOURS', 'GPUS'];
+
+/** Evidence span of a quote in text: exact match first, then whitespace-insensitive; start -1 when not found. */
+function span(text, quote) {
+  var q = str(typeof quote === 'object' && quote ? quote.quote : quote);
+  if (!q) return { quote: '', start: -1, end: -1 };
+  var i = text.indexOf(q);
+  if (i >= 0) return { quote: q, start: i, end: i + q.length };
+  var esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  var m = new RegExp(esc).exec(text);
+  if (m) return { quote: m[0], start: m.index, end: m.index + m[0].length };
+  var lo = text.toLowerCase().indexOf(q.toLowerCase());
+  if (lo >= 0) return { quote: text.substring(lo, lo + q.length), start: lo, end: lo + q.length };
+  return { quote: q, start: -1, end: -1 };
+}
+
+/** Sentence of the text that mentions `re` (for preference evidence). */
+function sentenceWith(text, re) {
+  var ss = sentencesOf(text);
+  for (var i = 0; i < ss.length; i++) if (re.test(ss[i])) return ss[i];
+  return null;
+}
+
+/** Adds preferences.evidence [{field, value, quote, start, end}] for every preference value of a rules parse. */
+function preferenceEvidence(res, text) {
+  var ev = [];
+  var add = function (field, value, re) {
+    var sen = re ? sentenceWith(text, re) : null;
+    if (sen) {
+      var sp = span(text, sen);
+      ev.push({ field: field, value: value, quote: sp.quote, start: sp.start, end: sp.end });
+    }
+  };
+  var p = res.preferences;
+  (p.clusters || []).forEach(function (c) {
+    add('clusters', c, (CLUSTER_WORDS.filter(function (w) {
+      return w.id === c;
+    })[0] || {}).re);
+  });
+  (p.gpuTypes || []).forEach(function (g) {
+    add('gpuTypes', g, (GPU_WORDS.filter(function (w) {
+      return w.id === g;
+    })[0] || {}).re);
+  });
+  (p.avoid || []).forEach(function (a) {
+    var w = CLUSTER_WORDS.concat(GPU_WORDS).filter(function (x) {
+      return x.id === a;
+    })[0];
+    add('avoid', a, w ? w.re : a === 'preemptible/standby' ? /\b(preempt\w*|standby|spot)\b/i : a === 'aws-p4d' ? /\b(aws|cloud|on[- ]?prem)/i : null);
+  });
+  if (p.preemptibleOk !== null && p.preemptibleOk !== undefined) add('preemptibleOk', p.preemptibleOk, /\b(preempt\w*|standby|spot)\b/i);
+  if (p.quietHours) add('quietHours', p.quietHours, /quiet hours?/i);
+  if (p.maxWalltimeHours) add('maxWalltimeHours', p.maxWalltimeHours, /wall ?time|runtime/i);
+  p.evidence = ev;
+  return res;
+}
+
+/**
+ * Validates a constraint result against the LabContextExtractor schema and the source text: coerces types, recomputes
+ * evidence offsets from the quotes, drops invalid items and lists every problem in `validation.errors`.
+ */
+function validateConstraintObject(r, text, refMs) {
+  var errors = [];
+  var ref0 = refMs || Date.now();
+  var keep = function (list, name, check) {
+    var outList = [];
+    (Array.isArray(list) ? list : []).forEach(function (it, i) {
+      if (!it || typeof it !== 'object') {
+        errors.push(name + '[' + i + ']: not an object');
+        return;
+      }
+      var msg = check(it);
+      if (!msg) {
+        var sp = span(text, it.evidence);
+        if (sp.start < 0) msg = 'evidence quote not found in the lab text';
+        else it.evidence = sp;
+      }
+      if (msg) errors.push(name + '[' + i + ']: ' + msg + ' (dropped)');
+      else outList.push(it);
+    });
+    return outList;
+  };
+  var res = {
+    component: EXTRACTOR.component,
+    version: EXTRACTOR.version,
+    source: str(r.source) || 'rules',
+    model: r.model || null,
+    budgets: keep(r.budgets, 'budgets', function (b) {
+      b.kind = str(b.kind).toUpperCase();
+      b.amount = num(b.amount);
+      b.period = PERIODS.indexOf(str(b.period).toUpperCase()) >= 0 ? str(b.period).toUpperCase() : 'TOTAL';
+      if (BUDGET_KINDS.indexOf(b.kind) < 0) return 'kind must be one of ' + BUDGET_KINDS.join(', ');
+      if (!(b.amount > 0)) return 'amount must be a positive number';
+      return null;
+    }),
+    deadlines: keep(r.deadlines, 'deadlines', function (d) {
+      var t = Date.parse(str(d.date));
+      if (isNaN(t)) return 'date must be ISO (YYYY-MM-DD)';
+      if (!str(d.label)) return 'label is required';
+      d.date = new Date(t).toISOString();
+      d.daysAway = round((t - ref0) / DAY_MS, 1);
+      return null;
+    }),
+    dataRestrictions: keep(r.dataRestrictions, 'dataRestrictions', function (d) {
+      d.kind = str(d.kind).toUpperCase();
+      return RESTRICTION_KINDS.indexOf(d.kind) < 0 ? 'kind must be one of ' + RESTRICTION_KINDS.join(', ') : null;
+    }),
+    memberCaps: keep(r.memberCaps, 'memberCaps', function (m) {
+      m.pct = num(m.pct);
+      return !str(m.who) ? 'who is required' : !(m.pct > 0 && m.pct <= 100) ? 'pct must be 0-100' : null;
+    }),
+    approvals: keep(r.approvals, 'approvals', function (a) {
+      a.threshold = num(a.threshold);
+      a.unit = str(a.unit).toUpperCase();
+      return !(a.threshold > 0) ? 'threshold must be positive' : APPROVAL_UNITS.indexOf(a.unit) < 0 ? 'unit must be one of ' + APPROVAL_UNITS.join(', ') : null;
+    }),
+    preferences: {},
+    summary: str(r.summary),
+    warnings: Array.isArray(r.warnings) ? r.warnings : [],
+    provenance: {
+      component: EXTRACTOR.component,
+      version: EXTRACTOR.version,
+      method: r.model ? 'Schema-constrained LLM (' + r.model + ') + validation, evidence spans' : 'Rules parser + validation, evidence spans',
+      asOf: new Date().toISOString(),
+    },
+  };
+  var p = r.preferences && typeof r.preferences === 'object' ? r.preferences : {};
+  var strings = function (v, field) {
+    if (v === null || v === undefined) return [];
+    if (!Array.isArray(v)) {
+      errors.push('preferences.' + field + ': must be a list (ignored)');
+      return [];
+    }
+    return v.map(function (x) {
+      return str(x);
+    }).filter(Boolean);
+  };
+  var clusterIds = CLUSTER_WORDS.map(function (c) {
+    return c.id;
+  });
+  res.preferences.clusters = strings(p.clusters, 'clusters').filter(function (c) {
+    var ok = clusterIds.indexOf(c) >= 0;
+    if (!ok) errors.push('preferences.clusters: unknown cluster ' + c + ' (dropped)');
+    return ok;
+  });
+  res.preferences.gpuTypes = strings(p.gpuTypes, 'gpuTypes');
+  res.preferences.avoid = strings(p.avoid, 'avoid');
+  res.preferences.preemptibleOk = p.preemptibleOk === true || p.preemptibleOk === false ? p.preemptibleOk : null;
+  res.preferences.maxWalltimeHours = num(p.maxWalltimeHours);
+  res.preferences.quietHours = str(p.quietHours) || null;
+  res.preferences.notes = strings(p.notes, 'notes').slice(0, 10);
+  res.preferences.evidence = (Array.isArray(p.evidence) ? p.evidence : [])
+    .map(function (e) {
+      var sp = span(text, e);
+      return sp.start < 0 ? null : { field: str(e.field), value: e.value, quote: sp.quote, start: sp.start, end: sp.end };
+    })
+    .filter(Boolean);
+  res.validation = { valid: errors.length === 0, errors: errors.slice(0, 30), dropped: errors.filter(function (e) {
+    return /\(dropped\)$/.test(e);
+  }).length };
+  if (!res.summary) res.summary = summarize(res);
+  return res;
+}
+
+/** Rules-based extraction of the lab text, with evidence spans, validated (status UNCONFIRMED). */
+function rulesExtraction(t) {
+  var raw = preferenceEvidence(parseConstraintsText(t, Date.now()), t);
+  var res = validateConstraintObject(raw, t);
+  res.warnings = raw.warnings;
+  return res;
+}
+
 function parseConstraintsRules(labId, text) {
   var t = str(text);
   var lab = null;
   if (str(labId)) lab = requireLab(labId);
   if (!t && lab) t = str(lab.contextDump);
-  var res = parseConstraintsText(t, Date.now());
+  var res = rulesExtraction(t);
   res.labId = lab ? lab.id : null;
   res.inputText = t;
   res.textHash = textHash(t);
+  res.status = 'UNCONFIRMED';
   return JSON.stringify(res);
 }
 
-/** Best constraints known for the lab: the cached LLM parse of the current context text, else the rules parse. */
+function validateConstraints(resultJson, text) {
+  var r = JSON.parse(str(resultJson) || '{}');
+  return JSON.stringify(validateConstraintObject(r, str(text)));
+}
+
+/** Cache row of a lab (or null). */
+function constraintRow(labId) {
+  var c = Advisor.ConstraintSet.fetch({
+    filter: Filter.eq('id', labId),
+    include: 'id, textHash, result, source, confirmedHash, confirmedResult, confirmedAt',
+    limit: 1,
+  }).objs;
+  return c && c.length ? c[0] : null;
+}
+
+/**
+ * Best constraints known for the lab text, with status: the lab-confirmed set when it matches the current text, else
+ * the cached LLM extraction, else the rules extraction (both UNCONFIRMED).
+ */
 function constraintsFor(lab) {
   var t = str(lab.contextDump);
   var h = textHash(t);
   try {
-    var c = Advisor.ConstraintSet.fetch({ filter: Filter.eq('id', lab.id), include: 'id, textHash, result', limit: 1 }).objs;
-    if (c && c.length && c[0].textHash === h && c[0].result) return JSON.parse(c[0].result);
+    var c = constraintRow(lab.id);
+    if (c && c.confirmedHash === h && c.confirmedResult) {
+      var conf = JSON.parse(c.confirmedResult);
+      conf.status = 'CONFIRMED';
+      conf.confirmedAt = iso(c.confirmedAt);
+      return conf;
+    }
+    if (c && c.textHash === h && c.result) {
+      var cached = JSON.parse(c.result);
+      cached.status = 'UNCONFIRMED';
+      return cached;
+    }
   } catch (e) {
     log.warn('constraint cache read failed: {}', e);
   }
-  return parseConstraintsText(t, Date.now());
+  var r = rulesExtraction(t);
+  r.status = 'UNCONFIRMED';
+  return r;
 }
 
-/** Writes the constraint cache row (called by extractConstraints in Python). */
+/** Writes the LLM extraction cache (called by extractConstraints in Python). */
 function saveConstraints(labId, hash, resultJson, source) {
   Advisor.ConstraintSet.make({ id: labId, textHash: hash, result: resultJson, source: source, parsedAt: DateTime.now() }).merge();
   return true;
+}
+
+/** Confirmed set of a lab when it matches the current context text, else null (used by extractConstraints). */
+function confirmedConstraints(labId) {
+  var lab = requireLab(labId);
+  var c = constraintRow(lab.id);
+  if (!c || !c.confirmedResult || c.confirmedHash !== textHash(str(lab.contextDump))) return null;
+  var r = JSON.parse(c.confirmedResult);
+  r.status = 'CONFIRMED';
+  r.confirmedAt = iso(c.confirmedAt);
+  r.textHash = c.confirmedHash;
+  r.labId = lab.id;
+  return r;
+}
+
+function confirmConstraints(labId, resultJson) {
+  var lab = requireLab(labId);
+  var t = str(lab.contextDump);
+  var h = textHash(t);
+  var input = str(resultJson) ? JSON.parse(resultJson) : constraintsFor(lab);
+  if (input.textHash && input.textHash !== h) throw new Error('The lab context changed since this extraction; extract again before confirming.');
+  var res = validateConstraintObject(input, t);
+  if (res.validation.dropped > 0) throw new Error('Cannot confirm: ' + res.validation.errors.join('; '));
+  res.status = 'CONFIRMED';
+  res.textHash = h;
+  res.labId = lab.id;
+  var now = DateTime.now();
+  Advisor.ConstraintSet.make({ id: lab.id, confirmedHash: h, confirmedResult: JSON.stringify(res), confirmedAt: now }).merge();
+  res.confirmedAt = iso(now);
+  return res;
 }
 
 /**
@@ -692,16 +952,186 @@ function contextSnapshot(labId) {
       return str(a.severity) + ' ' + str(a.alertType) + ' on ' + ref(a.job);
     }).join(', ') + ')' : ''));
     var c = constraintsFor(lab);
+    var tag = c.status === 'CONFIRMED' ? ' (confirmed by lab)' : ' (UNCONFIRMED extraction)';
     var rules = (c.dataRestrictions || []).map(function (d) {
       return d.kind;
     });
-    if (rules.length) parts.push('data restrictions: ' + rules.join(', '));
-    if ((c.preferences && c.preferences.avoid || []).length) parts.push('avoid: ' + c.preferences.avoid.join(', '));
+    if (rules.length) parts.push('data restrictions' + tag + ': ' + rules.join(', '));
+    if ((c.preferences && c.preferences.avoid || []).length) parts.push('avoid' + tag + ': ' + c.preferences.avoid.join(', '));
     return parts.join(' | ');
   } catch (e) {
     log.warn('contextSnapshot failed: {}', e);
     return '';
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// PolicyRAGAdvisor retrieval: a small versioned set of Purdue RCAC / NSF ACCESS policy documents (facts and URLs from
+// the domain research, knowledge/30-domain-compute-allocation.md, fetched 2026-11-19) plus the Policy rows, the lab
+// context dump and projects. Lexical (BM25-style) retrieval; every hit becomes a citation the answer must quote.
+// ---------------------------------------------------------------------------------------------------------------
+
+var DOC_SET_VERSION = 'purdue-policy-docs 2026-11-19';
+var POLICY_DOCS = [
+  { id: 'D-01', title: 'Gautschi AI QOS changes (effective 2026-11-02)', version: '2026-11-02', cluster: 'gautschi', url: 'https://www.rcac.purdue.edu/news/7941',
+    text: 'On Gautschi ai the normal QOS walltime limit dropped from 14 days to 4 days on 2026-11-02. An account may run at most max(2, 2 x purchased GPUs) H100s concurrently in normal QOS. Burst QOS: highest priority, charged 2 GPU-hours per GPU-hour, at most 8 GPUs, one running burst job per account, 8 hour walltime. Longer runs must checkpoint and chain jobs or use preemptible.' },
+  { id: 'D-02', title: 'Gautschi queues and QOS', version: '2026-11-19', cluster: 'gautschi', url: 'https://docs.rcac.purdue.edu/userguides/gautschi/run_jobs/queues/',
+    text: 'Gautschi ai partition QOS: normal (owned share, high priority, 4 days), preemptible (charged 0.25x, up to 30 days, jobs can be preempted for normal jobs with a 10-minute grace signal; use --signal=B:USR1@600 --requeue and checkpoint at least every 30 minutes), burst (2x charge, 8 hours). smallgpu L40S: at most 2 GPUs in use, 8 submitted, 24 hours. highmem: justification above 48 cores, 2 running, 8 submitted. cpu normal: 14 days. GPU-hour balance: estimated GPU-hours times the QOS multiplier must fit the remaining bank.' },
+  { id: 'D-03', title: 'Gilbreth queues and modernization', version: '2025-10-01', cluster: 'gilbreth', url: 'https://www.rcac.purdue.edu/index.php/news/7275',
+    text: 'Since the 2025 Gilbreth modernization every job must name an account (-A), a partition (-p) and request memory explicitly (--mem); jobs without a partition are rejected. Owned partitions (for example a100-80gb, a100-40gb, a30) run in normal QOS at high priority; standby scavenges idle GPUs with no start guarantee and a 4 hour limit; the training partition allows up to 24 hours for runs using more than 2 GPUs.' },
+  { id: 'D-04', title: 'Gilbreth GPU jobs and GPU utilization monitoring', version: '2026-11-19', cluster: 'gilbreth', url: 'https://docs.rcac.purdue.edu/userguides/gilbreth/run_jobs/gpu_usage_monitoring/',
+    text: 'RCAC logs and stores the power, memory and utilization of every GPU every 10 seconds and uses this data to identify users who request large amounts of GPU hours but do not actually use them. The get_gpu_util tool reports per-job utilization with a few hours delay. Request GPUs with --gres=gpu:N and memory proportional to GPUs.' },
+  { id: 'D-05', title: 'Anvil jobs, partitions and limits', version: '2026-11-19', cluster: 'anvil', url: 'https://docs.rcac.purdue.edu/userguides/anvil/jobs/',
+    text: 'Anvil partitions: wholenode and shared 96 hours, wide 12 hours, highmem gpu and ai 48 hours, debug 2 hours, gpu-debug 30 minutes. A user may use at most 12 GPUs and an allocation at most 32 GPUs at once. wholenode and wide charge 128 cores per node; highmem is charged 4x. GPU jobs are charged to the <project>-gpu account; long runs must checkpoint and chain jobs.' },
+  { id: 'D-06', title: 'Anvil policies: scratch purge and allocation expiry', version: '2026-11-19', cluster: 'anvil', url: 'https://docs.rcac.purdue.edu/userguides/anvil/policies/',
+    text: 'Anvil scratch files not accessed for 30 days are deleted instantly and automatically with no warning emails. Touching files to avoid the purge violates acceptable use. Project storage is purged 90 days after the allocation expires. Copy results to Data Depot or project space.' },
+  { id: 'D-07', title: 'NSF ACCESS project tiers and credits', version: '2026-11-19', cluster: 'anvil', url: 'https://allocations.access-ci.org/project-types',
+    text: 'ACCESS projects: Explore up to 400,000 credits, Discover up to 1,500,000, Accelerate up to 3,000,000, Maximize awarded in resource units. Credits are exchanged for specific resources; queues are only usable for exchanged resources. There are no automatic refills: request a supplement for more credits or an extension for more time. Allocations expire at their end date.' },
+  { id: 'D-08', title: 'ACCESS exchange rates for Anvil', version: '2026-11-19', cluster: 'anvil', url: 'https://allocations.access-ci.org/exchange_calculator',
+    text: 'Exchange rates: Anvil CPU 1.0 credit per SU (core-hour); Anvil GPU (A100) 67.308 credits per GPU-hour; Anvil AI (H100) 133.342 credits per GPU-hour. An Explore project of 400k credits is about 5,940 A100 GPU-hours or about 3,000 H100 GPU-hours.' },
+  { id: 'D-09', title: 'Scratch purge and quotas on RCAC community clusters', version: '2026-11-19', cluster: 'gautschi', url: 'https://docs.rcac.purdue.edu/userguides/gautschi/storage/scratch_space/',
+    text: 'On Gautschi, Gilbreth and Negishi scratch files that have not been accessed or modified in 60 days are purged. Quotas: home 25 GB (cannot be increased), scratch 100 TB and 2 million files. Keep shared data on Data Depot and archive to Fortress.' },
+  { id: 'D-10', title: 'Bell decommissioned 2026-10-31', version: '2026-10-31', cluster: 'bell', url: 'https://rcac.purdue.edu/news/7776',
+    text: 'The Bell community cluster was retired on 2026-10-31. Jobs can no longer be submitted to Bell; migrate CPU work to Gautschi cpu (48-core units) or Negishi.' },
+  { id: 'D-11', title: 'Negishi queues', version: '2026-11-19', cluster: 'negishi', url: 'https://docs.rcac.purdue.edu/userguides/negishi/run_jobs/queues/',
+    text: 'Negishi owned CPU partitions run in normal QOS for up to 14 days; highmem requires more than 64 cores with at most 2 running and 8 submitted; the gpu partition (AMD MI210, ROCm) allows at most 2 GPUs and 24 hours.' },
+  { id: 'D-12', title: 'Community cluster model and priority', version: '2026-11-19', cluster: null, url: 'https://docs.rcac.purdue.edu/userguides/gautschi/overview/',
+    text: 'Labs buy node shares or GPU-hour banks on RCAC community clusters. Normal QOS on owned resources has high priority and should start quickly; standby and preemptible scavenge idle cycles with no start guarantee; burst is highest priority at 2x charge. Every job must be submitted through Slurm; no work on login nodes. Be as accurate as possible about requested resources.' },
+  { id: 'D-13', title: 'Idle GPU policies at peer universities', version: '2026-11-19', cluster: null, url: 'https://docs.rc.ufl.edu/scheduler/idle_gpu_policy/',
+    text: 'Peer centers (UF, Yale, Princeton, Northeastern) cancel or warn about jobs whose GPUs stay idle: typical rules flag GPU utilization near 0 percent for 30 to 60 minutes and cancel after a grace period, after notifying the user. Checkpoint before cancelling long runs.' },
+  { id: 'D-14', title: 'Memory sizing for model training (Transformer Math 101)', version: '2023-04-18', cluster: null, url: 'https://blog.eleuther.ai/transformer-math/',
+    text: 'Mixed-precision Adam training needs about 16 bytes per parameter (weights, gradients, optimizer states) plus activations; inference needs about 2 bytes per parameter in fp16/bf16. LoRA fine-tuning needs far less optimizer memory. Pick the GPU count so per-GPU memory fits with headroom.' },
+];
+
+var STOP = { the: 1, a: 1, an: 1, of: 1, to: 1, and: 1, or: 1, in: 1, on: 1, for: 1, is: 1, are: 1, be: 1, can: 1, we: 1, our: 1, it: 1, with: 1, by: 1, at: 1, what: 1, which: 1, how: 1, do: 1, does: 1, i: 1, my: 1, us: 1, this: 1, that: 1, there: 1, any: 1 };
+
+function tokens(text) {
+  return str(text)
+    .toLowerCase()
+    .replace(/[^a-z0-9.+-]+/g, ' ')
+    .split(' ')
+    .map(function (t) {
+      return t.replace(/^[.+-]+|[.+-]+$/g, '');
+    })
+    .filter(function (t) {
+      return t.length > 1 && !STOP[t];
+    });
+}
+
+/** Ranks passages [{text, ...}] for a query with a BM25-style score (k1 1.2, b 0.75). */
+function rank(query, passages) {
+  var q = tokens(query);
+  if (!q.length) return [];
+  var docs = passages.map(function (p) {
+    return tokens(p.title + ' ' + p.text);
+  });
+  var avg =
+    docs.reduce(function (s, d) {
+      return s + d.length;
+    }, 0) / Math.max(1, docs.length);
+  var df = {};
+  docs.forEach(function (d) {
+    var seen = {};
+    d.forEach(function (t) {
+      if (!seen[t]) {
+        seen[t] = true;
+        df[t] = (df[t] || 0) + 1;
+      }
+    });
+  });
+  var n = docs.length;
+  return passages
+    .map(function (p, i) {
+      var tf = {};
+      docs[i].forEach(function (t) {
+        tf[t] = (tf[t] || 0) + 1;
+      });
+      var score = 0;
+      q.forEach(function (t) {
+        if (!tf[t]) return;
+        var idf = Math.log(1 + (n - df[t] + 0.5) / (df[t] + 0.5));
+        score += (idf * tf[t] * 2.2) / (tf[t] + 1.2 * (0.25 + (0.75 * docs[i].length) / avg));
+      });
+      return { p: p, score: score * (p.boost || 1) };
+    })
+    .filter(function (x) {
+      return x.score > 0;
+    })
+    .sort(function (a, b) {
+      return b.score - a.score;
+    });
+}
+
+/** Passages of the corpus for one lab: policy docs, active Policy rows in scope, lab context sentences, projects. */
+function corpus(labId, clusterId) {
+  var cl = str(clusterId).toLowerCase();
+  var out0 = POLICY_DOCS.filter(function (d) {
+    return !cl || !d.cluster || d.cluster === cl;
+  }).map(function (d) {
+    return { cite: cite('DOC', d.id, d.title, d.url, { version: d.version }), title: d.title, text: d.text };
+  });
+  arr(
+    Policy.fetch({
+      filter: Filter.eq('active', true),
+      include: 'id, scope, kind, severity, title, description, limitValue, limitText, sourceUrl, cluster.id, partition.id, lab.id',
+      limit: 300,
+    }).objs
+  ).forEach(function (p) {
+    var pl = ref(p.lab);
+    if (pl && pl !== str(labId)) return;
+    var pc = ref(p.cluster) || (p.partition ? String(ref(p.partition)).split('-')[0] : null);
+    if (cl && pc && pc !== cl) return;
+    out0.push({
+      cite: cite('POLICY', p.id, p.title, str(p.sourceUrl) || null, { severity: str(p.severity), scope: str(p.scope), version: 'active' }),
+      title: str(p.title),
+      text: [str(p.scope), str(p.kind).replace(/_/g, ' '), str(p.severity), str(p.description), p.limitValue !== null && p.limitValue !== undefined ? 'limit ' + p.limitValue : '', str(p.limitText), pc || ''].join(' '),
+      boost: pl ? 1.3 : 1.1,
+    });
+  });
+  if (str(labId)) {
+    var lab = requireLab(labId);
+    var dump = str(lab.contextDump);
+    sentencesOf(dump).forEach(function (sen, i) {
+      out0.push({ cite: cite('LAB', lab.id + '#' + (i + 1), sen, '/context', { quote: sen.substring(0, 200) }), title: 'Lab context', text: sen, boost: 1.2 });
+    });
+    projectsOf(lab.id).forEach(function (pj) {
+      out0.push({
+        cite: cite('PROJECT', pj.projectId, pj.name + (pj.deadlineLabel ? ' (' + pj.deadlineLabel + ')' : ''), '/context', { deadline: pj.deadline }),
+        title: pj.name,
+        text: [pj.name, pj.deadlineLabel, pj.workloadType, pj.description, 'deadline ' + str(pj.deadline).substring(0, 10)].join(' '),
+      });
+    });
+  }
+  return out0;
+}
+
+function retrieveSources(query, labId, clusterId, limit) {
+  return traced(
+    'retrieveSources',
+    labId,
+    { query: query, labId: labId, clusterId: clusterId, limit: limit },
+    function (d) {
+      return d.hits.length + ' sources: ' + d.hits.map(function (h) {
+        return h.id;
+      }).join(', ');
+    },
+    function () {
+      if (!str(query)) throw new Error('query is required: the words to look up, e.g. "preemptible walltime gautschi".');
+      var max = Math.max(1, Math.min(num(limit) || 6, 10));
+      var hits = rank(query, corpus(labId, clusterId)).slice(0, max);
+      var cites = hits.map(function (h) {
+        return h.p.cite;
+      });
+      return {
+        docSet: DOC_SET_VERSION,
+        hits: hits.map(function (h) {
+          return { id: h.p.cite.id, kind: h.p.cite.kind, title: h.p.cite.title, version: h.p.cite.version || null, url: h.p.cite.url, text: h.p.text.substring(0, 500), score: round(h.score, 2) };
+        }),
+        citations: cites,
+        note: 'Cite every fact you use as [<id>] with the ids above. Do not cite anything not listed here or in other tool results.',
+      };
+    }
+  );
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -737,6 +1167,11 @@ function labContext(labId) {
         projects: projectsOf(lab.id),
         constraints: c,
         contextDump: str(lab.contextDump).substring(0, 1500),
+        citations: [cite('LAB', lab.id, 'Lab context: ' + str(lab.name), '/context', { status: c.status || 'UNCONFIRMED' })].concat(
+          projectsOf(lab.id).map(function (pj) {
+            return cite('PROJECT', pj.projectId, pj.name + (pj.deadlineLabel ? ' (' + pj.deadlineLabel + ')' : ''), '/context', { deadline: pj.deadline });
+          })
+        ),
       };
     }
   );
@@ -752,7 +1187,9 @@ function labSummary(labId) {
     },
     function () {
       requireLab(labId);
-      return plain(Insights.labSummary(str(labId)));
+      var d = plain(Insights.labSummary(str(labId))) || {};
+      d.citations = [cite('DATA', 'labSummary:' + str(labId), 'Lab dashboard (Insights.labSummary)', '/')];
+      return d;
     }
   );
 }
@@ -801,7 +1238,13 @@ function listPolicies(labId, clusterId, kind) {
             sourceUrl: str(p.sourceUrl) || null,
           };
         });
-      return { count: rows.length, policies: rows.slice(0, 40) };
+      return {
+        count: rows.length,
+        policies: rows.slice(0, 40),
+        citations: rows.slice(0, 15).map(function (p) {
+          return cite('POLICY', p.policyId, p.title, p.sourceUrl, { severity: p.severity, scope: p.scope, version: 'active' });
+        }),
+      };
     }
   );
 }
@@ -816,7 +1259,9 @@ function predictDuration(workloadType, gpuTypeId, gpus, modelParamsB) {
     },
     function () {
       var wt = canonicalOf(workloadType || 'TRAINING', WORKLOAD_TYPES, 'workloadType');
-      return plain(Insights.predictDuration(wt, str(gpuTypeId) || 'A100-40GB', num(gpus) || 1, num(modelParamsB) || 0));
+      var d = plain(Insights.predictDuration(wt, str(gpuTypeId) || 'A100-40GB', num(gpus) || 1, num(modelParamsB) || 0)) || {};
+      d.citations = [cite('DATA', 'predictDuration', 'Duration estimate from completed jobs (historical only)', '/history', { sampleSize: d.sampleSize })];
+      return d;
     }
   );
 }
@@ -886,7 +1331,7 @@ function evaluateRun(labId, name, description, workloadType, project, gpuTypeId,
       var checks = arr(
         RuleCheck.fetch({
           filter: Filter.eq('runRequest.id', rrId),
-          include: 'id, outcome, message, title, ruleKind, severity, scope, policy.id',
+          include: 'id, outcome, message, title, ruleKind, severity, scope, policy.id, policy.sourceUrl',
           limit: 200,
         }).objs
       );
@@ -907,7 +1352,9 @@ function evaluateRun(labId, name, description, workloadType, project, gpuTypeId,
         .map(function (c) {
           return {
             outcome: str(c.outcome),
-            rule: (ref(c.policy) ? ref(c.policy) + ' ' : '') + str(c.title),
+            ruleId: ref(c.policy) || 'builtin:' + str(c.ruleKind),
+            rule: str(c.title),
+            sourceUrl: c.policy ? str(c.policy.sourceUrl) || null : null,
             kind: str(c.ruleKind),
             severity: str(c.severity),
             message: str(c.message).substring(0, 240),
@@ -959,7 +1406,20 @@ function evaluateRun(labId, name, description, workloadType, project, gpuTypeId,
         plans: plans,
         planError: planError,
         allocations: allocationsOf(lab.id),
-        note: 'Draft only; nothing was submitted. To submit, call proposeRunSubmission(runRequestId, planId) and ask the user to confirm.',
+        note: 'Draft only; nothing was submitted. The user launches from the Launch planner (link shown under your answer); cite rules by ruleId.',
+        citations: items.map(function (c) {
+          return cite('POLICY', c.ruleId, c.rule, c.sourceUrl, { severity: c.severity, outcome: c.outcome });
+        }),
+        _links: plans
+          .map(function (p) {
+            return {
+              kind: 'PLAN',
+              label: 'Open in Launch planner',
+              title: p.label + ' plan: ' + p.gpus + 'x ' + (p.gpuType || 'GPU') + ' on ' + p.partition + ', ~$' + p.estCostUsd + (p.meetsDeadline ? ', meets deadline' : ', misses deadline'),
+              href: '/plan?runRequest=' + encodeURIComponent(rrId) + '&plan=' + encodeURIComponent(p.planId),
+            };
+          })
+          .concat(plans.length ? [] : [{ kind: 'PLAN', label: 'Open in Launch planner', title: 'Review this request', href: '/plan?runRequest=' + encodeURIComponent(rrId) }]),
       };
     }
   );
@@ -1023,6 +1483,23 @@ function jobRow(j, metric, alerts) {
   };
 }
 
+/** "Open run" deep link for a job; the suggested action is applied (and confirmed) on the run page, never here. */
+function runLink(r) {
+  var actions = r.alerts
+    .map(function (a) {
+      return a.recommendedAction;
+    })
+    .filter(function (v, i, all) {
+      return v && all.indexOf(v) === i;
+    });
+  return {
+    kind: 'RUN',
+    label: 'Open run',
+    title: r.jobId + ' ' + r.name + (actions.length ? ' — suggested: ' + actions.join(', ').replace(/_/g, ' ').toLowerCase() : ''),
+    href: '/runs/' + encodeURIComponent(r.jobId),
+  };
+}
+
 var JOB_INCLUDE = 'id, jobName, user, lab.id, project.id, cluster.id, partition.id, state, allocGpus, gpuType.id, elapsedHours, timelimitHours, costUsd, gpuUtilAvg, isLive';
 
 function liveJobs(labId, state) {
@@ -1055,6 +1532,24 @@ function liveJobs(labId, state) {
           return r.alerts.length > 0;
         }).length,
         jobs: rows,
+        citations: rows
+          .filter(function (r) {
+            return r.alerts.length > 0;
+          })
+          .slice(0, 8)
+          .map(function (r) {
+            return cite('JOB', r.jobId, r.name + ' (' + r.alerts.map(function (a) {
+              return a.alertType;
+            }).join(', ') + ')', '/runs/' + encodeURIComponent(r.jobId));
+          }),
+        _links: rows
+          .filter(function (r) {
+            return r.alerts.length > 0;
+          })
+          .slice(0, 4)
+          .map(function (r) {
+            return runLink(r);
+          }),
       };
     }
   );
@@ -1116,6 +1611,8 @@ function jobHealth(jobId) {
         job: row,
         window: { samples: metrics.length, gpuUtilPct: stat('gpuUtilPct'), gpuMemPct: stat('gpuMemPct'), cpuUtilPct: stat('cpuUtilPct'), memPct: stat('memPct'), checkpointAgeMin: stat('checkpointAgeMin'), trainingLoss: stat('trainingLoss') },
         recentActions: actions,
+        citations: [cite('JOB', row.jobId, row.name + ' live metrics', '/runs/' + encodeURIComponent(row.jobId))],
+        _links: [runLink(row)],
         suggestedActions: row.alerts
           .map(function (a) {
             return a.recommendedAction;
@@ -1137,167 +1634,11 @@ function universityOverview() {
       return 'University-wide utilization, cost and fairness';
     },
     function () {
-      return plain(Insights.universityOverview());
+      var d = plain(Insights.universityOverview()) || {};
+      d.citations = [cite('DATA', 'universityOverview', 'University overview (Insights.universityOverview)', '/admin')];
+      return d;
     }
   );
-}
-
-// ---------------------------------------------------------------------------------------------------------------
-// Propose-only write tools. The agent never changes a run or job: it records an Advisor.Proposal and the user applies
-// it with Confirm on the Assistant page (confirmProposal), which calls RunRequest.submit / Job.applyAction.
-// ---------------------------------------------------------------------------------------------------------------
-
-function newProposal(fields) {
-  fields.state = 'PENDING';
-  return Advisor.Proposal.make(fields).create();
-}
-
-function proposedText(p, summary) {
-  return out({
-    proposalId: p.id,
-    state: 'PENDING',
-    summary: summary,
-    note: 'PROPOSED, NOT APPLIED. The user must click Confirm on the proposal card in the chat. Tell the user it awaits their confirmation; never say it was done.',
-  });
-}
-
-function proposeRunSubmission(runRequestId, planId, reason) {
-  return traced(
-    'proposeRunSubmission',
-    null,
-    { runRequestId: runRequestId, planId: planId, reason: reason },
-    function (d) {
-      return d.error ? d.error : 'Proposed: ' + d.summary;
-    },
-    function () {
-      var rrs = RunRequest.fetch({ filter: Filter.eq('id', str(runRequestId)), include: 'id, name, status, lab.id', limit: 1 }).objs;
-      if (!rrs || rrs.length === 0) throw new Error('No run request "' + runRequestId + '". Call evaluateRun first.');
-      var rr = rrs[0];
-      if (str(rr.status) === 'SUBMITTED') throw new Error('Run request ' + rr.id + ' is already submitted.');
-      var ps = RunPlan.fetch({
-        filter: Filter.eq('id', str(planId)),
-        include: 'id, runRequest.id, label, cluster.id, partition.id, gpuType.id, gpus, nodes, walltimeHours, estDurationHours, estWaitHours, estCostUsd, estCostUnits, meetsDeadline, sbatchScript',
-        limit: 1,
-      }).objs;
-      if (!ps || ps.length === 0 || ref(ps[0].runRequest) !== rr.id) throw new Error('Plan "' + planId + '" is not a plan of run request ' + rr.id + '.');
-      var p = ps[0];
-      var summary =
-        'Submit "' + str(rr.name).replace(/^\[Advisor\]\s*/, '') + '" with the ' + str(p.label) + ' plan: ' + num(p.gpus) + 'x ' + (ref(p.gpuType) || 'GPU') + ' on ' + ref(p.partition) +
-        ', ' + num(p.walltimeHours) + ' h walltime, ~$' + round(num(p.estCostUsd), 0) + (p.meetsDeadline === true ? ', meets deadline' : p.meetsDeadline === false ? ', MISSES deadline' : '');
-      var prop = newProposal({
-        name: summary,
-        kind: 'SUBMIT_RUN',
-        labId: ref(rr.lab),
-        runRequestId: rr.id,
-        planId: p.id,
-        actionType: 'SUBMIT',
-        reason: str(reason) || null,
-        details: JSON.stringify({
-          label: str(p.label),
-          cluster: ref(p.cluster),
-          partition: ref(p.partition),
-          gpuType: ref(p.gpuType),
-          gpus: num(p.gpus),
-          nodes: num(p.nodes),
-          walltimeHours: num(p.walltimeHours),
-          estWaitHours: round(num(p.estWaitHours), 1),
-          estDurationHours: round(num(p.estDurationHours), 1),
-          estCostUsd: round(num(p.estCostUsd), 0),
-          estCostUnits: round(num(p.estCostUnits), 1),
-          meetsDeadline: p.meetsDeadline,
-          sbatchScript: str(p.sbatchScript).substring(0, 3000),
-        }),
-      });
-      return { proposalId: prop.id, summary: summary, text: proposedText(prop, summary) };
-    },
-    function (d) {
-      return d.text;
-    }
-  );
-}
-
-var ACTION_LABEL = {
-  EXTEND_WALLTIME: 'Extend walltime of',
-  CANCEL: 'Cancel',
-  CHECKPOINT_NOW: 'Checkpoint now:',
-  REQUEUE_STANDBY: 'Requeue to standby:',
-  SCALE_DOWN: 'Scale down GPUs of',
-  NOTIFY_PI: 'Notify the PI about',
-  HOLD: 'Hold',
-};
-
-function proposeJobAction(jobId, actionType, reason) {
-  return traced(
-    'proposeJobAction',
-    null,
-    { jobId: jobId, actionType: actionType, reason: reason },
-    function (d) {
-      return d.error ? d.error : 'Proposed: ' + d.summary;
-    },
-    function () {
-      var at = canonicalOf(actionType, JOB_ACTIONS, 'actionType');
-      if (!at) throw new Error('actionType is required: ' + JOB_ACTIONS.join(', '));
-      var found = Job.fetch({ filter: Filter.eq('id', str(jobId)), include: 'id, jobName, state, lab.id, allocGpus, timelimitHours, elapsedHours', limit: 1 }).objs;
-      if (!found || found.length === 0) throw new Error('No job "' + jobId + '". Use liveJobs to list job ids.');
-      var j = found[0];
-      if (['RUNNING', 'PENDING'].indexOf(str(j.state)) < 0 && at !== 'NOTIFY_PI') throw new Error('Job ' + j.id + ' is ' + str(j.state) + '; only running or pending jobs can be changed.');
-      var summary = ACTION_LABEL[at] + ' job ' + j.id + ' (' + str(j.jobName) + ')';
-      var prop = newProposal({
-        name: summary,
-        kind: 'JOB_ACTION',
-        labId: ref(j.lab),
-        jobId: j.id,
-        actionType: at,
-        reason: str(reason) || null,
-        details: JSON.stringify({ state: str(j.state), gpus: num(j.allocGpus), timelimitHours: num(j.timelimitHours), elapsedHours: round(num(j.elapsedHours), 1) }),
-      });
-      return { proposalId: prop.id, summary: summary, text: proposedText(prop, summary) };
-    },
-    function (d) {
-      return d.text;
-    }
-  );
-}
-
-function pendingProposal(proposalId) {
-  var ps = Advisor.Proposal.fetch({
-    filter: Filter.eq('id', str(proposalId)),
-    include: 'id, name, kind, labId, jobId, runRequestId, planId, actionType, state',
-    limit: 1,
-  }).objs;
-  if (!ps || ps.length === 0) throw new Error('Unknown proposal ' + proposalId);
-  var p = ps[0];
-  if (str(p.state) !== 'PENDING') throw new Error('Proposal ' + p.id + ' is already ' + str(p.state));
-  return p;
-}
-
-function confirmProposal(proposalId) {
-  var p = pendingProposal(proposalId);
-  var result = { proposalId: p.id, kind: str(p.kind) };
-  try {
-    if (str(p.kind) === 'SUBMIT_RUN') {
-      var job = RunRequest.forId(p.runRequestId).get().submit(p.planId);
-      result.jobId = job ? String(job.id) : null;
-      result.message = 'Submitted: ' + p.name + (result.jobId ? ' -> job ' + result.jobId : '');
-    } else {
-      var logRow = Job.forId(p.jobId).get().applyAction(p.actionType, 'USER');
-      result.jobId = p.jobId;
-      result.message = 'Applied: ' + p.name + (logRow && logRow.outcome ? ' (' + logRow.outcome + ')' : '');
-    }
-    result.state = 'APPLIED';
-  } catch (e) {
-    result.state = 'FAILED';
-    result.message = 'Failed: ' + p.name + ': ' + String(e && e.message ? e.message : e);
-  }
-  Advisor.Proposal.make({ id: p.id, state: result.state, resultText: result.message, resultJobId: result.jobId || null, decidedAt: DateTime.now() }).merge();
-  log.info('Proposal {} {}', p.id, result.state);
-  return result;
-}
-
-function discardProposal(proposalId) {
-  var p = pendingProposal(proposalId);
-  Advisor.Proposal.make({ id: p.id, state: 'DISCARDED', resultText: 'Discarded by the user', decidedAt: DateTime.now() }).merge();
-  return { proposalId: p.id, state: 'DISCARDED', message: 'Discarded: ' + p.name };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1308,68 +1649,48 @@ function beginTurn() {
   return DateTime.now().minusSeconds(1).toString();
 }
 
-function turnTrace(since, labId) {
+function turnTrace(since) {
   var start = DateTime.fromString(str(since));
+  var citations = [];
+  var links = [];
+  var seenC = {};
+  var seenL = {};
   var calls = arr(
     Advisor.ToolCall.fetch({
       filter: Filter.ge('calledAt', start),
-      include: 'id, name, labId, args, summary, ok, millis, calledAt',
+      include: 'id, name, labId, args, summary, ok, millis, calledAt, evidence',
       order: 'ascending(calledAt)',
       limit: 50,
     }).objs
   ).map(function (c) {
+    if (c.evidence) {
+      try {
+        var ev = JSON.parse(c.evidence);
+        (ev.citations || []).forEach(function (x) {
+          if (!seenC[x.id]) {
+            seenC[x.id] = true;
+            citations.push(x);
+          }
+        });
+        (ev.links || []).forEach(function (x) {
+          if (!seenL[x.href]) {
+            seenL[x.href] = true;
+            links.push(x);
+          }
+        });
+      } catch (e) {
+        log.warn('bad evidence on tool call {}', c.id);
+      }
+    }
     return { tool: str(c.name), args: str(c.args), summary: str(c.summary), ok: c.ok !== false, millis: num(c.millis) };
   });
-  var props = arr(
-    Advisor.Proposal.fetch({
-      filter: Filter.ge('meta.created', start),
-      include: 'id, name, kind, labId, jobId, runRequestId, planId, actionType, reason, details, state',
-      order: 'ascending(meta.created)',
-      limit: 10,
-    }).objs
-  )
-    .filter(function (p) {
-      return !str(labId) || !p.labId || p.labId === str(labId);
-    })
-    .map(proposalJson);
-  return JSON.stringify({ toolCalls: calls, proposals: props });
+  return JSON.stringify({ toolCalls: calls, citations: citations.slice(0, 30), links: links.slice(0, 8), docSet: DOC_SET_VERSION });
 }
 
-function proposalJson(p) {
-  var details = null;
-  try {
-    details = p.details ? JSON.parse(p.details) : null;
-  } catch (e) {
-    details = null;
-  }
-  return {
-    id: p.id,
-    summary: str(p.name),
-    kind: str(p.kind),
-    labId: str(p.labId) || null,
-    jobId: str(p.jobId) || null,
-    runRequestId: str(p.runRequestId) || null,
-    planId: str(p.planId) || null,
-    actionType: str(p.actionType) || null,
-    reason: str(p.reason) || null,
-    details: details,
-    state: str(p.state),
-    resultText: str(p.resultText) || null,
-    resultJobId: str(p.resultJobId) || null,
-  };
-}
-
-function pendingProposals(labId) {
-  var f = Filter.eq('state', 'PENDING');
-  if (str(labId)) f = f.and().eq('labId', str(labId));
-  return arr(
-    Advisor.Proposal.fetch({
-      filter: f,
-      include: 'id, name, kind, labId, jobId, runRequestId, planId, actionType, reason, details, state, resultText, resultJobId',
-      order: 'descending(meta.created)',
-      limit: 20,
-    }).objs
-  ).map(proposalJson);
+/** One markdown bullet for a retrieval hit, ending in its citation id. */
+function hitLine(h) {
+  var body = h.kind === 'LAB' ? 'Your lab context: "' + h.text.substring(0, 180) + '"' : h.kind === 'POLICY' ? h.title : h.title + ': ' + h.text.substring(0, 170) + (h.text.length > 170 ? '…' : '');
+  return '- ' + body + ' [' + h.id + ']';
 }
 
 /** Starter questions personalised with the lab's nearest deadline and live-job alerts. */
@@ -1467,12 +1788,11 @@ function offlineAnswer(question, labId) {
         });
       }
       ev.checks.items.slice(0, 4).forEach(function (c) {
-        lines.push('- ' + c.outcome + ': ' + c.message);
+        lines.push('- ' + c.outcome + ': ' + c.message + ' [' + c.ruleId + ']');
       });
       if (remainingUsd) lines.push('\nRemaining allocation value: about $' + Math.round(remainingUsd) + '.');
       if (cheapestOk) {
-        JSON.parse(proposeRunSubmission(ev.runRequestId, cheapestOk.planId, 'Cheapest plan that meets the deadline (offline advisor)'));
-        lines.push('\nI prepared the **' + cheapestOk.label + '** plan for submission. It is not submitted until you click **Confirm** on the card below.');
+        lines.push('\nThe cheapest plan that meets the deadline is **' + cheapestOk.label + '**; open it in the Launch planner (link below) to review and submit.');
       }
     }
   }
@@ -1490,15 +1810,24 @@ function offlineAnswer(question, labId) {
   }
   if (lab && wantsRules) {
     var cl = (q.match(/\b(anvil|gilbreth|gautschi|negishi|bell)\b/) || [])[1];
-    var pol = JSON.parse(listPolicies(lab.id, cl || null, null));
-    lines.push('**Rules that apply' + (cl ? ' on ' + cl : '') + ':** ' + pol.count + ' active.');
-    (pol.policies || []).slice(0, 8).forEach(function (p) {
-      lines.push('- ' + p.severity + ' ' + p.policyId + ' ' + p.title + (p.limitValue !== null ? ' (limit ' + p.limitValue + ')' : ''));
+    var found = JSON.parse(retrieveSources(question, lab.id, cl || null, 6));
+    lines.push('**Relevant rules and sources' + (cl ? ' for ' + cl : '') + ':**');
+    (found.hits || []).forEach(function (h) {
+      lines.push(hitLine(h));
     });
+  }
+  if (lab && lines.length === 0 && !wantsBudget) {
+    var src = JSON.parse(retrieveSources(question, lab.id, null, 4));
+    if (src.hits && src.hits.length) {
+      lines.push('Relevant sources:');
+      src.hits.forEach(function (h) {
+        lines.push(hitLine(h));
+      });
+    }
   }
   if (lab && (wantsBudget || lines.length === 0)) {
     var ctx = JSON.parse(labContext(lab.id));
-    lines.push('**' + ctx.lab.name + '** allocations:');
+    lines.push('**' + ctx.lab.name + '** allocations [' + lab.id + ']:');
     ctx.allocations.forEach(function (a) {
       lines.push('- ' + a.cluster + ' ' + a.source + (a.grant ? ' (' + a.grant + ')' : '') + ': ' + a.remaining + ' of ' + a.total + ' ' + a.unit + ' left' + (a.daysLeft !== null ? ', ends in ' + Math.round(a.daysLeft) + ' days' : ''));
     });

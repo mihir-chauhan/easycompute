@@ -402,6 +402,9 @@ export interface TickSummary {
   liveJobs?: number;
 }
 
+/** Evidence span returned by LabContextExtractor: exact quote of the lab text and its offsets (older replies: a string). */
+export type EvidenceSpan = string | { quote: string; start?: number; end?: number };
+
 /** `Advisor.extractConstraints(labId, text)` (advisor agent; see pages/Assistant/types.ts `LabConstraints`). */
 export interface LabConstraints {
   source: string;
@@ -409,8 +412,8 @@ export interface LabConstraints {
   llmError?: string;
   summary?: string;
   warnings?: string[];
-  budgets: { kind: string; amount: number; period?: string; scope?: string | null; evidence?: string }[];
-  deadlines: { label: string; date: string; daysAway?: number | null; evidence?: string }[];
+  budgets: { kind: string; amount: number; period?: string; scope?: string | null; evidence?: EvidenceSpan }[];
+  deadlines: { label: string; date: string; daysAway?: number | null; evidence?: EvidenceSpan }[];
   preferences: {
     clusters?: string[];
     gpuTypes?: string[];
@@ -419,10 +422,11 @@ export interface LabConstraints {
     maxWalltimeHours?: number | null;
     quietHours?: string | null;
     notes?: string[];
+    evidence?: { quote: string; start?: number; end?: number; field: string; value?: unknown }[];
   };
-  dataRestrictions: { kind: string; description?: string; evidence?: string }[];
-  memberCaps?: { who: string; pct: number; evidence?: string }[];
-  approvals?: { threshold: number; unit: string; evidence?: string }[];
+  dataRestrictions: { kind: string; description?: string; evidence?: EvidenceSpan }[];
+  memberCaps?: { who: string; pct: number; evidence?: EvidenceSpan }[];
+  approvals?: { threshold: number; unit: string; evidence?: EvidenceSpan }[];
 }
 
 /** A constraint the advisor parsed out of the lab's context dump; editable before saving as a LAB Policy. */

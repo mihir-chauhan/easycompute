@@ -1,0 +1,99 @@
+/**
+ * Parsed, validated telemetry sample: the stable ingestion contract between the raw {@link SourceJobTelemetry} feed
+ * and {@link JobMetric}. Produced by {@link EasyComputeIngest#telemetryToCanonical}. When
+ * {@link CanonicalJobTelemetry#rejectReason} is empty the sample upserts into {@link JobMetric} (transform
+ * `CanonicalJobTelemetry-JobMetric`); otherwise it is written to {@link IngestRejection} (transform
+ * `CanonicalJobTelemetry-IngestRejection`) and never to {@link JobMetric}.
+ */
+type CanonicalJobTelemetry mixes Canonical<CanonicalJobTelemetry> {
+
+  /**
+   * Deterministic {@link JobMetric} id, `jm-<cluster>-<jobid>-<seq zero-padded to 2>`.
+   */
+  metricKey: string
+
+  /**
+   * {@link Job} id, `<cluster>-<jobid>`.
+   */
+  job: string
+
+  /**
+   * Sample time (UTC).
+   */
+  ts: datetime
+
+  /**
+   * GPU utilization 0-100.
+   */
+  gpuUtilPct: double
+
+  /**
+   * GPU memory used 0-100.
+   */
+  gpuMemPct: double
+
+  /**
+   * CPU utilization 0-100.
+   */
+  cpuUtilPct: double
+
+  /**
+   * Host memory used 0-100.
+   */
+  memPct: double
+
+  /**
+   * Disk read throughput in MB/s.
+   */
+  ioReadMBps: double
+
+  /**
+   * Disk write throughput in MB/s.
+   */
+  ioWriteMBps: double
+
+  /**
+   * GPU board power in watts.
+   */
+  powerW: double
+
+  /**
+   * Minutes since the last checkpoint.
+   */
+  checkpointAgeMin: double
+
+  /**
+   * Training loss; null when not reported.
+   */
+  trainingLoss: double
+
+  /**
+   * Feed name written to {@link IngestRejection#feed} ("JobTelemetryFeed").
+   */
+  feed: string
+
+  /**
+   * File name the sample came from.
+   */
+  sourceFile: string
+
+  /**
+   * Human-readable row key: the metric id, or a best-effort key when parts are missing.
+   */
+  rowKey: string
+
+  /**
+   * Deterministic {@link IngestRejection} id (feed + file + row hash) so re-processing a file does not duplicate.
+   */
+  rejectionId: string
+
+  /**
+   * Every validation failure, "; "-separated; null when the sample is valid.
+   */
+  rejectReason: string
+
+  /**
+   * The original object as JSON.
+   */
+  rawRow: string
+}

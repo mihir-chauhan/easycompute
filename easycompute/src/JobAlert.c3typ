@@ -54,4 +54,19 @@ entity type JobAlert {
    * When the alert was resolved.
    */
   resolvedAt: datetime
+
+  /**
+   * Guardrail rule that fired (for example "OOM_RISK.enter: gpuMemPct >= 95").
+   */
+  firedRule: string
+
+  /**
+   * Why the alert fired: metric values, enter / exit thresholds and the window evaluated.
+   */
+  evidence: json
+
+  /**
+   * Components behind the alert (GuardrailRuleEngine, GPUUnderuseDetector, ...).
+   */
+  provenance: json
 }

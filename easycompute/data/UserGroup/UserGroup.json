@@ -1,0 +1,17 @@
+[
+  {
+    "id": "EasyCompute.LabMember",
+    "name": "EasyCompute.LabMember",
+    "inactive": false
+  },
+  {
+    "id": "EasyCompute.LabPI",
+    "name": "EasyCompute.LabPI",
+    "inactive": false
+  },
+  {
+    "id": "EasyCompute.UniversityAdmin",
+    "name": "EasyCompute.UniversityAdmin",
+    "inactive": false
+  }
+]

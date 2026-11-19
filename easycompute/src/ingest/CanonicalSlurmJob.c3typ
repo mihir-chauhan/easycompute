@@ -1,0 +1,199 @@
+/**
+ * Parsed, validated Slurm accounting row: the stable ingestion contract between the raw
+ * {@link SourceSlurmSacct} feed and {@link Job}. Produced by {@link EasyComputeIngest#slurmToCanonical}. When
+ * {@link CanonicalSlurmJob#rejectReason} is empty the row upserts into {@link Job} (transform
+ * `CanonicalSlurmJob-Job`); otherwise it is written to {@link IngestRejection} (transform
+ * `CanonicalSlurmJob-IngestRejection`) and never to {@link Job}.
+ */
+type CanonicalSlurmJob mixes Canonical<CanonicalSlurmJob> {
+
+  /**
+   * Deterministic {@link Job} id, `<Cluster>-<JobID>`; null when either part is missing.
+   */
+  jobKey: string
+
+  /**
+   * Slurm JobID.
+   */
+  slurmJobId: string
+
+  /**
+   * {@link ComputeCluster} id.
+   */
+  cluster: string
+
+  /**
+   * {@link Partition} id resolved from cluster + Slurm partition + QOS (falling back to QOS "normal").
+   */
+  partition: string
+
+  /**
+   * {@link Lab} id resolved from the account (trailing "-gpu" / "-aws" stripped) via {@link Lab#slurmAccounts}.
+   */
+  lab: string
+
+  /**
+   * Slurm account charged.
+   */
+  account: string
+
+  /**
+   * Slurm QOS.
+   */
+  qos: string
+
+  /**
+   * Pseudonymized username.
+   */
+  user: string
+
+  /**
+   * Slurm job name.
+   */
+  jobName: string
+
+  /**
+   * First word of the Slurm state, a {@link Job.State} value.
+   */
+  state: string
+
+  /**
+   * Submit time (UTC).
+   */
+  submitTime: datetime
+
+  /**
+   * Start time (UTC); null for "Unknown".
+   */
+  startTime: datetime
+
+  /**
+   * End time (UTC); null for "Unknown".
+   */
+  endTime: datetime
+
+  /**
+   * Time limit in hours.
+   */
+  timelimitHours: double
+
+  /**
+   * Elapsed run time in hours.
+   */
+  elapsedHours: double
+
+  /**
+   * Allocated CPU cores.
+   */
+  allocCpus: int
+
+  /**
+   * Allocated nodes.
+   */
+  allocNodes: int
+
+  /**
+   * GPU count from `gres/gpu=N` in AllocTRES (0 when absent).
+   */
+  allocGpus: int
+
+  /**
+   * {@link GpuType} id from `gres/gpu:<type>` in AllocTRES, upper-cased.
+   */
+  gpuType: string
+
+  /**
+   * Requested memory in GB.
+   */
+  reqMemGb: double
+
+  /**
+   * Peak resident memory in GB.
+   */
+  maxRssGb: double
+
+  /**
+   * {@link Project} id (WCKey); null when empty.
+   */
+  project: string
+
+  /**
+   * {@link WorkloadType} value (AdminComment `workload`).
+   */
+  workloadType: string
+
+  /**
+   * Average GPU utilization 0-100 (AdminComment `gpu_util`).
+   */
+  gpuUtilAvg: double
+
+  /**
+   * CPU efficiency 0-1 (AdminComment `cpu_eff`).
+   */
+  cpuEfficiency: double
+
+  /**
+   * Memory efficiency (AdminComment `mem_eff`).
+   */
+  memEfficiency: double
+
+  /**
+   * Cost in the cluster allocation unit (AdminComment `cost_units`).
+   */
+  costUnits: double
+
+  /**
+   * Cost in USD (AdminComment `cost_usd`).
+   */
+  costUsd: double
+
+  /**
+   * {@link RunRequest} id (AdminComment `run_request`).
+   */
+  runRequest: string
+
+  /**
+   * Slurm exit code; null when empty.
+   */
+  exitCode: string
+
+  /**
+   * Allocated node list; null when empty.
+   */
+  nodeList: string
+
+  /**
+   * True when the state is RUNNING or PENDING.
+   */
+  isLive: boolean
+
+  /**
+   * Feed name written to {@link IngestRejection#feed} ("SlurmSacctFeed").
+   */
+  feed: string
+
+  /**
+   * File name the row came from.
+   */
+  sourceFile: string
+
+  /**
+   * Human-readable row key: the job id, or a best-effort key when JobID/Cluster is missing.
+   */
+  rowKey: string
+
+  /**
+   * Deterministic {@link IngestRejection} id (feed + file + row hash) so re-processing a file does not duplicate.
+   */
+  rejectionId: string
+
+  /**
+   * Every validation failure, "; "-separated; null when the row is valid.
+   */
+  rejectReason: string
+
+  /**
+   * The original row as JSON keyed by the CSV header.
+   */
+  rawRow: string
+}

@@ -44,7 +44,19 @@ type Advisor.Reply {
   toolCalls: json
 
   /**
-   * Proposals created during this turn as a JSON array (see {@link Advisor#pendingProposals}).
+   * Sources the answer may cite, as a JSON array of `{id, kind (DOC, POLICY, LAB, PROJECT, JOB, DATA), title, url,
+   * version}`; the answer cites them inline as `[id]`.
    */
-  proposals: json
+  citations: json
+
+  /**
+   * Deep links for the next step as a JSON array of `{kind (PLAN, RUN), label, title, href}` (Launch planner with the
+   * run request and plan pre-filled, run pages). The advisor never acts itself.
+   */
+  links: json
+
+  /**
+   * Provenance of the answer `{component: PolicyRAGAdvisor, version, method, model, policyVersion, sources, asOf}`.
+   */
+  provenance: json
 }

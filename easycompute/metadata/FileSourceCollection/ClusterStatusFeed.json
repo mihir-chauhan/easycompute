@@ -1,0 +1,6 @@
+{
+  "name": "ClusterStatusFeed",
+  "description": "Partition status snapshot CSV (sinfo/squeue summary) -> SourcePartitionStatus -> CanonicalPartitionStatus -> merges Partition queue/utilization fields and ComputeCluster.status (valid rows) / IngestRejection (rejected rows).",
+  "sourceSystem": "EasyComputeFeeds",
+  "source": "SourcePartitionStatus"
+}

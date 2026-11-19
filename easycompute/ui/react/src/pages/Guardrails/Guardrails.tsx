@@ -10,11 +10,13 @@ import { EmptyState, ErrorState, KpiRow, KpiRowSkeleton, KpiTile, PageFrame, Sec
 import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { fetchLabActions, getAutopilot, saveAutopilot } from '@/features/lab/api';
+import { applyJobAction, fetchLabActions, getAutopilot, saveAutopilot } from '@/features/lab/api';
+import { Button } from '@/components/ui/button';
 import { ActivityRow, HeadNote, Mono, muted } from '@/features/lab/components';
 import { ACTION_LABEL, formatInt, formatShortDateTime } from '@/features/lab/format';
 import type { AutopilotPolicy } from '@/features/lab/types';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
+import { ModelProvenance } from '@/features/lab/models';
 import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { cn } from '@/lib/utils';
@@ -120,7 +122,26 @@ const Guardrails: React.FC = () => {
   const auto = log.filter((a) => a.actor === 'AUTOPILOT');
   const checkpoints = log.filter((a) => a.actionType === 'CHECKPOINT_NOW' && a.outcome === 'DONE').length;
   const released = log.filter((a) => (a.actionType === 'CANCEL' || a.actionType === 'SCALE_DOWN') && a.outcome === 'DONE').length;
-  const pendingApproval = log.filter((a) => a.outcome === 'PENDING_APPROVAL').length;
+  /** Pending requests not yet followed by a DONE action of the same type on the same job. */
+  const pending = log.filter(
+    (a) => a.outcome === 'PENDING_APPROVAL' && !log.some((b) => b.job?.id === a.job?.id && b.actionType === a.actionType && b.outcome === 'DONE' && b.actedAt > a.actedAt),
+  );
+  const pendingApproval = pending.length;
+  const [approving, setApproving] = useState<string | null>(null);
+  const approve = async (e: (typeof log)[number]) => {
+    if (!e.job) return;
+    setApproving(e.id);
+    setErr(null);
+    try {
+      await applyJobAction(e.job.id, e.actionType, lr.actor === 'ADMIN' ? 'ADMIN' : 'USER');
+      acts.reload();
+    } catch (x) {
+      setErr(errorMessage(x));
+      reportError(x);
+    } finally {
+      setApproving(null);
+    }
+  };
 
   const num = (f: NumField, unit: string, scale = 1) =>
     draft ? (
@@ -164,8 +185,31 @@ const Guardrails: React.FC = () => {
           <KpiTile label="Actions taken" value={formatInt(log.length)} caption={`${formatInt(auto.length)} automatic · ${formatInt(log.length - auto.length)} by people`} />
           <KpiTile label="Checkpoints forced" value={formatInt(checkpoints)} caption="Before walltime, preemption or OOM" tone="good" />
           <KpiTile label="GPU jobs released or scaled" value={formatInt(released)} caption="Idle or oversized GPUs given back" />
-          <KpiTile label="Waiting for approval" value={formatInt(pendingApproval)} tone={pendingApproval ? 'warn' : undefined} caption="Walltime extensions need RCAC" />
+          <KpiTile label="Waiting for approval" value={formatInt(pendingApproval)} tone={pendingApproval ? 'warn' : undefined} caption="Need a PI (or RCAC for walltime)" />
         </KpiRow>
+      )}
+
+      {pending.length > 0 && (
+        <SectionCard title="Waiting for approval" actions={<HeadNote>{lr.canApprove ? 'You can approve these' : 'Your PI approves these'}</HeadNote>}>
+          <ul className="flex flex-col">
+            {pending.map((e) => (
+              <li key={e.id} className="flex flex-wrap items-center gap-3 border-b border-[var(--c3-style-basic-border-border)] py-3 first:pt-0 last:border-b-0 last:pb-0">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">{`${ACTION_LABEL[e.actionType] ?? e.actionType} · ${e.job?.jobName ?? e.job?.id ?? ''}`}</div>
+                  {e.detail && <div className={cn('text-[13px]', muted)}>{e.detail}</div>}
+                </div>
+                <span className={cn('font-mono text-[11.5px]', muted)}>{formatShortDateTime(e.actedAt)}</span>
+                {lr.canApprove ? (
+                  <Button size="sm" loading={approving === e.id} onClick={() => approve(e)}>
+                    Approve
+                  </Button>
+                ) : (
+                  <ToneBadge tone="warn">Needs PI</ToneBadge>
+                )}
+              </li>
+            ))}
+          </ul>
+        </SectionCard>
       )}
 
       <SectionCard
@@ -204,6 +248,9 @@ const Guardrails: React.FC = () => {
                       <td className="px-3 py-3">
                         <div className="font-medium text-[var(--c3-style-basic-fg-primary)]">{r.name}</div>
                         <div className={cn('text-xs', muted)}>{r.signal}</div>
+                        <div className="mt-1">
+                          <ModelProvenance name={r.key === 'idle' || r.key === 'low' ? 'GPUUnderuseDetector' : r.key === 'budget' ? 'AllocationBurnForecaster' : 'GuardrailRuleEngine'} />
+                        </div>
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         <Mono>{r.trigger(draft, num)}</Mono>

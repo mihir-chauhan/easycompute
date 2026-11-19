@@ -3,39 +3,43 @@
  * Confidential and Proprietary C3 Materials.
  */
 
-import React, { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
+import React, { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Bot, RotateCcw, Send, Sparkles, Zap } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Bot, RotateCcw, Send, ShieldCheck, Sparkles, Zap } from 'lucide-react';
 
 import { c3Call } from '@/c3Action';
-import { CardGrid, PageFrame, SectionCard, Segmented, ToneBadge, errorMessage, useAppShell } from '@/components/app';
+import { CardGrid, ModelComputing, ModelProvenance, PageFrame, SectionCard, Segmented, ToneBadge, errorMessage, useAppShell, type Provenance } from '@/components/app';
 import { Button } from '@/components/ui/button';
-import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 
+import Citations from './Citations';
 import LabKnowledge from './LabKnowledge';
-import ProposalCard, { SOFT } from './ProposalCard';
+import NextSteps from './NextSteps';
 import ToolChips from './ToolChips';
-import type { AdvisorReply, Proposal, ProposalDecision, ToolCall } from './types';
+import { SOFT } from './tones';
+import type { AdvisorReply, Citation, NextLink, ToolCall } from './types';
 
 interface ChatMessage {
   id: number;
-  role: 'user' | 'assistant' | 'error' | 'system';
+  role: 'user' | 'assistant' | 'error';
   text: string;
   mode?: string;
   fallbackReason?: string;
   seconds?: number;
   toolCalls?: ToolCall[];
-  proposalIds?: string[];
+  citations?: Citation[];
+  links?: NextLink[];
+  provenance?: Provenance;
   question?: string;
 }
 
 const FALLBACK_PROMPTS = [
-  'Can we finish the NeurIPS fine-tune by Friday within budget?',
+  'Can we finish our next deadline run by Friday within budget?',
+  'Can thesis runs use preemptible or standby on Gautschi?',
   'Which of our running jobs are wasting GPUs?',
   'How much of our allocation is left, and when does it expire?',
-  'What rules apply to an 8-GPU H100 run on Gautschi?',
   'Where is Purdue short on GPUs right now?',
 ];
 
@@ -46,10 +50,33 @@ const SLOW_MS = 45000;
 const MD_CLASS =
   'min-w-0 text-sm leading-6 text-[var(--c3-style-basic-fg-primary)] [&_p]:my-2 [&_p:first-child]:mt-0 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_strong]:font-semibold [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:font-semibold [&_code]:rounded-sm [&_code]:bg-[var(--c3-style-basic-bg-secondary)] [&_code]:px-1 [&_code]:text-[13px] [&_pre]:overflow-auto [&_pre]:rounded-md [&_pre]:bg-[var(--c3-style-basic-bg-secondary)] [&_pre]:p-2 [&_pre]:text-xs [&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[13px] [&_th]:border-b [&_th]:border-[var(--c3-style-basic-border-border)] [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:font-semibold [&_td]:border-b [&_td]:border-[var(--c3-style-basic-border-border)] [&_td]:px-2 [&_td]:py-1 [&_td]:tabular-nums';
 
+/** Turns inline citations "[D-01]" into markdown links to the source (external URL or in-app page). */
+const linkCitations = (text: string, citations: Citation[]): string => {
+  const byId = new Map(citations.filter((c) => c.url).map((c) => [c.id, c.url as string]));
+  return text.replace(/\[([^\]\s][^\]]{0,60})\](?!\()/g, (all, id: string) => (byId.has(id) ? `[\\[${id}\\]](${byId.get(id)})` : all));
+};
+
+/** Markdown link: in-app paths go through the router (HashRouter), external ones open a new tab. */
+function MdLink({ href, children }: { href?: string; children?: ReactNode }) {
+  if (href && href.startsWith('/')) {
+    return (
+      <Link to={href} className="font-mono text-[12px] text-[var(--c3-style-basic-fg-accent)] hover:underline">
+        {children}
+      </Link>
+    );
+  }
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className="font-mono text-[12px] text-[var(--c3-style-basic-fg-accent)] hover:underline">
+      {children}
+    </a>
+  );
+}
+
 /**
- * AI Advisor chat. Each question goes to the server-side `Advisor.ask`, which runs the "EasyCompute Advisor" GenaiCore
- * agent inside this app (or the deterministic offline advisor in quick mode / when no LLM is available). Answers show
- * the tools they used; actions the advisor proposes appear as cards that change nothing until the user confirms.
+ * AI Advisor chat with PolicyRAGAdvisor. Each question goes to the server-side `Advisor.ask`, which runs the agent
+ * inside this app with retrieval over versioned Purdue / ACCESS policy documents, lab rules and context, and live job
+ * evidence (or the deterministic quick mode). Answers cite their sources as chips and end with deep links to the
+ * Launch planner and run pages; the advisor itself never submits, cancels or overrides anything.
  */
 const AssistantPage: React.FC = () => {
   const { labId, lab } = useAppShell();
@@ -59,9 +86,6 @@ const AssistantPage: React.FC = () => {
   const [pending, setPending] = useState(false);
   const [slow, setSlow] = useState(false);
   const [mode, setMode] = useState<'agent' | 'offline'>('agent');
-  const [proposals, setProposals] = useState<Record<string, Proposal>>({});
-  const [pendingIds, setPendingIds] = useState<string[]>([]);
-  const [deciding, setDeciding] = useState<string | null>(null);
   const [prompts, setPrompts] = useState<string[]>(FALLBACK_PROMPTS);
   const nextId = useRef(1);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -90,45 +114,20 @@ const AssistantPage: React.FC = () => {
     setMessages((prev) => [...prev, { ...m, id }]);
   }, []);
 
-  const mergeProposals = useCallback((list: Proposal[]) => {
-    if (!list.length) return;
-    setProposals((prev) => {
-      const next = { ...prev };
-      list.forEach((p) => {
-        next[p.id] = p;
-      });
-      return next;
-    });
-  }, []);
-
-  const loadPending = useCallback(async () => {
-    if (!labId) return;
-    try {
-      const list = ((await c3Call('Advisor', 'pendingProposals', null, [labId])) ?? []) as Proposal[];
-      if (!mounted.current) return;
-      mergeProposals(list);
-      setPendingIds(list.map((p) => p.id));
-    } catch {
-      // The pending list is a convenience; the chat still works without it.
-    }
-  }, [labId, mergeProposals]);
-
-  // New lab = new conversation, fresh suggestions and pending approvals.
+  // New lab = new conversation and fresh suggestions.
   useEffect(() => {
     turn.current += 1;
     setMessages([]);
     setSessionId(null);
     setPending(false);
     setSlow(false);
-    setPendingIds([]);
-    void loadPending();
     if (!labId) return;
     c3Call('Advisor', 'suggestedPrompts', null, [labId])
       .then((list: unknown) => {
         if (mounted.current && Array.isArray(list) && list.length) setPrompts(list as string[]);
       })
       .catch(() => undefined);
-  }, [labId, loadPending]);
+  }, [labId]);
 
   const send = async (question: string, askMode: 'agent' | 'offline' = mode) => {
     const q = question.trim();
@@ -145,8 +144,6 @@ const AssistantPage: React.FC = () => {
       const reply = (await c3Call('Advisor', 'ask', null, [q, sessionId, labId, askMode])) as AdvisorReply;
       if (!mounted.current || turn.current !== myTurn) return;
       if (reply.sessionId) setSessionId(reply.sessionId);
-      const props = reply.proposals ?? [];
-      mergeProposals(props);
       addMessage({
         role: reply.status === 'completed' || reply.mode === 'offline' ? 'assistant' : 'error',
         text: reply.answer || 'The advisor returned no answer.',
@@ -154,7 +151,9 @@ const AssistantPage: React.FC = () => {
         fallbackReason: reply.fallbackReason,
         seconds: reply.seconds,
         toolCalls: reply.toolCalls ?? [],
-        proposalIds: props.map((p) => p.id),
+        citations: reply.citations ?? [],
+        links: reply.links ?? [],
+        provenance: reply.provenance,
         question: q,
       });
     } catch (err: unknown) {
@@ -164,7 +163,6 @@ const AssistantPage: React.FC = () => {
       if (mounted.current && turn.current === myTurn) {
         setPending(false);
         setSlow(false);
-        void loadPending();
       }
     }
   };
@@ -175,21 +173,6 @@ const AssistantPage: React.FC = () => {
     setPending(false);
     setSlow(false);
     window.setTimeout(() => void send(q, 'offline'), 0);
-  };
-
-  const decide = async (p: Proposal, action: 'confirmProposal' | 'discardProposal') => {
-    setDeciding(p.id);
-    try {
-      const res = (await c3Call('Advisor', action, null, [p.id])) as ProposalDecision;
-      if (!mounted.current) return;
-      mergeProposals([{ ...p, state: res.state, resultText: res.message, resultJobId: res.jobId ?? p.jobId }]);
-      addMessage({ role: 'system', text: res.message });
-    } catch (err: unknown) {
-      if (mounted.current) addMessage({ role: 'error', text: errorMessage(err) });
-    } finally {
-      if (mounted.current) setDeciding(null);
-      void loadPending();
-    }
   };
 
   const onSubmit = (e: FormEvent) => {
@@ -218,7 +201,7 @@ const AssistantPage: React.FC = () => {
   return (
     <PageFrame
       title="AI Advisor"
-      description="Ask about budgets, deadlines, rules, run plans and live jobs. Answers come from live app data; actions wait for your confirmation."
+      description="PolicyRAGAdvisor answers from versioned Purdue policies, your lab's rules and context, and live job evidence, and cites every source. It explains; you act in the Launch planner and run pages."
       breadcrumbs={[{ label: 'Lab' }, { label: 'AI Advisor' }]}
       actions={
         <div className="flex flex-wrap items-center gap-2">
@@ -227,7 +210,7 @@ const AssistantPage: React.FC = () => {
             value={mode}
             onChange={(v) => setMode(v as 'agent' | 'offline')}
             options={[
-              { value: 'agent', label: 'AI agent' },
+              { value: 'agent', label: 'PolicyRAGAdvisor' },
               { value: 'offline', label: 'Quick (no LLM)' },
             ]}
           />
@@ -238,7 +221,11 @@ const AssistantPage: React.FC = () => {
       }
     >
       <CardGrid layout="two-one">
-        <SectionCard title={lab ? `Advisor for ${lab.name}` : 'Advisor'} subtitle="EasyCompute Advisor · GenAI agent with read-only tools over this app">
+        <SectionCard
+          title={lab ? `Advisor for ${lab.name}` : 'Advisor'}
+          subtitle="PolicyRAGAdvisor · retrieval-augmented, cites sources, read-only"
+          actions={<ModelProvenance component="PolicyRAGAdvisor" />}
+        >
           <div className="flex min-h-[420px] flex-col gap-4">
             {messages.length === 0 && (
               <div className="flex flex-col items-start gap-3 py-2">
@@ -249,7 +236,7 @@ const AssistantPage: React.FC = () => {
                   <div>
                     <div className="text-sm font-semibold">What do you want to know?</div>
                     <div className="text-xs text-[var(--c3-style-basic-fg-secondary)]">
-                      The advisor checks university and cluster rules, your budget and deadlines, and live job health.
+                      Answers cite Purdue RCAC / ACCESS documents, policy rules, your lab context and live jobs.
                     </div>
                   </div>
                 </div>
@@ -293,35 +280,29 @@ const AssistantPage: React.FC = () => {
                   </div>
                 );
               }
-              if (m.role === 'system') {
-                return (
-                  <div key={m.id} className="text-center text-xs text-[var(--c3-style-basic-fg-secondary)]">
-                    {m.text}
-                  </div>
-                );
-              }
+              const citations = m.citations ?? [];
               return (
                 <div key={m.id} className="flex gap-3" data-testid="assistant-answer">
                   <span className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-md ${SOFT.accent}`}>
                     <Bot className="size-3.5" aria-hidden />
                   </span>
-                  <div className="flex min-w-0 flex-1 flex-col gap-2">
+                  <div className="flex min-w-0 flex-1 flex-col gap-2.5">
                     <div className={MD_CLASS}>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ href, children }) => <MdLink href={href}>{children}</MdLink> }}>
+                        {linkCitations(m.text, citations)}
+                      </ReactMarkdown>
                     </div>
-                    {(m.proposalIds ?? []).map((id) =>
-                      proposals[id] ? <ProposalCard key={id} proposal={proposals[id]} busy={deciding === id} onDecide={(p, a) => void decide(p, a)} /> : null,
-                    )}
+                    <Citations citations={citations} text={m.text} />
+                    <NextSteps links={m.links ?? []} />
                     <ToolChips calls={m.toolCalls ?? []} />
                     <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--c3-style-basic-fg-secondary)]">
-                      {m.mode === 'offline' ? (
+                      <ModelProvenance component="PolicyRAGAdvisor" provenance={m.provenance} compact />
+                      {m.mode === 'offline' && (
                         <span title={m.fallbackReason}>
                           <ToneBadge tone="neutral">Quick answer · no LLM</ToneBadge>
                         </span>
-                      ) : (
-                        <ToneBadge tone="accent">AI agent</ToneBadge>
                       )}
-                      {m.seconds !== undefined && <span className="tabular-nums">{m.seconds.toFixed(1)} s</span>}
+                      {m.seconds !== undefined && <span className="font-mono tabular-nums">{m.seconds.toFixed(1)} s</span>}
                     </div>
                   </div>
                 </div>
@@ -329,9 +310,8 @@ const AssistantPage: React.FC = () => {
             })}
 
             {pending && (
-              <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--c3-style-basic-fg-secondary)]" aria-live="polite">
-                <Spinner size="sm" />
-                {mode === 'offline' ? 'Looking at the data…' : 'The advisor is checking rules, plans and live data…'}
+              <div className="flex flex-wrap items-center gap-3" aria-live="polite">
+                <ModelComputing component="PolicyRAGAdvisor" verb={mode === 'offline' ? 'is looking up your data' : 'is retrieving sources and computing'} />
                 {slow && (
                   <Button size="sm" variant="ghost" appearance="accent" leadingIcon={<Zap />} onClick={() => quickAnswer(lastQuestion)}>
                     Taking long — get a quick answer
@@ -351,7 +331,7 @@ const AssistantPage: React.FC = () => {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={onKeyDown}
-                placeholder={labId ? 'Ask about deadlines, budget, rules or running jobs… (Enter to send)' : 'Pick a lab in the header first'}
+                placeholder={labId ? 'Ask about rules, deadlines, budget or running jobs… (Enter to send)' : 'Pick a lab in the header first'}
                 disabled={pending || !labId}
                 className="min-h-10 flex-1 resize-none"
               />
@@ -364,23 +344,24 @@ const AssistantPage: React.FC = () => {
 
         <div className="flex min-w-0 flex-col gap-4">
           <LabKnowledge labId={labId} labName={lab?.name} />
-          <SectionCard
-            title="Needs your attention"
-            subtitle="Actions the advisor proposed. Nothing runs until you approve."
-            actions={pendingIds.length > 0 ? <ToneBadge tone="warn">{pendingIds.length} open</ToneBadge> : undefined}
-          >
-            {pendingIds.length === 0 ? (
-              <p className="text-sm text-[var(--c3-style-basic-fg-secondary)]">All clear. Proposed actions show up here for your approval.</p>
-            ) : (
-              <div className="-my-3 flex flex-col">
-                {pendingIds
-                  .map((id) => proposals[id])
-                  .filter((p): p is Proposal => Boolean(p))
-                  .map((p) => (
-                    <ProposalCard key={p.id} proposal={p} row busy={deciding === p.id} onDecide={(pp, a) => void decide(pp, a)} />
-                  ))}
-              </div>
-            )}
+          <SectionCard title="How the advisor works" subtitle="Grounded, cited, read-only">
+            <ul className="flex flex-col gap-2 text-[13px] text-[var(--c3-style-basic-fg-secondary)]">
+              <li className="flex gap-2">
+                <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[var(--c3-style-basic-fg-accent)]" aria-hidden />
+                <span>
+                  Rules are enforced by <span className="font-mono text-[var(--c3-style-basic-fg-primary)]">ClusterPolicyEngine</span>; the advisor explains them and never waives,
+                  submits or cancels anything.
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <Sparkles className="mt-0.5 size-4 shrink-0 text-[var(--c3-style-basic-fg-accent)]" aria-hidden />
+                <span>Every answer cites versioned Purdue RCAC / ACCESS documents, policy ids, your lab context, projects or live jobs.</span>
+              </li>
+              <li className="flex gap-2">
+                <Zap className="mt-0.5 size-4 shrink-0 text-[var(--c3-style-basic-fg-accent)]" aria-hidden />
+                <span>Next steps open the Launch planner or the run page, where you review and confirm.</span>
+              </li>
+            </ul>
           </SectionCard>
         </div>
       </CardGrid>

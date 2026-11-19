@@ -1,0 +1,5 @@
+{
+  "name": "Partition",
+  "createOnly": false,
+  "updateMode": "merge"
+}

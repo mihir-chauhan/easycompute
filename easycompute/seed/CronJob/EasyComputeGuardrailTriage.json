@@ -1,0 +1,13 @@
+{
+  "id": "EasyComputeGuardrailTriage",
+  "name": "EasyComputeGuardrailTriage",
+  "description": "Every 15 minutes runs the 'Run guardrail triage' agentic workflow on up to 3 OPEN JobAlerts that have no GuardrailTriage yet (GuardrailWorkflow.triageNew).",
+  "action": {
+    "typeName": "GuardrailWorkflow",
+    "actionName": "triageNew"
+  },
+  "concurrent": false,
+  "scheduleDef": {
+    "cronExpression": "0 0/15 * * * ?"
+  }
+}

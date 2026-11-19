@@ -15,6 +15,8 @@ import {
   KpiRow,
   KpiRowSkeleton,
   KpiTile,
+  ModelComputing,
+  ModelProvenance,
   PageFrame,
   ResultCount,
   SearchBox,
@@ -265,7 +267,20 @@ export default function AdminLabs() {
         </KpiRow>
       ) : null}
 
-      <SectionCard flush>
+      <SectionCard
+        flush
+        title="Labs"
+        actions={
+          loading && !data ? (
+            <ModelComputing component="AllocationBurnForecaster" verb="is projecting run-out dates" />
+          ) : (
+            <span className="flex gap-2">
+              <ModelProvenance component="AllocationBurnForecaster" compact />
+              <ModelProvenance component="LabFairShareAllocator" compact />
+            </span>
+          )
+        }
+      >
         <DataTable
           columns={columns}
           rows={rows}

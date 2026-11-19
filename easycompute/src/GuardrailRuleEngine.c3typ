@@ -1,0 +1,11 @@
+/**
+ * Memory / walltime / progress / failure guardrails as a state machine with hysteresis (MODEL_MAP); records why each
+ * alert fired. Consequential autopilot actions wait for user confirmation.
+ */
+type GuardrailRuleEngine {
+
+  /**
+   * Opens, refreshes or closes the job's alerts (same as {@link Job#evaluateHealth}).
+   */
+  evaluate: function(jobId: !string): [JobAlert] js-server
+}

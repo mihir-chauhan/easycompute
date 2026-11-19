@@ -34,6 +34,7 @@ import { ActivityRow, CheckRow, HeadNote, JobStateBadge, muted } from '@/feature
 import { ACTION_LABEL, ALERT_TYPE_LABEL, whereLabel, formatShortDateTime, formatClock, formatInt, formatPct100, formatUsd } from '@/features/lab/format';
 import type { Alert, Job, SummaryAllocation, SummaryDeadline } from '@/features/lab/types';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
+import { alertModel, ModelProvenance } from '@/features/lab/models';
 import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { formatDate, formatShortDate } from '@/lib/format';
@@ -44,7 +45,7 @@ interface Attention {
   kind: 'bad' | 'warn' | 'info';
   glyph: string;
   title: React.ReactNode;
-  detail?: string;
+  detail?: React.ReactNode;
   action?: { label: string; primary?: boolean; run: () => void };
 }
 
@@ -151,7 +152,14 @@ const LabHome: React.FC = () => {
             </button>
           </span>
         ),
-        detail: a.message,
+        detail: (
+          <>
+            {a.message}
+            <span className="mt-1 block">
+              <ModelProvenance name={alertModel(a.alertType)} />
+            </span>
+          </>
+        ),
         action: a.recommendedAction && lr.canActOn(a.job?.user) ? { label: ACTION_LABEL[a.recommendedAction], primary: a.severity === 'CRITICAL', run: () => runAction(a) } : undefined,
       }));
     allocations
@@ -162,7 +170,14 @@ const LabHome: React.FC = () => {
           kind: 'warn',
           glyph: '$',
           title: `At this pace, ${a.grantName ?? a.name ?? a.clusterName} runs out ${formatShortDate(a.projectedRunOut)}`,
-          detail: `${formatInt(a.remainingUnits)} ${a.unitName ?? ''} left, burning ${formatInt(a.burnPerDay)} per day; the allocation ends ${formatDate(a.endDate)}.`,
+          detail: (
+            <>
+              {`${formatInt(a.remainingUnits)} ${a.unitName ?? ''} left, burning ${formatInt(a.burnPerDay)} per day; the allocation ends ${formatDate(a.endDate)}.`}
+              <span className="mt-1 block">
+                <ModelProvenance name="AllocationBurnForecaster" />
+              </span>
+            </>
+          ),
           action: { label: 'Review usage', run: () => navigate('/history') },
         }),
       );

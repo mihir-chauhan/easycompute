@@ -3,6 +3,8 @@
  * Confidential and Proprietary C3 Materials.
  */
 
+import type { Provenance } from '@/components/app';
+
 /** One tool call recorded during an ask turn (Advisor.Reply.toolCalls). */
 export interface ToolCall {
   tool: string;
@@ -12,41 +14,24 @@ export interface ToolCall {
   millis?: number | null;
 }
 
-/** Plan or job details shown on a proposal card (Advisor.Proposal.details). */
-export interface ProposalDetails {
-  label?: string;
-  cluster?: string;
-  partition?: string;
-  gpuType?: string;
-  gpus?: number;
-  nodes?: number;
-  walltimeHours?: number;
-  estWaitHours?: number;
-  estDurationHours?: number;
-  estCostUsd?: number;
-  estCostUnits?: number;
-  meetsDeadline?: boolean | null;
-  sbatchScript?: string;
-  state?: string;
-  timelimitHours?: number;
-  elapsedHours?: number;
+/** A source the answer may cite inline as [id] (Advisor.Reply.citations). */
+export interface Citation {
+  id: string;
+  kind: 'DOC' | 'POLICY' | 'LAB' | 'PROJECT' | 'JOB' | 'DATA' | string;
+  title: string;
+  url?: string | null;
+  version?: string;
+  severity?: string;
+  outcome?: string;
+  quote?: string;
 }
 
-/** An action the advisor proposed; applied only when the user confirms (Advisor.pendingProposals). */
-export interface Proposal {
-  id: string;
-  summary: string;
-  kind: 'SUBMIT_RUN' | 'JOB_ACTION' | string;
-  labId?: string | null;
-  jobId?: string | null;
-  runRequestId?: string | null;
-  planId?: string | null;
-  actionType?: string | null;
-  reason?: string | null;
-  details?: ProposalDetails | null;
-  state: 'PENDING' | 'APPLIED' | 'FAILED' | 'DISCARDED' | string;
-  resultText?: string | null;
-  resultJobId?: string | null;
+/** Next-step deep link (Advisor.Reply.links): the user acts on the Launch planner / run page, never in the chat. */
+export interface NextLink {
+  kind: 'PLAN' | 'RUN' | string;
+  label: string;
+  title: string;
+  href: string;
 }
 
 /** Advisor.ask result. */
@@ -59,27 +44,32 @@ export interface AdvisorReply {
   fallbackReason?: string;
   seconds?: number;
   toolCalls?: ToolCall[];
-  proposals?: Proposal[];
+  citations?: Citation[];
+  links?: NextLink[];
+  provenance?: Provenance;
 }
 
-/** Advisor.confirmProposal / discardProposal result. */
-export interface ProposalDecision {
-  proposalId: string;
-  state: string;
-  message: string;
-  jobId?: string | null;
+/** Evidence span: exact quote of the lab text and its character offsets. */
+export interface Evidence {
+  quote: string;
+  start: number;
+  end: number;
 }
 
-/** Advisor.extractConstraints result. */
+/** Advisor.extractConstraints result (LabContextExtractor). */
 export interface LabConstraints {
+  component?: string;
+  version?: string;
+  status: 'UNCONFIRMED' | 'CONFIRMED' | string;
   source: 'llm' | 'rules' | string;
-  model?: string;
+  model?: string | null;
   cached?: boolean;
+  confirmedAt?: string | null;
   llmError?: string;
   summary?: string;
   warnings?: string[];
-  budgets: { kind: string; amount: number; period?: string; scope?: string | null; evidence?: string }[];
-  deadlines: { label: string; date: string; daysAway?: number | null; evidence?: string }[];
+  budgets: { kind: string; amount: number; period?: string; scope?: string | null; evidence?: Evidence }[];
+  deadlines: { label: string; date: string; daysAway?: number | null; evidence?: Evidence }[];
   preferences: {
     clusters?: string[];
     gpuTypes?: string[];
@@ -88,8 +78,11 @@ export interface LabConstraints {
     maxWalltimeHours?: number | null;
     quietHours?: string | null;
     notes?: string[];
+    evidence?: (Evidence & { field: string; value: unknown })[];
   };
-  dataRestrictions: { kind: string; description?: string; evidence?: string }[];
-  memberCaps?: { who: string; pct: number; evidence?: string }[];
-  approvals?: { threshold: number; unit: string; evidence?: string }[];
+  dataRestrictions: { kind: string; description?: string; evidence?: Evidence }[];
+  memberCaps?: { who: string; pct: number; evidence?: Evidence }[];
+  approvals?: { threshold: number; unit: string; evidence?: Evidence }[];
+  validation?: { valid: boolean; errors: string[]; dropped: number };
+  provenance?: Provenance;
 }

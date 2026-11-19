@@ -26,6 +26,7 @@ import {
 } from '@/features/lab/api';
 import { CheckRow, HeadNote, Mono, muted } from '@/features/lab/components';
 import { notYetRules, toCandidateRules } from '@/features/lab/constraints';
+import { ModelComputing, ModelProvenance } from '@/features/lab/models';
 import { formatInt, titleCase } from '@/features/lab/format';
 import type { Allocation, ExtractedConstraint, LabConstraints, Project } from '@/features/lab/types';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
@@ -42,6 +43,29 @@ const SOURCE_USE: Record<string, [Tone, string]> = {
   STARTUP: ['warn', 'Ask PI'],
   CLOUD_CREDITS: ['info', 'Overflow'],
 };
+
+/** The context text with each extracted rule's evidence span highlighted and numbered. */
+function EvidenceText({ text, spans }: { text: string; spans: string[] }) {
+  const hits = spans
+    .map((sp, i) => ({ i, sp: sp.trim(), at: sp.trim() ? text.indexOf(sp.trim()) : -1 }))
+    .filter((h) => h.at >= 0)
+    .sort((a, b) => a.at - b.at);
+  const parts: React.ReactNode[] = [];
+  let pos = 0;
+  hits.forEach((h) => {
+    if (h.at < pos) return;
+    parts.push(text.slice(pos, h.at));
+    parts.push(
+      <mark key={h.i} className="rounded-sm bg-[var(--c3-style-basic-bg-warning)] px-0.5 text-[var(--c3-style-basic-fg-primary)]">
+        {h.sp}
+        <sup className="ml-0.5 font-mono text-[10px] text-[var(--c3-style-basic-fg-warning)]">{h.i + 1}</sup>
+      </mark>,
+    );
+    pos = h.at + h.sp.length;
+  });
+  parts.push(text.slice(pos));
+  return <p className="text-[13px] leading-6 whitespace-pre-wrap text-[var(--c3-style-basic-fg-secondary)]">{parts}</p>;
+}
 
 const LabContext: React.FC = () => {
   const navigate = useNavigate();
@@ -204,8 +228,22 @@ const LabContext: React.FC = () => {
                 </span>
               </div>
               )}
+              {busy === 'extract' && <ModelComputing name="LabContextExtractor" className="mt-3" />}
               {note && <p role="status" className="mt-3 text-[13px] text-[var(--c3-style-basic-fg-success)]">{note}</p>}
-              {parsed?.summary && <p className={cn('mt-3 text-[13px]', muted)}>{parsed.summary}</p>}
+              {parsed && (
+                <div className="mt-4 flex flex-col gap-3 border-t border-[var(--c3-style-basic-border-border)] pt-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">Evidence in your text</span>
+                    <ModelProvenance
+                      name="LabContextExtractor"
+                      support={parsed.source === 'llm' ? `LLM${parsed.cached ? ' (cached)' : ''} + rules validation` : 'rules parser (LLM unavailable)'}
+                      extra={parsed.llmError}
+                    />
+                  </div>
+                  {parsed.summary && <p className={cn('text-[13px]', muted)}>{parsed.summary}</p>}
+                  <EvidenceText text={text} spans={pending.map((c) => c.sourceText ?? '')} />
+                </div>
+              )}
             </SectionCard>
           </div>
 
@@ -274,8 +312,13 @@ const LabContext: React.FC = () => {
                       key={c.key}
                       kind="warn"
                       glyph="?"
-                      title={c.title}
-                      detail={c.sourceText ? `“${c.sourceText}”` : `Extracted ${titleCase(c.kind)} rule`}
+                      title={
+                        <span>
+                          <sup className="mr-1 font-mono text-[10px] text-[var(--c3-style-basic-fg-warning)]">{pending.indexOf(c) + 1}</sup>
+                          {c.title}
+                        </span>
+                      }
+                      detail={c.sourceText ? `“${c.sourceText}”` : `No evidence span returned for this ${titleCase(c.kind).toLowerCase()} rule: check it against your text before confirming.`}
                       right={
                         <>
                           <Button variant="outline" appearance="secondary" size="sm" loading={busy === `add-${c.key}`} onClick={() => accept(c)}>

@@ -10,6 +10,7 @@ import EChart from '@/components/charts/EChart';
 import type { EChartsCoreOption } from '@/lib/echarts';
 import { cn } from '@/lib/utils';
 
+import { ModelComputing, ModelProvenance, type Provenance } from './Model';
 import { ChartSkeleton, EmptyState, ErrorState } from './PageStates';
 import { SectionCard } from './SectionCard';
 import { ecColor, toneColor, type Tone } from './tone';
@@ -190,18 +191,39 @@ interface MetricChartProps {
   onItemClick?: (name: string) => void;
   /** Extra content under the chart (bar list, notes). */
   footer?: ReactNode;
+  /** MODEL_MAP component behind the numbers: "<model> is computing…" while loading, provenance chip after. */
+  model?: string;
+  provenance?: Provenance | null;
   className?: string;
 }
 
 /** Chart card: SectionCard + EChart + HTML legend, with loading / empty / error states built in. */
-export function MetricChart({ title, subtitle, actions, option, legend, loading, error, onRetry, empty, emptyLabel = 'No data for this view yet.', heightClass = 'h-72', ariaLabel, onItemClick, footer, className }: MetricChartProps) {
+export function MetricChart({ title, subtitle, actions, option, legend, loading, error, onRetry, empty, emptyLabel = 'No data for this view yet.', heightClass = 'h-72', ariaLabel, onItemClick, footer, model, provenance, className }: MetricChartProps) {
   let body: ReactNode;
   if (error) body = <ErrorState message={error} onRetry={onRetry} />;
-  else if (loading) body = <ChartSkeleton className={heightClass} />;
+  else if (loading)
+    body = (
+      <div className="flex flex-col gap-2">
+        {model ? <ModelComputing component={model} /> : null}
+        <ChartSkeleton className={heightClass} />
+      </div>
+    );
   else if (empty || !option) body = <EmptyState title={emptyLabel} className={heightClass} />;
   else body = <EChart option={option} className={heightClass} ariaLabel={ariaLabel} onItemClick={onItemClick} />;
   return (
-    <SectionCard title={title} subtitle={subtitle} actions={actions} className={cn('h-full', className)}>
+    <SectionCard
+      title={title}
+      subtitle={subtitle}
+      actions={
+        actions || (model && !loading) ? (
+          <span className="flex items-center gap-2">
+            {model && !loading ? <ModelProvenance component={model} provenance={provenance} compact /> : null}
+            {actions}
+          </span>
+        ) : undefined
+      }
+      className={cn('h-full', className)}
+    >
       <div className="flex min-w-0 flex-col gap-3">
         {body}
         {legend && legend.length > 0 && !error && !loading ? <ChartLegend items={legend} /> : null}

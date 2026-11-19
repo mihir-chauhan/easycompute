@@ -1,0 +1,292 @@
+[
+ {
+  "id": "anvil_host_memory_q50_q90_v1",
+  "name": "AnvilHostMemoryQ50Q90",
+  "status": "CHAMPION",
+  "modelVersion": "v1",
+  "family": "LinearQuantileRegressor/NumPyPinballAdam",
+  "historicalOnly": true,
+  "confidence": "MEDIUM",
+  "targetName": "hostMemoryGiB",
+  "targetUnit": "GiB",
+  "trainingPeriod": "2021-10-01..2021-10-31",
+  "sampleSupport": 2671,
+  "trainCount": 2068,
+  "testCount": 603,
+  "splitLabel": "FALLBACK SPLIT (owner split train<Dec 2021 / Dec holdout impossible: only 2021-10 present locally): train = submit < 2021-10-21T14:04:24, holdout = last 25% of parent jobs by submit time",
+  "metrics": {
+   "pinballLossQ50": 0.2244,
+   "pinballLossQ90": 0.234,
+   "p50LogMAE": 0.4488,
+   "p50MedianAbsLogError": 0.0133,
+   "p90Coverage": 0.9071,
+   "p50Coverage": 0.4494,
+   "baselinePinballLossQ50": 0.2248,
+   "baselinePinballLossQ90": 0.409,
+   "baselineP50LogMAE": 0.4495,
+   "baselineP90Coverage": 0.9088,
+   "l2Q50": 0.1,
+   "l2Q90": 0.01,
+   "lossSpace": "log1p(1024 * GiB)",
+   "beatsConstantBaseline": {
+    "q50": true,
+    "q90": true
+   }
+  },
+  "payload": {
+   "family": "LinearQuantileRegressor/NumPyPinballAdam",
+   "component": "AnvilHostMemoryQ50Q90",
+   "target": {
+    "name": "hostMemoryGiB",
+    "unit": "GiB",
+    "transform": "log1p(scale * y)",
+    "scale": 1024.0,
+    "inverse": "max(0, expm1(t) / scale)",
+    "clipToWalltime": false,
+    "population": "parent jobs COMPLETED/TIMEOUT/OUT_OF_MEMORY joined to their .batch step; target = batch TRESUsageInTot mem (host RAM of the batch script tasks; no GPU VRAM)"
+   },
+   "featureSchema": {
+    "features": [
+     "part_shared",
+     "part_standard",
+     "part_gpu",
+     "part_gpu-debug",
+     "part_highmem",
+     "part_wide",
+     "part_debug",
+     "part_other",
+     "log1p_req_cpus",
+     "log1p_req_nodes",
+     "log1p_req_mem_gib",
+     "log1p_req_gpus",
+     "log1p_walltime_hours",
+     "hour_sin",
+     "hour_cos",
+     "weekday_sin",
+     "weekday_cos",
+     "month_sin",
+     "month_cos",
+     "mem_missing"
+    ],
+    "partitionCategories": [
+     "shared",
+     "standard",
+     "gpu",
+     "gpu-debug",
+     "highmem",
+     "wide",
+     "debug",
+     "other"
+    ],
+    "partitionRule": "lower-case Slurm partition name; anything not in partitionCategories -> other",
+    "inputs": {
+     "partition": "Slurm partition name (Partition.slurmPartition), string",
+     "reqCpus": "requested CPUs (ReqCPUS)",
+     "reqNodes": "requested nodes",
+     "reqMemGiB": "requested memory GiB for the whole job; null/<=0 -> mem_missing=1",
+     "reqGpus": "requested GPUs (gres/gpu)",
+     "walltimeHours": "requested time limit h; null -> neutral",
+     "submitTime": "cluster-local 'YYYY-MM-DDTHH:MM[:SS]' (or submitHour 0-23, submitWeekday Mon=0..Sun=6, submitMonth 1-12); missing -> neutral"
+    },
+    "transforms": {
+     "numeric": "log1p(max(0, v)); null -> 0",
+     "hour": "angle = 2*pi*hour/24",
+     "weekday": "angle = 2*pi*weekdayMon0/7",
+     "month": "angle = 2*pi*(month-1)/12",
+     "cyclic": "sin(angle), cos(angle)"
+    },
+    "scaling": {
+     "method": "z = (x - mean) / std (std 1 when constant); missing feature -> z = 0",
+     "mean": [
+      0.027704979408,
+      0.946087607638,
+      0.023212280045,
+      0.000374391614,
+      0.001123174841,
+      0.000748783227,
+      0.000748783227,
+      0.0,
+      1.165501513646,
+      0.941269614843,
+      5.799480434808,
+      0.02221444641,
+      0.153763906193,
+      -0.447430177421,
+      -0.004586875797,
+      0.196606752957,
+      -0.198744752983,
+      -1.0,
+      -0.0,
+      0.0
+     ],
+     "std": [
+      0.16412621218,
+      0.225844739395,
+      0.150577123429,
+      0.019345579458,
+      0.033494974536,
+      0.027353656994,
+      0.027353656994,
+      1.0,
+      0.915105223978,
+      0.395977372261,
+      0.958654934866,
+      0.161353410454,
+      0.356172182464,
+      0.477226109093,
+      0.756333549238,
+      0.749343475228,
+      0.600275490077,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "degenerateFeatures": [
+     "part_other",
+     "month_sin",
+     "month_cos",
+     "mem_missing"
+    ],
+    "excluded": "usernames, UIDs, accounts, job names, command text, paths, project names"
+   },
+   "heads": {
+    "p50": {
+     "quantile": 0.5,
+     "intercept": 1.368720247352,
+     "coefficients": [
+      -0.004674144085,
+      -0.020310301331,
+      0.02262222543,
+      -0.002650498278,
+      0.003049050441,
+      0.068445251031,
+      0.00081496589,
+      0.0,
+      0.020580614591,
+      -0.019394733123,
+      0.022000084375,
+      -0.002503945989,
+      0.075133868815,
+      -0.002326137071,
+      0.005904098775,
+      -0.001970737067,
+      -0.006904489146,
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    "p90": {
+     "quantile": 0.9,
+     "intercept": 2.586157690973,
+     "coefficients": [
+      0.182543236028,
+      -0.104298281369,
+      -0.044336802056,
+      -0.029912327546,
+      -0.020719347802,
+      -0.026465554156,
+      0.083151317644,
+      0.0,
+      0.822589843297,
+      0.525266338354,
+      0.040898973596,
+      0.112292142901,
+      0.396467394771,
+      -0.007243762279,
+      0.078286970245,
+      -0.361655280897,
+      0.035956743551,
+      0.0,
+      -0.0,
+      0.0
+     ]
+    }
+   },
+   "postprocess": "p90 = max(p90, p50)",
+   "training": {
+    "optimizer": "Adam full-batch",
+    "lr": 0.05,
+    "schedule": "cosine to 1%",
+    "steps": 4000,
+    "l2": {
+     "p50": 0.1,
+     "p90": 0.01,
+     "grid": [
+      0.0001,
+      0.001,
+      0.01,
+      0.1
+     ],
+     "selection": "inner temporal validation, last 25% of window by submit"
+    },
+    "lossFunction": "pinball",
+    "refitOnAll": true
+   },
+   "split": {
+    "label": "FALLBACK SPLIT (owner split train<Dec 2021 / Dec holdout impossible: only 2021-10 present locally): train = submit < 2021-10-21T14:04:24, holdout = last 25% of parent jobs by submit time",
+    "cutoff": "2021-10-21T14:04:24",
+    "trainCount": 2068,
+    "testCount": 603
+   },
+   "sampleSupport": {
+    "total": 2671,
+    "byPartition": {
+     "standard": 2527,
+     "shared": 74,
+     "gpu": 62,
+     "debug": 2,
+     "highmem": 3,
+     "gpu-debug": 1,
+     "wide": 2
+    }
+   },
+   "targetSummary": {
+    "p10": 0.0027,
+    "p50": 0.0028,
+    "p90": 0.0221
+   },
+   "datasetChecks": {
+    "files": [
+     "jobs_2021-02.psv.gz",
+     "jobs_2021-04.psv.gz",
+     "jobs_2021-08.psv.gz",
+     "jobs_2021-10.psv.gz"
+    ],
+    "rowsPerFile": {
+     "jobs_2021-02.psv.gz": 0,
+     "jobs_2021-04.psv.gz": 0,
+     "jobs_2021-08.psv.gz": 0,
+     "jobs_2021-10.psv.gz": 14021
+    },
+    "totalRows": 14021,
+    "malformedRows": 4,
+    "malformedParentRows": 4,
+    "malformedStepRows": 0,
+    "parentRows": 3758,
+    "duplicateParentIds": 0,
+    "batchStepRows": 2933,
+    "otherStepRows": 7326,
+    "batchJoinExact": 2929,
+    "batchJoinIdOnlyStartMismatch": 0,
+    "batchOrphans": 4,
+    "parentsWithBatch": 2929,
+    "joinKey": "JobIDRaw base + Start",
+    "parentsMissingWalltime": 0,
+    "parentsMissingMemRequest": 0,
+    "parentsMissingSubmit": 0,
+    "monthsWithRows": [
+     "2021-10"
+    ],
+    "submitRange": [
+     "2021-10-01T13:07:12",
+     "2021-10-31T22:45:35"
+    ]
+   },
+   "confidence": "MEDIUM",
+   "historical_only": true,
+   "source": "Anvil (Purdue RCAC, NSF ACCESS) Slurm sacct export, 2021-10"
+  }
+ }
+]
