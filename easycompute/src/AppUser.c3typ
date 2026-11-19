@@ -1,0 +1,53 @@
+/**
+ * A person who uses EasyCompute: a lab member, a PI or Research Computing staff. Lab people share the id of their
+ * {@link LabMember}; rows are created from LabMember on first use by {@link UserAdmin}. Inherited `name` is the
+ * person's display name.
+ */
+@db(index=['lab', 'role', 'status', 'username', 'email'])
+entity type AppUser {
+
+  /**
+   * Email address (demo data uses fictional addresses).
+   */
+  email: string
+
+  /**
+   * Cluster / platform username; matched against the signed-in platform user.
+   */
+  username: string
+
+  /**
+   * Lab the user belongs to; empty for Research Computing staff.
+   */
+  lab: Lab
+
+  /**
+   * The lab roster entry for this person.
+   */
+  labMember: LabMember
+
+  /**
+   * What the user may do.
+   */
+  role: string enum AppUser.Role
+
+  /**
+   * Account state.
+   */
+  status: string enum AppUser.Status
+
+  /**
+   * Last time the user was active in the app.
+   */
+  lastActive: datetime
+
+  /**
+   * Name of the PI or admin who invited the user.
+   */
+  invitedBy: string
+
+  /**
+   * When the invitation was sent.
+   */
+  invitedAt: datetime
+}

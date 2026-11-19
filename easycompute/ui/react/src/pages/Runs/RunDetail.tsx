@@ -51,8 +51,9 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, ModalSubtitle, ModalTitle } from '@/components/ui/modal';
 import { ackAlert, applyJobAction, fetchJobActions, fetchJobAlerts, fetchJobMetrics, getJob, monitorTick } from '@/features/lab/api';
 import { ActivityRow, AlertTypeBadge, HeadNote, JobStateBadge, muted, Notice } from '@/features/lab/components';
-import { ACTION_LABEL, ALERT_TYPE_LABEL, formatClock, formatDuration, formatInt, formatPct100, formatRelative, formatUsd, walltimeLeft } from '@/features/lab/format';
+import { ACTION_LABEL, ALERT_TYPE_LABEL, formatShortDateTime, formatClock, formatDuration, formatInt, formatPct100, formatRelative, formatUsd, walltimeLeft } from '@/features/lab/format';
 import type { ActionType, Alert, JobMetric } from '@/features/lab/types';
+import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { formatDateTime } from '@/lib/format';
 
@@ -106,6 +107,8 @@ const RunDetail: React.FC = () => {
   const latest = metrics.at(-1);
   const openAlerts = alerts.filter((a) => a.status === 'OPEN' || a.status === 'ACKED');
   const live = j?.state === 'RUNNING' || j?.state === 'PENDING';
+  const lr = useLabRole();
+  const canAct = Boolean(j && lr.canActOn(j.user));
 
   const charts = useMemo(() => {
     const x = metrics.map((m) => formatClock(m.ts));
@@ -127,7 +130,7 @@ const RunDetail: React.FC = () => {
     setBusy(action);
     setActionError(null);
     try {
-      const res = await applyJobAction(j.id, action);
+      const res = await applyJobAction(j.id, action, lr.actor);
       setNote(`${ACTION_LABEL[action]}: ${res?.detail ?? 'done'}${res?.outcome === 'PENDING_APPROVAL' ? ' — waiting for approval' : ''}`);
       setConfirm(null);
       reloadAll();
@@ -226,19 +229,19 @@ const RunDetail: React.FC = () => {
           <span className="font-mono">{j.jobName ?? j.id}</span>
         </span>
       }
-      description={[j.user, [j.cluster?.name ?? j.cluster?.id, j.partition?.name].filter(Boolean).join(' '), j.qos && `${j.qos} QOS`, j.slurmJobId && `job ${j.slurmJobId}`, j.nodeList && `node ${j.nodeList}`, j.project?.name].filter(Boolean).join(' · ')}
+      description={[j.user, [j.cluster?.name ?? j.cluster?.id, j.partition?.slurmPartition ?? j.partition?.name].filter(Boolean).join(' '), j.qos && `${j.qos} QOS`, j.slurmJobId && `job ${j.slurmJobId}`, j.nodeList && `node ${j.nodeList}`, j.project?.name].filter(Boolean).join(' · ')}
       badges={banner && live ? <ToneBadge tone="warn">Needs approval</ToneBadge> : <JobStateBadge value={j.state} />}
       actions={
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" appearance="secondary" leadingIcon={<FastForward />} loading={busy === 'tick'} onClick={simulate}>
             Simulate next 15 min
           </Button>
-          {live && (
+          {live && canAct && (
             <Button variant="outline" appearance="secondary" leadingIcon={<Save />} loading={busy === 'CHECKPOINT_NOW'} onClick={() => run('CHECKPOINT_NOW')}>
               Checkpoint now
             </Button>
           )}
-          {live && (
+          {live && canAct && (
             <Button variant="outline" appearance="danger" leadingIcon={<Ban />} onClick={() => setConfirm('CANCEL')}>
               Cancel run
             </Button>
@@ -256,10 +259,13 @@ const RunDetail: React.FC = () => {
             <div className={`mt-0.5 text-[13px] ${muted}`}>{banner.message}</div>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
-            <Button variant="outline" appearance="secondary" size="sm" loading={busy === banner.id} onClick={() => acknowledge(banner)}>
-              Acknowledge
-            </Button>
-            {banner.recommendedAction && (
+            {canAct && (
+              <Button variant="outline" appearance="secondary" size="sm" loading={busy === banner.id} onClick={() => acknowledge(banner)}>
+                Acknowledge
+              </Button>
+            )}
+            {!canAct && <ToneBadge tone="warn">Waiting for the PI or run owner to approve</ToneBadge>}
+            {banner.recommendedAction && canAct && (
               <Button size="sm" appearance={banner.recommendedAction === 'CANCEL' ? 'danger' : 'accent'} loading={busy === banner.recommendedAction} onClick={() => request(banner.recommendedAction as ActionType)}>
                 {ACTION_LABEL[banner.recommendedAction]}
               </Button>
@@ -314,7 +320,7 @@ const RunDetail: React.FC = () => {
                 <ol className="flex flex-col">
                   {issues.map((a, i) => (
                     <li key={a.id} className="grid grid-cols-[44px_22px_minmax(0,1fr)] gap-2 border-b border-[var(--c3-style-basic-border-border)] py-3 first:pt-0 last:border-b-0 last:pb-0">
-                      <span className={`pt-0.5 font-mono text-[11.5px] ${muted}`}>{formatClock(a.detectedAt)}</span>
+                      <span className={`pt-0.5 font-mono text-[11.5px] ${muted}`}>{formatShortDateTime(a.detectedAt)}</span>
                       <span className={`mt-0.5 flex size-5 items-center justify-center rounded-full text-[11px] font-semibold ${a.status === 'OPEN' ? (a.severity === 'CRITICAL' ? 'bg-[var(--c3-style-basic-bg-danger)] text-[var(--c3-style-basic-fg-danger)]' : 'bg-[var(--c3-style-basic-bg-warning)] text-[var(--c3-style-basic-fg-warning)]') : 'bg-[var(--c3-style-basic-bg-success)] text-[var(--c3-style-basic-fg-success)]'}`}>
                         {i + 1}
                       </span>
@@ -365,12 +371,12 @@ const RunDetail: React.FC = () => {
                     </div>
                     {isOpen && (
                       <div className="flex shrink-0 flex-wrap gap-2">
-                        {a.status === 'OPEN' && (
+                        {a.status === 'OPEN' && canAct && (
                           <Button variant="ghost" appearance="secondary" size="sm" loading={busy === a.id} onClick={() => acknowledge(a)}>
                             Acknowledge
                           </Button>
                         )}
-                        {a.recommendedAction && live && (
+                        {a.recommendedAction && live && canAct && (
                           <Button size="sm" appearance={a.recommendedAction === 'CANCEL' ? 'danger' : 'accent'} leadingIcon={<Icon />} loading={busy === a.recommendedAction} onClick={() => request(a.recommendedAction as ActionType)}>
                             {ACTION_LABEL[a.recommendedAction]}
                           </Button>
@@ -394,7 +400,7 @@ const RunDetail: React.FC = () => {
               {log.map((e) => (
                 <ActivityRow
                   key={e.id}
-                  time={formatClock(e.actedAt)}
+                  time={formatShortDateTime(e.actedAt)}
                   icon={e.actor === 'AUTOPILOT' ? <Bot /> : e.actor === 'ADMIN' ? <ShieldCheck /> : <User />}
                   title={
                     <span className="flex flex-wrap items-center gap-2">
@@ -412,7 +418,7 @@ const RunDetail: React.FC = () => {
       )}
 
       {tab === 'actions' && (
-        <SectionCard title="Actions" subtitle={live ? 'Every action is logged with its Slurm command' : 'This run has ended'}>
+        <SectionCard title="Actions" subtitle={!live ? 'This run has ended' : canAct ? 'Every action is logged with its Slurm command' : `Only ${j.user ?? 'the run owner'} or a PI can act on this run`}>
           <ul className="grid grid-cols-1 gap-1 md:grid-cols-2">
             {MANUAL_ACTIONS.map((a) => {
               const Icon = ACTION_ICON[a];
@@ -420,7 +426,7 @@ const RunDetail: React.FC = () => {
                 <li key={a}>
                   <button
                     type="button"
-                    disabled={!live || busy !== null}
+                    disabled={!live || !canAct || busy !== null}
                     onClick={() => request(a)}
                     className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left hover:bg-[var(--c3-style-basic-bg-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
                   >

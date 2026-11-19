@@ -90,9 +90,9 @@ describe(filename, function () {
 
     it('generates an sbatch script with account, partition, QOS and time', function () {
       var s = this.plans[0].sbatchScript;
-      expect(s).toContain('#SBATCH --account=testlab');
-      expect(s).toContain('#SBATCH --partition=ai');
-      expect(s).toContain('#SBATCH --qos=');
+      expect(s).toContain('#SBATCH -A testlab');
+      expect(s).toContain('#SBATCH -p ai');
+      expect(s).toContain('#SBATCH -q ');
       expect(s).toContain('#SBATCH --time=');
     });
   });

@@ -13,7 +13,7 @@ export const frac = (v?: number | null): string => (v == null ? '—' : `${Math.
 export const num = (v?: number | null, digits = 0): string =>
   v == null ? '—' : v.toLocaleString('en-US', { maximumFractionDigits: digits });
 export const compact = (v?: number | null): string =>
-  v == null ? '—' : v.toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+  v == null ? '—' : Math.abs(v) < 1000 ? Math.round(v).toLocaleString('en-US') : v.toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 });
 export const usd = (v?: number | null): string =>
   v == null ? '—' : v.toLocaleString('en-US', { style: 'currency', currency: 'USD', notation: v >= 10000 ? 'compact' : 'standard', maximumFractionDigits: v >= 10000 ? 1 : 0 });
 export const hours = (v?: number | null): string => {

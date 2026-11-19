@@ -257,22 +257,35 @@ function slurmPartitionName(p) {
   return cid && id.indexOf(cid + '-') === 0 ? id.substring(cid.length + 1) : id;
 }
 
+/** ACCESS project ids look like `cis250417` (three letters + six digits). */
+var ACCESS_ACCOUNT_RE = /^[a-z]{3}\d{6}$/;
+
+/**
+ * Slurm account the way RCAC expects it: the PI/lab account on Purdue community clusters (Gilbreth, Gautschi, Negishi);
+ * the ACCESS allocation on Anvil, with the `-gpu` suffix for GPU partitions (`-A cis250417-gpu`); `<lab>-aws` on the
+ * cloud ParallelCluster.
+ */
 function chooseAccount(ctx, cluster, isGpu) {
-  var accounts = csv(ctx.lab.slurmAccounts);
-  var alloc = ctx.allocations[cluster.id];
-  var grants = alloc ? alloc.grantNames.join(' ').toLowerCase() : '';
-  var pick = accounts.filter(function (a) {
-    return grants.indexOf(a.toLowerCase()) >= 0;
-  })[0];
-  pick = pick || accounts.filter(function (a) {
-    return a.toLowerCase().indexOf(String(cluster.id)) >= 0;
-  })[0];
-  if (!pick && isGpu) {
-    pick = accounts.filter(function (a) {
-      return /gpu/i.test(a);
-    })[0];
+  var accounts = csv(ctx.lab.slurmAccounts).map(function (a) {
+    return a.toLowerCase();
+  });
+  var base = accounts.filter(function (a) {
+    return !ACCESS_ACCOUNT_RE.test(a.replace(/-gpu$/, '')) && !/-aws$/.test(a);
+  })[0] || String(ctx.labId).replace(/^lab-/, '');
+  if (cluster.billing == 'ACCESS_SU') {
+    var alloc = ctx.allocations[cluster.id];
+    var fromGrant = alloc ? (alloc.grantNames.join(' ').match(/\b([A-Za-z]{3}\d{6})\b/) || [])[1] : null;
+    var project = (fromGrant ? fromGrant.toLowerCase() : null) || accounts.filter(function (a) {
+      return ACCESS_ACCOUNT_RE.test(a);
+    })[0] || base;
+    return isGpu ? project + '-gpu' : project;
   }
-  return pick || accounts[0] || String(ctx.labId);
+  if (cluster.billing == 'THIRD_PARTY_HOURLY') {
+    return accounts.filter(function (a) {
+      return /-aws$/.test(a);
+    })[0] || base + '-aws';
+  }
+  return base;
 }
 
 /** Effective USD and allocation units per resource-hour (GPU-hour, or core-hour for CPU partitions). */
@@ -663,7 +676,7 @@ function builtinChecks(ctx, c) {
     severity: 'BLOCK',
     ok: !limitIssues.length,
     msg: limitIssues.length
-      ? (c.p.name || c.p.id) + ': ' + limitIssues.join('; ') + '.'
+      ? c.cluster.name + ' ' + (c.p.name || c.p.id) + ' (published limits: ' + fmtHours(num(c.p.maxWalltimeHours, 0)) + ', ' + (c.isGpu ? c.p.maxGpusPerJob + ' GPUs, ' : '') + c.p.maxNodesPerJob + ' node(s) per job): ' + limitIssues.join('; ') + '.'
       : (c.p.name || c.p.id) + ' allows ' + fmtHours(num(c.p.maxWalltimeHours, 0)) + (c.isGpu ? ', ' + c.p.maxGpusPerJob + ' GPUs' : '') + ' and ' + c.p.maxNodesPerJob + ' node(s) per job.',
   });
   var hasBudget = false;
@@ -690,6 +703,7 @@ function evaluateCandidate(ctx, c) {
   ctx.policies.forEach(function (pol) {
     if (!policyApplies(pol, c)) return;
     var r = evalPolicy(ctx, pol, c);
+    if (!r.ok && pol.sourceUrl) r.msg += ' Source: ' + pol.sourceUrl;
     results.push({
       key: pol.id,
       policy: pol,
@@ -842,8 +856,30 @@ function checkRules() {
 
 // ---------------------------------------------------------------- recommendPlans
 
+/** Module lines per cluster, following the RCAC user guides (module trees, ROCm on Negishi's MI210 nodes). */
+function moduleLines(cid, c, wt, env) {
+  var L = [];
+  var sim = wt == 'SIMULATION';
+  if (cid == 'aws-p4d') {
+    L.push('source ~/miniconda3/etc/profile.d/conda.sh   # ParallelCluster DLAMI: no Lmod modules');
+    L.push(sim ? 'export PATH=/opt/gromacs/bin:$PATH' : 'conda activate ' + env);
+    return L;
+  }
+  L.push('module purge');
+  if (cid == 'anvil') L.push(c.isGpu ? 'module load modtree/gpu' : 'module load modtree/cpu');
+  if (sim) {
+    L.push(c.isGpu && cid == 'negishi' ? 'module load rocm gromacs' : 'module load gromacs');
+    return L;
+  }
+  if (c.isGpu) L.push(cid == 'negishi' ? 'module load rocm' : 'module load cuda');
+  L.push('module load conda');
+  L.push('conda activate ' + env);
+  return L;
+}
+
 function sbatchScript(ctx, c, label) {
   var req = ctx.req;
+  var cid = String(c.cluster.id);
   var name = slug(req.name);
   var account = chooseAccount(ctx, c.cluster, c.isGpu);
   var qos = partitionQos(c.p);
@@ -852,24 +888,30 @@ function sbatchScript(ctx, c, label) {
   var gpusPerNode = Math.max(1, num(c.p.gpusPerNode, 1));
   var coresPerNode = num(c.p.coresPerNode, 64);
   var cpt = c.isGpu ? Math.max(1, Math.floor(coresPerNode / gpusPerNode)) : 1;
-  var mem = c.isGpu ? Math.max(8, Math.round((num(c.p.memPerNodeGb, 256) * gpn) / gpusPerNode * 0.9)) : Math.round(num(c.p.memPerNodeGb, 256) * 0.9);
+  var mem = c.isGpu ? Math.max(8, Math.round(((num(c.p.memPerNodeGb, 256) * gpn) / gpusPerNode) * 0.9)) : Math.round(num(c.p.memPerNodeGb, 256) * 0.9);
   var checkpointing = c.p.preemptible || c.chained > 1 || c.walltime > 4;
+  var rcac = c.cluster.billing == 'IN_HOUSE_NODE_SHARE'; // RCAC community clusters: account + partition + QOS on every job
+  var scratch = cid == 'anvil' ? '$SCRATCH' : cid == 'aws-p4d' ? '/fsx' : '$RCAC_SCRATCH';
+  var wt = String(req.workloadType || '');
   var L = [];
   L.push('#!/bin/bash');
   L.push('# EasyCompute plan "' + label + '" for "' + (req.name || req.id) + '" (' + (ctx.lab.name || ctx.labId) + ')');
   L.push('# ' + (c.isGpu ? c.gpus + ' x ' + c.gpuType.id : c.nodes + ' node(s), ' + c.nodes * coresPerNode + ' cores') + ' on ' + c.cluster.name + ' ' + (c.p.name || c.p.id) +
     ' | predicted runtime ' + fmtHours(c.duration) + ' | wait ' + waitBucket(c.wait) + ' | est. cost ' + round(c.costUnits, 1) + ' ' + (c.cluster.unitName || 'units') + ' ($' + round(c.costUsd, 2) + ')');
+  if (rcac) L.push('# RCAC requires account (-A), partition (-p) and QOS (-q) on every job' + (cid == 'gilbreth' ? ', plus an explicit --mem on Gilbreth' : '') + '.');
+  if (cid == 'anvil') L.push('# Anvil: GPU partitions are charged to the "-gpu" allocation account; no QOS flag.');
   L.push('#SBATCH --job-name=' + name);
-  L.push('#SBATCH --account=' + account);
-  L.push('#SBATCH --partition=' + part);
-  L.push('#SBATCH --qos=' + qos);
+  L.push('#SBATCH -A ' + account);
+  L.push('#SBATCH -p ' + part);
+  if (rcac) L.push('#SBATCH -q ' + qos);
   L.push('#SBATCH --nodes=' + c.nodes);
   if (c.isGpu) {
     L.push('#SBATCH --ntasks-per-node=' + gpn);
-    L.push('#SBATCH --gpus-per-node=' + gpn);
+    L.push(cid == 'gilbreth' ? '#SBATCH --gres=gpu:' + gpn : '#SBATCH --gpus-per-node=' + gpn);
     L.push('#SBATCH --cpus-per-task=' + cpt);
   } else {
     L.push('#SBATCH --ntasks-per-node=' + coresPerNode);
+    if (cid == 'anvil' && part == 'wholenode') L.push('#SBATCH --exclusive');
   }
   L.push('#SBATCH --mem=' + mem + 'G');
   L.push('#SBATCH --time=' + slurmTime(c.walltime));
@@ -878,20 +920,12 @@ function sbatchScript(ctx, c, label) {
   if (c.p.preemptible || c.chained > 1) L.push('#SBATCH --requeue');
   L.push('#SBATCH --mail-type=BEGIN,END,FAIL,TIME_LIMIT_80');
   if (ctx.req.submittedBy && ctx.req.submittedBy.username) L.push('#SBATCH --mail-user=' + ctx.req.submittedBy.username + '@purdue.edu');
-  L.push('#SBATCH --output=%x-%j.out');
+  L.push('#SBATCH -o %x-%j.out');
   L.push('');
   L.push('set -euo pipefail');
-  L.push('module purge');
-  var wt = String(req.workloadType || '');
-  if (wt == 'SIMULATION') {
-    L.push('module load ' + (c.isGpu ? 'cuda gromacs/2024.4-gpu' : 'gromacs/2024.4'));
-  } else if (c.isGpu) {
-    L.push('module load cuda/12.6 conda');
-    L.push('conda activate ' + name);
-  } else {
-    L.push('module load conda');
-    L.push('conda activate ' + name);
-  }
+  moduleLines(cid, c, wt, name).forEach(function (l) {
+    L.push(l);
+  });
   if (checkpointing) {
     L.push('');
     L.push('# On USR1 ask the application to write a checkpoint before the job ends');
@@ -902,15 +936,15 @@ function sbatchScript(ctx, c, label) {
   if (wt == 'SIMULATION') {
     L.push('srun gmx_mpi mdrun -deffnm ' + name + ' -cpi ' + name + '.cpt -cpt 15 -maxh ' + round(Math.max(0.2, c.walltime - 0.2), 1) + ' &');
   } else if (wt == 'DATA_PROCESSING') {
-    L.push('srun python process.py --input "$RCAC_SCRATCH/' + name + '/raw" --output "$RCAC_SCRATCH/' + name + '/processed" &');
+    L.push('srun python process.py --input "' + scratch + '/' + name + '/raw" --output "' + scratch + '/' + name + '/processed" &');
   } else if (wt == 'INFERENCE') {
-    L.push('srun python infer.py --model checkpoints/' + name + ' --tensor-parallel ' + Math.max(1, c.gpus) + ' --batch-size 32 &');
+    L.push('srun python infer.py --model "' + scratch + '/' + name + '/checkpoints" --tensor-parallel ' + Math.max(1, c.gpus) + ' --batch-size 32 &');
   } else if (wt == 'INTERACTIVE') {
-    L.push('jupyter lab --no-browser --ip=0.0.0.0 --port=$((8000 + RANDOM % 1000)) &');
+    L.push('jupyter lab --no-browser --ip=0.0.0.0 --port=$((8000 + RANDOM % 1000)) &   # or use Open OnDemand');
   } else {
     L.push('srun torchrun --nnodes=$SLURM_NNODES --nproc_per_node=' + Math.max(1, gpn) + ' \\');
     L.push('  --rdzv_backend=c10d --rdzv_endpoint=$(hostname):29500 \\');
-    L.push('  train.py --config configs/' + name + '.yaml --resume-from latest --save-every-min 30 &');
+    L.push('  train.py --config configs/' + name + '.yaml --ckpt-dir "' + scratch + '/' + name + '/ckpt" --resume-from latest --save-every-min 30 &');
   }
   L.push('wait');
   return L.join('\n');
@@ -1057,10 +1091,25 @@ function nextSlurmJobId(clusterId) {
   return String(Date.now() % 100000000);
 }
 
-function nodeName(clusterId, i) {
-  var prefix = { gautschi: 'gautschi-h', gilbreth: 'gilbreth-k', anvil: 'g', negishi: 'negishi-a', 'aws-p4d': 'ip-10-0-4-' }[clusterId] || clusterId + '-n';
-  var n = String(10 + i);
-  return prefix + (n.length < 3 ? '0' + n : n);
+/**
+ * A node name in the cluster's real naming scheme: Gilbreth `gilbreth-k007` (letter = node type of the partition),
+ * Gautschi `gautschi-h012` / `gautschi-g002` / `gautschi-a219`, Negishi `negishi-a336`, Anvil `g012` (gpu), `h009`
+ * (ai), `a142` (cpu), AWS ParallelCluster `p4d-dy-4` / `p4d-sp-3`.
+ */
+function nodeName(p, i) {
+  var cid = p.cluster ? String(p.cluster.id) : '';
+  var part = slurmPartitionName(p);
+  var gt = p.gpuType ? String(p.gpuType.id) : '';
+  var letter;
+  if (cid == 'aws-p4d') return (p.preemptible ? 'p4d-sp-' : 'p4d-dy-') + (1 + (i % Math.max(1, num(p.nodeCount, 4))));
+  if (cid == 'gilbreth') letter = { 'a100-80gb': 'k', 'a100-40gb': 'n', a10: 'h', a30: 'b', h100: 'l', training: 'j' }[part] || 'k';
+  else if (cid == 'gautschi') letter = part == 'ai' ? 'h' : part == 'smallgpu' ? 'g' : part == 'highmem' ? 'b' : 'a';
+  else if (cid == 'negishi') letter = part == 'gpu' ? 'g' : part == 'highmem' ? 'b' : 'a';
+  else if (cid == 'anvil') letter = /H100/.test(gt) ? 'h' : gt ? 'g' : part == 'highmem' ? 'b' : 'a';
+  else letter = 'a';
+  var n = String(1 + (i % Math.max(1, num(p.nodeCount, 20))));
+  while (n.length < 3) n = '0' + n;
+  return (cid == 'anvil' ? '' : cid + '-') + letter + n;
 }
 
 function submit(planId) {
@@ -1082,7 +1131,7 @@ function submit(planId) {
   var gpusPerNode = Math.max(1, num(p.gpusPerNode, 1));
   var cores = gpus > 0 ? Math.floor(num(p.coresPerNode, 64) / gpusPerNode) * gpus : nodes * num(p.coresPerNode, 64);
   var nodeList = [];
-  for (var i = 0; i < nodes; i++) nodeList.push(nodeName(clusterId, (Number(slurmJobId) + i * 3) % 40));
+  for (var i = 0; i < nodes; i++) nodeList.push(nodeName(p, Number(slurmJobId) % 97 + i));
   var lab = req.lab;
   var user = req.submittedBy && req.submittedBy.username ? String(req.submittedBy.username) : 'user_' + String(lab.id).substring(0, 3);
 

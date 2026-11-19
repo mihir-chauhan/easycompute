@@ -1,0 +1,22 @@
+/**
+ * What an {@link AppUser} may do in EasyCompute. Each value corresponds to a platform role
+ * (`EasyCompute.UniversityAdmin`, `EasyCompute.LabPI`, `EasyCompute.LabMember`).
+ */
+enum type AppUser.Role {
+  /**
+   * Research Computing staff: every lab, clusters, policies, users and approvals.
+   */
+  UNIVERSITY_ADMIN = 'UNIVERSITY_ADMIN'
+  /**
+   * Principal investigator: full control of their own lab, including members, guardrails and approvals.
+   */
+  PI = 'PI'
+  /**
+   * Graduate or undergraduate student: plans and runs jobs within the lab's limits and acts on their own jobs.
+   */
+  STUDENT = 'STUDENT'
+  /**
+   * Postdoc, research staff or lab manager: same rights as a student.
+   */
+  STAFF = 'STAFF'
+}

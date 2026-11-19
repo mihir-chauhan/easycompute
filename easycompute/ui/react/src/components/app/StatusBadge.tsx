@@ -58,6 +58,7 @@ export const STATUS_MAPS = {
     ONLINE: ['good', 'Online'],
     DEGRADED: ['warn', 'Degraded'],
     MAINTENANCE: ['neutral', 'Maintenance'],
+    RETIRED: ['neutral', 'Retired'],
   },
   actionOutcome: {
     DONE: ['good', 'Done'],

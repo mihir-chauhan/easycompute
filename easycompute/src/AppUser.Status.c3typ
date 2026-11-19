@@ -1,0 +1,17 @@
+/**
+ * Account state of an {@link AppUser}.
+ */
+enum type AppUser.Status {
+  /**
+   * Can sign in and use the app.
+   */
+  ACTIVE = 'ACTIVE'
+  /**
+   * Invited by a PI or admin; has not signed in yet.
+   */
+  INVITED = 'INVITED'
+  /**
+   * Removed from the lab; kept for the audit history.
+   */
+  DISABLED = 'DISABLED'
+}

@@ -31,9 +31,10 @@ import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { applyJobAction, fetchLabActions, fetchLiveJobs, fetchLiveMetrics, fetchMembers, fetchOpenAlerts, getLabSummary } from '@/features/lab/api';
 import { ActivityRow, CheckRow, HeadNote, JobStateBadge, muted } from '@/features/lab/components';
-import { ACTION_LABEL, ALERT_TYPE_LABEL, formatClock, formatInt, formatPct100, formatUsd } from '@/features/lab/format';
+import { ACTION_LABEL, ALERT_TYPE_LABEL, whereLabel, formatShortDateTime, formatClock, formatInt, formatPct100, formatUsd } from '@/features/lab/format';
 import type { Alert, Job, SummaryAllocation, SummaryDeadline } from '@/features/lab/types';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
+import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { formatDate, formatShortDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -64,6 +65,7 @@ const LabHome: React.FC = () => {
   const themeKey = useThemeKey();
   const { reportError } = useErrorBoundary();
   const { lab, labId, error: labError } = useCurrentLab();
+  const lr = useLabRole();
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -121,7 +123,7 @@ const LabHome: React.FC = () => {
     setBusy(a.id);
     setActionError(null);
     try {
-      await applyJobAction(a.job.id, a.recommendedAction);
+      await applyJobAction(a.job.id, a.recommendedAction, lr.actor);
       live.reload();
       summary.reload();
     } catch (err) {
@@ -150,7 +152,7 @@ const LabHome: React.FC = () => {
           </span>
         ),
         detail: a.message,
-        action: a.recommendedAction ? { label: ACTION_LABEL[a.recommendedAction], primary: a.severity === 'CRITICAL', run: () => runAction(a) } : undefined,
+        action: a.recommendedAction && lr.canActOn(a.job?.user) ? { label: ACTION_LABEL[a.recommendedAction], primary: a.severity === 'CRITICAL', run: () => runAction(a) } : undefined,
       }));
     allocations
       .filter((a) => a.runsOutBeforeEnd && a.projectedRunOut)
@@ -178,7 +180,7 @@ const LabHome: React.FC = () => {
       );
     return items.slice(0, 5);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alerts, allocations]);
+  }, [alerts, allocations, lr.role, lr.user]);
 
   const recentColumns: Column<Job>[] = [
     {
@@ -191,7 +193,7 @@ const LabHome: React.FC = () => {
         </div>
       ),
     },
-    { key: 'cl', header: 'Cluster', hideBelow: 'md', render: (j) => [j.cluster?.name ?? j.cluster?.id, j.partition?.name ?? j.partition?.id, j.qos].filter(Boolean).join(' · ') },
+    { key: 'cl', header: 'Cluster', hideBelow: 'md', render: (j) => whereLabel(j) },
     { key: 'gpus', header: 'GPUs', align: 'right', render: (j) => formatInt(j.allocGpus) },
     { key: 'st', header: 'Status', render: (j) => (alerts.some((a) => a.job?.id === j.id && a.severity === 'CRITICAL' && a.status === 'OPEN') ? <ToneBadge tone="warn">Needs approval</ToneBadge> : <JobStateBadge value={j.state} />) },
     { key: 'cost', header: 'Cost', align: 'right', render: (j) => formatUsd(j.costUsd) },
@@ -349,7 +351,7 @@ const LabHome: React.FC = () => {
               {actions.map((e) => (
                 <ActivityRow
                   key={e.id}
-                  time={formatClock(e.actedAt)}
+                  time={formatShortDateTime(e.actedAt)}
                   icon={e.actor === 'AUTOPILOT' ? <Bot /> : <User />}
                   title={`${ACTION_LABEL[e.actionType] ?? e.actionType}${e.job ? ` · ${e.job.jobName ?? e.job.name ?? e.job.id}` : ''}`}
                   detail={e.detail}

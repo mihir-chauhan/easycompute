@@ -27,7 +27,7 @@ import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { fetchLiveMetrics, fetchOpenAlerts, fetchRecentJobs, monitorTick } from '@/features/lab/api';
 import { AlertTypeBadge, CliHint, JobStateBadge, Mono, muted, Notice } from '@/features/lab/components';
-import { formatDuration, formatInt, formatPct100, formatRelative, formatUsd } from '@/features/lab/format';
+import { whereLabel, formatDuration, formatInt, formatPct100, formatRelative, formatUsd } from '@/features/lab/format';
 import type { Alert, Job } from '@/features/lab/types';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
 import { useLoad } from '@/features/lab/useLoad';
@@ -153,8 +153,8 @@ const RunList: React.FC = () => {
       ),
     },
     { key: 'owner', header: 'Owner', hideBelow: 'md', sortValue: (j) => j.user ?? '', render: (j) => j.user ?? '—' },
-    { key: 'cl', header: 'Cluster · QOS', hideBelow: 'lg', render: (j) => [j.cluster?.name ?? j.cluster?.id, j.partition?.name ?? j.partition?.id, j.qos].filter(Boolean).join(' · ') },
-    { key: 'gpus', header: 'GPUs', align: 'right', sortValue: (j) => j.allocGpus ?? 0, render: (j) => `${j.allocGpus ?? 0} × ${j.gpuType?.id?.split('-')[0] ?? 'CPU'}` },
+    { key: 'cl', header: 'Cluster · QOS', hideBelow: 'lg', render: (j) => whereLabel(j) },
+    { key: 'gpus', header: 'GPUs', align: 'right', hideBelow: 'sm', sortValue: (j) => j.allocGpus ?? 0, render: (j) => `${j.allocGpus ?? 0} × ${j.gpuType?.id?.split('-')[0] ?? 'CPU'}` },
     { key: 'st', header: 'Status', sortValue: (j) => j.state ?? '', render: status },
     { key: 'prog', header: 'Progress', hideBelow: 'md', render: progress },
     {
@@ -168,7 +168,7 @@ const RunList: React.FC = () => {
         return u == null ? <span className={muted}>–</span> : <span className={TONE_TEXT[utilTone(u)]}>{formatPct100(u)}</span>;
       },
     },
-    { key: 'cost', header: 'Charged', align: 'right', sortValue: (j) => j.costUsd ?? 0, render: (j) => formatUsd(j.costUsd) },
+    { key: 'cost', header: 'Charged', align: 'right', hideBelow: 'sm', sortValue: (j) => j.costUsd ?? 0, render: (j) => formatUsd(j.costUsd) },
   ];
 
   const error = labError ?? data.error;

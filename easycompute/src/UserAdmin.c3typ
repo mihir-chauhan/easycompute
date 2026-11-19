@@ -1,0 +1,55 @@
+/**
+ * App-level user management, the demo role switcher and PI / admin approvals. Every method acts as the current
+ * app user ({@link UserAdmin#whoAmI}) and enforces lab scope: admins act on every lab, PIs on their own lab, students
+ * and staff only read their own lab.
+ */
+type UserAdmin {
+
+  /**
+   * The acting app user (demo override, else the matching platform user, else a synthetic university admin) and
+   * what that user may do.
+   */
+  whoAmI: function(): json js-server
+
+  /**
+   * Makes the calling platform user act as the given {@link AppUser} (null clears the override). Returns
+   * {@link UserAdmin#whoAmI}.
+   */
+  setDemoUser: function(appUserId: string): json js-server
+
+  /**
+   * Users of a lab (or of every lab for admins) with role and status counts.
+   */
+  listUsers: function(labId: string): json js-server
+
+  /**
+   * Invites a person to a lab with a role; the user starts as INVITED.
+   */
+  inviteUser: function(email: !string, name: !string, role: !string, labId: string): json js-server
+
+  /**
+   * Changes a user's role.
+   */
+  setRole: function(userId: !string, role: !string): json js-server
+
+  /**
+   * Removes a user from the lab (status DISABLED; history is kept).
+   */
+  removeUser: function(userId: !string): json js-server
+
+  /**
+   * Decisions waiting for a PI or admin: walltime extensions requested by users or autopilot, and runs over a
+   * lab's approval threshold.
+   */
+  pendingApprovals: function(labId: string): json js-server
+
+  /**
+   * Approves a pending item (`ALE:<ActionLogEntry id>` or `RR:<RunRequest id>`).
+   */
+  approve: function(id: !string, note: string): json js-server
+
+  /**
+   * Rejects a pending item (`ALE:<ActionLogEntry id>` or `RR:<RunRequest id>`).
+   */
+  reject: function(id: !string, note: string): json js-server
+}

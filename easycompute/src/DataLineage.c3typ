@@ -1,0 +1,11 @@
+/**
+ * Data lineage for the Data Fusion page: sources, pipelines, entities and consumers with live row counts, last
+ * load, rejected rows and freshness.
+ */
+type DataLineage {
+
+  /**
+   * The lineage graph (nodes, edges and summary) computed from the current data.
+   */
+  graph: function(): json js-server
+}

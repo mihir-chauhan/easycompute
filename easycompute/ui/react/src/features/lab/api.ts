@@ -142,7 +142,7 @@ export const getLabSummary = async (labId: string) => unbox<LabSummary>(await la
 /* ---------- Jobs / monitor ---------- */
 
 const JOB_LIST_INCLUDE =
-  'id, slurmJobId, user, jobName, state, workloadType, cluster.id, cluster.name, partition.id, partition.name, qos, allocGpus, allocNodes, allocCpus, gpuType.id, gpuType.name, timelimitHours, elapsedHours, gpuUtilAvg, costUsd, costUnits, submitTime, startTime, endTime, project.id, project.name, isLive';
+  'id, slurmJobId, user, jobName, state, workloadType, cluster.id, cluster.name, partition.id, partition.name, partition.slurmPartition, qos, allocGpus, allocNodes, allocCpus, gpuType.id, gpuType.name, timelimitHours, elapsedHours, gpuUtilAvg, costUsd, costUnits, submitTime, startTime, endTime, project.id, project.name, isLive';
 
 export const fetchLiveJobs = (labId: string) =>
   fetchObjs<Job>('Job', {
@@ -197,7 +197,7 @@ export const fetchJobMetrics = async (jobId: string) =>
 
 export const fetchOpenAlerts = (labId: string) =>
   fetchObjs<Alert>('JobAlert', {
-    include: 'id, job.id, job.jobName, alertType, severity, status, detectedAt, message, recommendedAction, autoActionTaken',
+    include: 'id, job.id, job.jobName, job.user, alertType, severity, status, detectedAt, message, recommendedAction, autoActionTaken',
     filter: `${eq('lab.id', labId)} && (status == 'OPEN' || status == 'ACKED')`,
     order: 'descending(detectedAt)',
     limit: 200,
@@ -227,8 +227,8 @@ export const fetchLabActions = (labId: string, limit = 20) =>
     limit,
   });
 
-export const applyJobAction = (jobId: string, actionType: ActionType) =>
-  labCall<ActionLog>('Job', 'applyAction', { id: jobId }, [actionType, 'USER']);
+export const applyJobAction = (jobId: string, actionType: ActionType, actor: 'USER' | 'ADMIN' | 'AUTOPILOT' = 'USER') =>
+  labCall<ActionLog>('Job', 'applyAction', { id: jobId }, [actionType, actor]);
 
 export const ackAlert = (id: string) => labCall<Alert>('JobAlert', 'merge', { id, status: 'ACKED' });
 

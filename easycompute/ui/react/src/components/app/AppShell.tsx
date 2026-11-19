@@ -19,14 +19,16 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeftRight, Bell, Building2, Check, ChevronDown, Search, Settings, Wallet, X, type LucideIcon } from 'lucide-react';
+import { ArrowLeftRight, Bell, Building2, Check, ChevronDown, Lock, Search, Settings, Wallet, X, type LucideIcon } from 'lucide-react';
 
 import { DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { c3Call } from '@/c3Action';
 import { getLabSummary, getUniversityOverview } from '@/features/admin/api';
 import type { LabSummaryLite, UniversityOverview } from '@/features/admin/types';
 import { cn } from '@/lib/utils';
 
 import { ProgressBar } from './ProgressBar';
+import { ROLE_LABEL, ROLE_SHORT, roleCan, type EcRole, type Permission } from './roles';
 import { burnTone, type Tone } from './tone';
 
 /* ------------------------------------------------- context ------------------------------------------------- */
@@ -49,11 +51,27 @@ interface AppShellContextValue {
   /** Cluster scope from the top bar ("all clusters" = null). */
   clusterId: string | null;
   setClusterId: (id: string | null) => void;
+  /** Demo role (avatar menu): drives nav, access and page actions. */
+  role: EcRole;
+  setRole: (role: EcRole) => void;
+  can: (permission: Permission) => boolean;
+  /** Demo signed-in person for the role: the lab's PI, a student of the lab, or RCAC staff. */
+  user: ShellUser | null;
+}
+
+export interface ShellUser {
+  id: string;
+  name: string;
+  username: string;
+  /** LabMember.role (PI, POSTDOC, STUDENT, STAFF) or 'RCAC' for university admins. */
+  memberRole: string;
 }
 
 const AppShellContext = createContext<AppShellContextValue | null>(null);
 const LAB_KEY = 'easycompute.labId';
 const BANNER_KEY = 'easycompute.banner.dismissed';
+const ROLE_KEY = 'easycompute.role';
+const RCAC_USER: ShellUser = { id: 'rcac-admin', name: 'RCAC staff (demo)', username: 'rcac-admin', memberRole: 'RCAC' };
 
 const readStored = (key: string): string | null => {
   try {
@@ -75,6 +93,27 @@ export function AppShellProvider({ labs, defaultLabId, children }: { labs: Shell
   const location = useLocation();
   const [labId, setLabIdState] = useState<string | null>(() => readStored(LAB_KEY) ?? defaultLabId ?? null);
   const [clusterId, setClusterId] = useState<string | null>(null);
+  const [role, setRoleState] = useState<EcRole>(() => {
+    const r = readStored(ROLE_KEY);
+    return r === 'PI' || r === 'MEMBER' || r === 'UNIVERSITY_ADMIN' ? r : 'UNIVERSITY_ADMIN';
+  });
+  const [members, setMembers] = useState<Array<{ id: string; name: string; username: string; role: string }>>([]);
+  const setRole = useCallback((r: EcRole) => {
+    setRoleState(r);
+    writeStored(ROLE_KEY, r);
+  }, []);
+
+  // Members of the current lab, to pick the demo signed-in person for the role.
+  useEffect(() => {
+    if (!labId) return undefined;
+    let cancelled = false;
+    c3Call('LabMember', 'fetch', null, [{ include: 'id, name, username, role', filter: `lab.id == '${labId.replace(/'/g, '')}'`, order: 'name', limit: 100, offset: 0 }])
+      .then((res: { objs?: Array<{ id: string; name: string; username: string; role: string }> }) => !cancelled && setMembers(res?.objs ?? []))
+      .catch(() => !cancelled && setMembers([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [labId]);
 
   useEffect(() => {
     if (labs.length === 0) return;
@@ -95,8 +134,16 @@ export function AppShellProvider({ labs, defaultLabId, children }: { labs: Shell
       view: location.pathname.startsWith('/admin') ? 'admin' : 'lab',
       clusterId,
       setClusterId,
+      role,
+      setRole,
+      can: (p: Permission) => roleCan(role, p),
+      user: (() => {
+        if (role === 'UNIVERSITY_ADMIN') return RCAC_USER;
+        const m = role === 'PI' ? members.find((x) => x.role === 'PI') ?? members.find((x) => x.role === 'STAFF') : members.find((x) => x.role === 'STUDENT') ?? members.find((x) => x.role === 'POSTDOC');
+        return m ? { id: m.id, name: m.name, username: m.username, memberRole: m.role } : null;
+      })(),
     }),
-    [labs, labId, setLabId, location.pathname, clusterId],
+    [labs, labId, setLabId, location.pathname, clusterId, role, setRole, members],
   );
   return <AppShellContext.Provider value={value}>{children}</AppShellContext.Provider>;
 }
@@ -104,7 +151,21 @@ export function AppShellProvider({ labs, defaultLabId, children }: { labs: Shell
 /** Current lab, view and cluster scope. Safe outside the provider (returns an empty shell). */
 export function useAppShell(): AppShellContextValue {
   const ctx = useContext(AppShellContext);
-  return ctx ?? { labs: [], labId: null, lab: null, setLabId: () => undefined, view: 'lab', clusterId: null, setClusterId: () => undefined };
+  return (
+    ctx ?? {
+      labs: [],
+      labId: null,
+      lab: null,
+      setLabId: () => undefined,
+      view: 'lab',
+      clusterId: null,
+      setClusterId: () => undefined,
+      role: 'UNIVERSITY_ADMIN',
+      setRole: () => undefined,
+      can: () => true,
+      user: null,
+    }
+  );
 }
 
 /* -------------------------------------------------- types -------------------------------------------------- */
@@ -121,6 +182,8 @@ export interface ShellNavItem {
   badgeTone?: 'live' | 'new';
   /** Hide from the sidebar (still matched for the active state, e.g. detail routes). */
   hidden?: boolean;
+  /** Roles that see this item (default: all). */
+  roles?: EcRole[];
 }
 
 /* -------------------------------------------------- pieces -------------------------------------------------- */
@@ -161,9 +224,10 @@ const iconBtn = 'grid size-8 shrink-0 place-items-center rounded-lg text-[var(--
 
 /** Workspace switcher: lab (lab view) or "Purdue Research Computing" (admin view). The menu switches both. */
 function WorkspaceSwitcher() {
-  const { labs, lab, labId, setLabId, view } = useAppShell();
+  const { labs, lab, labId, setLabId, view, role } = useAppShell();
   const navigate = useNavigate();
   const name = view === 'admin' ? 'research-computing' : lab?.name ?? 'Select lab';
+  const pill = view === 'admin' ? ROLE_SHORT.UNIVERSITY_ADMIN : ROLE_SHORT[role];
   return (
     <DropdownMenu align="start">
       <DropdownMenuTrigger>
@@ -182,7 +246,7 @@ function WorkspaceSwitcher() {
               view === 'admin' ? 'bg-[var(--ec-blue-bg)] text-[var(--ec-blue)]' : 'bg-[var(--ec-pink-bg)] text-[var(--ec-pink)]',
             )}
           >
-            {view === 'admin' ? 'RCAC staff' : 'Lab admin'}
+            {pill}
           </span>
           <ChevronDown className="size-4 shrink-0 text-[var(--ec-fg-2)]" aria-hidden />
         </button>
@@ -201,7 +265,8 @@ function WorkspaceSwitcher() {
           }}
         />
       ))}
-      <DropdownMenuSeparator />
+      {role === 'UNIVERSITY_ADMIN' ? <DropdownMenuSeparator /> : null}
+      {role === 'UNIVERSITY_ADMIN' ? (
       <DropdownMenuItem
         value="__view"
         label={view === 'admin' ? 'Back to lab view' : 'Research Computing view'}
@@ -209,6 +274,7 @@ function WorkspaceSwitcher() {
         leftIcon={<ArrowLeftRight />}
         onSelect={() => navigate(view === 'admin' ? '/' : '/admin')}
       />
+      ) : null}
     </DropdownMenu>
   );
 }
@@ -306,6 +372,64 @@ function CommandPalette({ open, onClose, items }: { open: boolean; onClose: () =
   );
 }
 
+const ROLES: EcRole[] = ['UNIVERSITY_ADMIN', 'PI', 'MEMBER'];
+const ROLE_AVATAR: Record<EcRole, string> = { UNIVERSITY_ADMIN: 'R', PI: 'P', MEMBER: 'S' };
+
+/** Avatar menu with the demo role switcher (University Admin / PI / Student). */
+function RoleMenu({ role, setRole, userName }: { role: EcRole; setRole: (r: EcRole) => void; userName?: string }) {
+  const navigate = useNavigate();
+  return (
+    <DropdownMenu align="end">
+      <DropdownMenuTrigger>
+        <button type="button" aria-label={`Account and demo role: ${ROLE_LABEL[role]}`} className="rounded-full focus-visible:outline-2">
+          <Avatar text={ROLE_AVATAR[role]} size={28} />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuLabel>{userName ? `${userName} · ${ROLE_LABEL[role]}` : ROLE_LABEL[role]}</DropdownMenuLabel>
+      <DropdownMenuSeparator />
+      <DropdownMenuLabel>Demo role</DropdownMenuLabel>
+      {ROLES.map((r) => (
+        <DropdownMenuItem
+          key={r}
+          value={`role-${r}`}
+          label={ROLE_LABEL[r]}
+          trailingIcon={r === role ? <Check /> : undefined}
+          onSelect={() => {
+            setRole(r);
+            if (r !== 'UNIVERSITY_ADMIN' && window.location.hash.startsWith('#/admin')) navigate('/');
+          }}
+        />
+      ))}
+      <DropdownMenuSeparator />
+      <DropdownMenuItem value="__members" label={role === 'MEMBER' ? 'Lab members' : 'Users & roles'} onSelect={() => navigate(role === 'UNIVERSITY_ADMIN' ? '/admin/users' : '/members')} />
+    </DropdownMenu>
+  );
+}
+
+/** Shown on Research Computing pages for roles without access. */
+function AccessNotice({ role, onSwitch }: { role: EcRole; onSwitch: () => void }) {
+  const navigate = useNavigate();
+  return (
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 px-6 text-center">
+      <span className="grid size-10 place-items-center rounded-full bg-[var(--ec-card-2)] text-[var(--ec-fg-2)]">
+        <Lock className="size-5" aria-hidden />
+      </span>
+      <p className="m-0 text-base font-medium text-[var(--ec-fg-hi)]">Research Computing is for University Admins</p>
+      <p className="m-0 max-w-md text-sm text-[var(--ec-fg-2)]">
+        You are signed in as {ROLE_LABEL[role]}. University dashboards, clusters, data pipelines and user management need the RCAC staff role.
+      </p>
+      <div className="flex gap-2">
+        <button type="button" onClick={() => navigate('/')} className="inline-flex h-[34px] items-center rounded-md border border-[var(--ec-line-2)] px-3 text-sm font-medium hover:bg-[var(--ec-card)]">
+          Back to my lab
+        </button>
+        <button type="button" onClick={onSwitch} className="inline-flex h-[34px] items-center rounded-md bg-[var(--ec-accent-hi)] px-3 text-sm font-medium text-[#132010] hover:bg-[#95f37e]">
+          Switch demo role to Admin
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* --------------------------------------------------- shell --------------------------------------------------- */
 
 interface AppShellProps {
@@ -333,7 +457,7 @@ const elapsedOf = (start?: string, end?: string): number | null => {
 };
 
 export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, children }: AppShellProps) {
-  const { view, labId, labs, setLabId } = useAppShell();
+  const { view, labId, labs, setLabId, role, setRole, user } = useAppShell();
   const location = useLocation();
   const navigate = useNavigate();
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -395,7 +519,7 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
   const groups = useMemo(() => {
     const out: Array<{ name: string | null; items: ShellNavItem[] }> = [];
     items
-      .filter((i) => !i.hidden)
+      .filter((i) => !i.hidden && (!i.roles || i.roles.includes(role)))
       .forEach((i) => {
         const name = i.group ?? null;
         const g = out.find((x) => x.name === name);
@@ -427,8 +551,8 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
 
   const paletteItems = useMemo(
     () => [
-      ...labNav.filter((i) => !i.hidden).map((i) => ({ key: `l${i.path}`, label: i.label, hint: 'Lab view', run: () => navigate(i.path) })),
-      ...adminNav.filter((i) => !i.hidden).map((i) => ({ key: `a${i.path}`, label: i.label, hint: 'Research Computing', run: () => navigate(i.path) })),
+      ...labNav.filter((i) => !i.hidden && (!i.roles || i.roles.includes(role))).map((i) => ({ key: `l${i.path}`, label: i.label, hint: 'Lab view', run: () => navigate(i.path) })),
+      ...adminNav.filter((i) => !i.hidden && role === 'UNIVERSITY_ADMIN').map((i) => ({ key: `a${i.path}`, label: i.label, hint: 'Research Computing', run: () => navigate(i.path) })),
       ...labs.map((l) => ({
         key: `lab-${l.id}`,
         label: l.name,
@@ -440,7 +564,7 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
       })),
       ...(overview?.clusters ?? []).map((c) => ({ key: `c-${c.id}`, label: c.name, hint: 'Cluster', run: () => navigate(`/admin/clusters/${c.id}`) })),
     ],
-    [labNav, adminNav, labs, overview, navigate, setLabId],
+    [labNav, adminNav, labs, overview, navigate, setLabId, role],
   );
 
   const navLink = (item: ShellNavItem, target: string = item.path) => {
@@ -540,7 +664,7 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
           <button type="button" className={cn(iconBtn, 'hidden sm:grid')} aria-label="Lab settings" onClick={() => navigate('/context')}>
             <Settings />
           </button>
-          <Avatar text="P" size={28} className="hidden sm:grid" />
+          <RoleMenu role={role} setRole={setRole} userName={user?.name} />
         </div>
       </header>
 
@@ -555,11 +679,15 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
               {g.items.map((i) => navLink(i))}
             </React.Fragment>
           ))}
-          <h6 className="mx-2 mt-3.5 mb-1.5 hidden text-xs font-medium text-[var(--ec-fg-2)] md:block">{view === 'admin' ? 'Lab' : 'University'}</h6>
-          {navLink(
-            { path: '__switch', label: view === 'admin' ? 'Back to lab view' : 'Research Computing', icon: view === 'admin' ? ArrowLeftRight : Building2 },
-            view === 'admin' ? '/' : '/admin',
-          )}
+          {role === 'UNIVERSITY_ADMIN' ? (
+            <>
+              <h6 className="mx-2 mt-3.5 mb-1.5 hidden text-xs font-medium text-[var(--ec-fg-2)] md:block">{view === 'admin' ? 'Lab' : 'University'}</h6>
+              {navLink(
+                { path: '__switch', label: view === 'admin' ? 'Back to lab view' : 'Research Computing', icon: view === 'admin' ? ArrowLeftRight : Building2 },
+                view === 'admin' ? '/' : '/admin',
+              )}
+            </>
+          ) : null}
 
           {view === 'lab' && meters.length > 0 ? (
             <div className="mt-auto hidden flex-col gap-2.5 border-t border-[var(--ec-line)] px-2 pt-3 pb-1 text-xs text-[var(--ec-fg-2)] md:flex">
@@ -575,7 +703,9 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
             </div>
           ) : null}
         </nav>
-        <main className="min-w-0 flex-1 overflow-auto bg-[var(--ec-bg)]">{children}</main>
+        <main className="min-w-0 flex-1 overflow-auto bg-[var(--ec-bg)]">
+          {view === 'admin' && role !== 'UNIVERSITY_ADMIN' ? <AccessNotice role={role} onSwitch={() => setRole('UNIVERSITY_ADMIN')} /> : children}
+        </main>
       </div>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteItems} />

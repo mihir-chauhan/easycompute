@@ -197,8 +197,8 @@ interface MetricChartProps {
 export function MetricChart({ title, subtitle, actions, option, legend, loading, error, onRetry, empty, emptyLabel = 'No data for this view yet.', heightClass = 'h-72', ariaLabel, onItemClick, footer, className }: MetricChartProps) {
   let body: ReactNode;
   if (error) body = <ErrorState message={error} onRetry={onRetry} />;
-  else if (loading || !option) body = <ChartSkeleton className={heightClass} />;
-  else if (empty) body = <EmptyState title={emptyLabel} className={heightClass} />;
+  else if (loading) body = <ChartSkeleton className={heightClass} />;
+  else if (empty || !option) body = <EmptyState title={emptyLabel} className={heightClass} />;
   else body = <EChart option={option} className={heightClass} ariaLabel={ariaLabel} onItemClick={onItemClick} />;
   return (
     <SectionCard title={title} subtitle={subtitle} actions={actions} className={cn('h-full', className)}>

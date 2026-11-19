@@ -92,6 +92,26 @@ entity type RunRequest {
   createdAt: datetime
 
   /**
+   * Whether a lab rule requires PI approval before submission; set by {@link RunRequest#checkRules}.
+   */
+  approvalStatus: string enum RunRequest.Approval
+
+  /**
+   * Which rule requires approval, or the approver's note.
+   */
+  approvalReason: string
+
+  /**
+   * Who approved or rejected the request.
+   */
+  approvedBy: string
+
+  /**
+   * When the request was approved or rejected.
+   */
+  approvedAt: datetime
+
+  /**
    * Rule results from the last check.
    */
   checks: [RuleCheck](runRequest)

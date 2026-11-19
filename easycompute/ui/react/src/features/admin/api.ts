@@ -1,6 +1,5 @@
 /*
- * Research Computing (admin) data access. Every call goes through `adminCall` = `c3Call`, unless the dev server runs
- * with `VITE_ADMIN_STUBS=1` (layout work without a backend; the stub module is lazy-loaded and never used otherwise).
+ * Research Computing (admin) data access. Every call goes through `c3Call` (live backend verified 18:49 UTC).
  */
 
 import { c3Call } from '@/c3Action';
@@ -9,10 +8,6 @@ import { filterLiteral } from '@/lib/format';
 import type { ComputeCluster, FetchResult, JobLite, Lab, LabSummaryLite, Partition, Policy, UniversityOverview } from './types';
 
 async function adminCall<T>(type: string, action: string, thisArg?: unknown, args?: unknown[]): Promise<T> {
-  if (import.meta.env.VITE_ADMIN_STUBS === '1') {
-    const { stubCall } = await import('./stubs');
-    return stubCall(type, action, thisArg, args ?? []) as T;
-  }
   return (await c3Call(type, action, thisArg, args)) as T;
 }
 
@@ -90,3 +85,123 @@ export const listPartitions = (): Promise<Partition[]> =>
 /** FAIL rule checks (for "Blocks (30d)" per policy). */
 export const listFailedChecks = (): Promise<Array<{ id: string; policy?: { id: string } | null; checkedAt?: string }>> =>
   fetchObjs('RuleCheck', { include: 'id, policy.id, checkedAt', filter: "outcome == 'FAIL'", order: 'descending(checkedAt)', limit: 2000 });
+
+/* ------------------------------------------------------------ users & approvals ------------------------------------------------------------ */
+
+export interface MemberRow {
+  id: string;
+  name: string;
+  username: string;
+  role: string;
+  lab?: { id: string; name?: string };
+  meta?: { created?: string; updated?: string };
+}
+
+export const listMembers = (labId?: string | null): Promise<MemberRow[]> =>
+  fetchObjs<MemberRow>('LabMember', {
+    include: 'id, name, username, role, lab.id, lab.name, meta.created, meta.updated',
+    ...(labId ? { filter: `lab.id == ${filterLiteral(labId)}` } : {}),
+    order: 'name',
+    limit: 500,
+  });
+
+export const createMember = (m: { id: string; name: string; username: string; role: string; labId: string }) =>
+  adminCall<MemberRow>('LabMember', 'create', { id: m.id, name: m.name, username: m.username, role: m.role, lab: { id: m.labId } });
+
+export const updateMemberRole = (id: string, role: string) => adminCall<MemberRow>('LabMember', 'merge', { id, role });
+
+export const removeMember = (id: string) => adminCall<boolean>('LabMember', 'remove', { id });
+
+export interface ApprovalRow {
+  id: string;
+  actionType: string;
+  actor: string;
+  actedAt?: string;
+  detail?: string;
+  outcome: string;
+  lab?: { id: string; name?: string };
+  job?: { id: string; user?: string; jobName?: string; state?: string };
+}
+
+export const listPendingApprovals = (labId?: string | null): Promise<ApprovalRow[]> =>
+  fetchObjs<ApprovalRow>('ActionLogEntry', {
+    include: 'id, actionType, actor, actedAt, detail, outcome, lab.id, lab.name, job.id, job.user, job.jobName, job.state',
+    filter: `outcome == 'PENDING_APPROVAL'${labId ? ` && lab.id == ${filterLiteral(labId)}` : ''}`,
+    order: 'descending(actedAt)',
+    limit: 200,
+  });
+
+/** Approve: run the action as ADMIN on a still-running job (best effort), then close the request as DONE. */
+export async function approveRequest(a: ApprovalRow, approver: string): Promise<void> {
+  if (a.job?.id && a.job.state === 'RUNNING' && a.actionType !== 'NOTIFY_PI') {
+    try {
+      await adminCall('Job', 'applyAction', { id: a.job.id }, [a.actionType, 'ADMIN']);
+    } catch {
+      // The job may have moved on; the request is still recorded as approved.
+    }
+  }
+  await adminCall('ActionLogEntry', 'merge', { id: a.id, outcome: 'DONE', detail: `${a.detail ?? ''} · Approved by ${approver}`.trim() });
+}
+
+export const denyRequest = (a: ApprovalRow, approver: string) =>
+  adminCall('ActionLogEntry', 'merge', { id: a.id, outcome: 'FAILED', detail: `${a.detail ?? ''} · Denied by ${approver}`.trim() });
+
+/* ---------------------------------------------------------------- data fusion ---------------------------------------------------------------- */
+
+export interface EntityStat {
+  type: string;
+  count: number | null;
+  lastUpdated: string | null;
+  error?: string;
+}
+
+/** Row count + latest load time of an entity type (null when the type is not reachable). */
+export async function entityStat(type: string): Promise<EntityStat> {
+  try {
+    const [count, latest] = await Promise.all([
+      adminCall<number>(type, 'fetchCount', null, [{}]),
+      fetchObjs<{ id: string; meta?: { updated?: string } }>(type, { include: 'id, meta.updated', order: 'descending(meta.updated)', limit: 1 }),
+    ]);
+    return { type, count: typeof count === 'number' ? count : null, lastUpdated: latest[0]?.meta?.updated ?? null };
+  } catch (e) {
+    return { type, count: null, lastUpdated: null, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export interface FeedStat {
+  feed: string;
+  deployed: boolean;
+  files: number;
+  failedFiles: number;
+  lastLoad: string | null;
+  rejected: number | null;
+  error?: string;
+}
+
+/** Native ingestion stats for a FileSourceCollection (C3 Data Fusion): files, failures, last load, rejections. */
+export async function feedStat(feed: string): Promise<FeedStat> {
+  const lit = filterLiteral(feed);
+  try {
+    const fsc = await fetchObjs<{ id: string; name?: string }>('FileSourceCollection', { include: 'id, name', filter: `name == ${lit} || id == ${lit}`, limit: 1 });
+    if (!fsc.length) return { feed, deployed: false, files: 0, failedFiles: 0, lastLoad: null, rejected: null };
+    const [files, rejected] = await Promise.all([
+      fetchObjs<{ id: string; status?: { state?: string }; meta?: { updated?: string } }>('SourceFile', {
+        include: 'id, status.state, meta.updated',
+        filter: `sourceCollectionName == ${lit}`,
+        order: 'descending(meta.updated)',
+        limit: 200,
+      }).catch(() => []),
+      adminCall<number>('IngestRejection', 'fetchCount', null, [{ filter: `feed == ${lit}` }]).catch(() => null),
+    ]);
+    return {
+      feed,
+      deployed: true,
+      files: files.length,
+      failedFiles: files.filter((f) => /fail|reject|error/i.test(f.status?.state ?? '')).length,
+      lastLoad: files[0]?.meta?.updated ?? null,
+      rejected: typeof rejected === 'number' ? rejected : null,
+    };
+  } catch (e) {
+    return { feed, deployed: false, files: 0, failedFiles: 0, lastLoad: null, rejected: null, error: e instanceof Error ? e.message : String(e) };
+  }
+}

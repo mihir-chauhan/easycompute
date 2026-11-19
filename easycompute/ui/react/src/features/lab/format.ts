@@ -4,7 +4,7 @@
  */
 
 import type { Tone } from '@/components/app';
-import type { ActionType, AlertType, JobState, RuleScope, WorkloadType } from './types';
+import type { ActionType, AlertType, WorkloadType } from './types';
 
 export const WORKLOAD_LABEL: Record<WorkloadType, string> = {
   TRAINING: 'Training',
@@ -13,17 +13,6 @@ export const WORKLOAD_LABEL: Record<WorkloadType, string> = {
   SIMULATION: 'Simulation',
   DATA_PROCESSING: 'Data processing',
   INTERACTIVE: 'Interactive',
-};
-
-export const JOB_STATE_LABEL: Record<JobState, string> = {
-  PENDING: 'Pending',
-  RUNNING: 'Running',
-  COMPLETED: 'Completed',
-  FAILED: 'Failed',
-  TIMEOUT: 'Timeout',
-  CANCELLED: 'Cancelled',
-  OUT_OF_MEMORY: 'Out of memory',
-  PREEMPTED: 'Preempted',
 };
 
 export const ALERT_TYPE_LABEL: Record<AlertType, string> = {
@@ -49,20 +38,8 @@ export const ACTION_LABEL: Record<ActionType, string> = {
   HOLD: 'Hold',
 };
 
-export const SCOPE_LABEL: Record<RuleScope, string> = {
-  UNIVERSITY: 'University',
-  CLUSTER: 'Cluster',
-  PARTITION: 'Partition',
-  LAB: 'Lab',
-};
-
-export const SCOPE_ORDER: RuleScope[] = ['UNIVERSITY', 'CLUSTER', 'PARTITION', 'LAB'];
-
 /** `AUTO_RESOLVED` → `Auto resolved`. */
 export const titleCase = (v: string): string => v.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
-
-export const labelOf = <K extends string>(map: Record<K, string>, value?: string | null): string =>
-  value ? (map[value as K] ?? titleCase(value)) : '—';
 
 const usd0 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 const usd2 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
@@ -82,12 +59,14 @@ export const formatDuration = (hours?: number | null): string => {
   const h = Math.max(0, hours);
   if (h < 1) return `${Math.round(h * 60)}m`;
   if (h < 48) {
-    const whole = Math.floor(h);
-    const m = Math.round((h - whole) * 60);
+    const mins = Math.round(h * 60);
+    const whole = Math.floor(mins / 60);
+    const m = mins - whole * 60;
     return m ? `${whole}h ${m}m` : `${whole}h`;
   }
-  const d = Math.floor(h / 24);
-  const rem = Math.round(h - d * 24);
+  const totalH = Math.round(h);
+  const d = Math.floor(totalH / 24);
+  const rem = totalH - d * 24;
   return rem ? `${d}d ${rem}h` : `${d}d`;
 };
 
@@ -123,6 +102,10 @@ export const formatClock = (iso?: string | null): string => {
 /** Walltime remaining for a live job, hours. */
 export const walltimeLeft = (job: { timelimitHours?: number; elapsedHours?: number }): number | null =>
   job.timelimitHours == null ? null : Math.max(0, job.timelimitHours - (job.elapsedHours ?? 0));
+
+/** `Gautschi · ai · normal` for a job (Slurm partition name, not the long display name). */
+export const whereLabel = (j: { cluster?: { id: string; name?: string }; partition?: { id: string; name?: string; slurmPartition?: string }; qos?: string }): string =>
+  [j.cluster?.name ?? j.cluster?.id, j.partition?.slurmPartition ?? j.partition?.name ?? j.partition?.id, j.qos].filter(Boolean).join(' · ');
 
 /** Clock time for today, `Nov 19` otherwise (activity timelines). */
 export const formatShortDateTime = (iso?: string | null): string => {

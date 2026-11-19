@@ -57,6 +57,24 @@ function tdpFor(gpuTypeId) {
   return 165;
 }
 
+/** A node name in the cluster's naming scheme (same rules as RunRequest#submit). */
+function nodeName(p, i) {
+  if (p == null) return 'node' + i;
+  var cid = p.cluster ? String(p.cluster.id) : '';
+  var part = String(p.slurmPartition || p.name || '').toLowerCase();
+  var gt = p.gpuType ? String(p.gpuType.id) : '';
+  var letter;
+  if (cid == 'aws-p4d') return (p.preemptible ? 'p4d-sp-' : 'p4d-dy-') + (1 + (i % Math.max(1, num(p.nodeCount, 4))));
+  if (cid == 'gilbreth') letter = { 'a100-80gb': 'k', 'a100-40gb': 'n', a10: 'h', a30: 'b', h100: 'l', training: 'j' }[part] || 'k';
+  else if (cid == 'gautschi') letter = part == 'ai' ? 'h' : part == 'smallgpu' ? 'g' : part == 'highmem' ? 'b' : 'a';
+  else if (cid == 'negishi') letter = part == 'gpu' ? 'g' : part == 'highmem' ? 'b' : 'a';
+  else if (cid == 'anvil') letter = /H100/.test(gt) ? 'h' : gt ? 'g' : part == 'highmem' ? 'b' : 'a';
+  else letter = 'a';
+  var n = String(1 + (i % Math.max(1, num(p.nodeCount, 20))));
+  while (n.length < 3) n = '0' + n;
+  return (cid == 'anvil' ? '' : cid + '-') + letter + n;
+}
+
 /**
  * Next sample from the last two: each metric continues half of its last change plus bounded noise, so scripted
  * issues (idle GPUs, rising memory, stale checkpoints) persist, while healthy jobs keep fluctuating. A small,
@@ -161,7 +179,7 @@ function tick() {
       if (queuedH >= waitH || rand(j.id + ':start:' + Math.floor(simTo / HOUR_MS)) < STEP_MIN / 60 / Math.max(0.25, waitH)) {
         var nodes = Math.max(1, num(j.allocNodes, 1));
         var names = [];
-        for (var n = 0; n < nodes; n++) names.push(String(j.cluster ? j.cluster.id : 'node') + '-n' + (10 + Math.floor(rand(j.id + ':node' + n) * 80)));
+        for (var n = 0; n < nodes; n++) names.push(nodeName(j.partition, Math.floor(rand(j.id + ':node') * 90) + n));
         jobUpdates.push({ id: j.id, state: 'RUNNING', startTime: toDt(simTo - STEP_MIN * MIN_MS), nodeList: j.nodeList || names.join(',') });
         var gpus = num(j.allocGpus, 0);
         var wt = String(j.workloadType || '');

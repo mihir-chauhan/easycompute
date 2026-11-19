@@ -1,0 +1,10 @@
+/**
+ * The {@link AppUser} a platform user is acting as in the demo role switcher. Id = platform user id.
+ */
+entity type DemoIdentity {
+
+  /**
+   * App user being impersonated for the demo.
+   */
+  appUser: AppUser
+}

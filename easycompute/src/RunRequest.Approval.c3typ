@@ -1,0 +1,21 @@
+/**
+ * Whether a {@link RunRequest} needs PI approval before it may be submitted.
+ */
+enum type RunRequest.Approval {
+  /**
+   * No approval rule applies.
+   */
+  NOT_REQUIRED = 'NOT_REQUIRED'
+  /**
+   * A lab rule requires the PI's approval (for example runs above 500 GPU-hours); submit is blocked until decided.
+   */
+  PENDING = 'PENDING'
+  /**
+   * Approved by the PI or Research Computing.
+   */
+  APPROVED = 'APPROVED'
+  /**
+   * Rejected; the request is closed.
+   */
+  REJECTED = 'REJECTED'
+}

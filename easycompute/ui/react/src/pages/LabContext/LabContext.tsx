@@ -126,12 +126,11 @@ const LabContext: React.FC = () => {
       render: (a) => (
         <div className="flex min-w-0 flex-col">
           <span className="truncate font-medium text-[var(--c3-style-basic-fg-primary)]">{a.grantName ?? a.id}</span>
-          <Mono className={muted}>{`${a.cluster?.name ?? a.cluster?.id ?? ''} · ${titleCase(a.source ?? '')}`}</Mono>
+          <Mono className={muted}>{`${a.cluster?.name ?? a.cluster?.id ?? ''} · ${titleCase(a.source ?? '')} · ends ${formatDate(a.endDate)}`}</Mono>
         </div>
       ),
     },
     { key: 'avail', header: 'Available', align: 'right', render: (a) => `${formatInt((a.totalUnits ?? 0) - (a.usedUnits ?? 0))} ${a.unitName ?? ''}` },
-    { key: 'ends', header: 'Ends', hideBelow: 'sm', render: (a) => formatDate(a.endDate) },
     {
       key: 'use',
       header: 'Use',

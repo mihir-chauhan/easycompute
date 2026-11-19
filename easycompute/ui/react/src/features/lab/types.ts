@@ -11,11 +11,14 @@
 export interface Ref {
   id: string;
   name?: string;
+  /** Partition refs: the Slurm `-p` value (e.g. `ai`, `a100-80gb`). */
+  slurmPartition?: string;
 }
 
 /** Job reference as included on alerts/actions (`job.jobName`). */
 export interface JobRef extends Ref {
   jobName?: string;
+  user?: string;
 }
 
 export type ClusterBilling = 'IN_HOUSE_NODE_SHARE' | 'ACCESS_SU' | 'THIRD_PARTY_HOURLY';
