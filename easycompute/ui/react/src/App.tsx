@@ -37,6 +37,7 @@ import AdminClusterDetail from './pages/AdminClusters/AdminClusterDetail';
 import AdminLabs from './pages/AdminLabs/AdminLabs';
 import AdminData from './pages/AdminData/AdminData';
 import AdminUsers from './pages/AdminUsers/AdminUsers';
+import Projects from './pages/Projects/Projects';
 // </routes-imports>
 
 /** Mirrors the shell's current lab into the lab pages' `useCurrentLab` (features/lab), so both stay in step. */
@@ -136,6 +137,7 @@ export default function App() {
                 <Route path="/admin/data" element={<AdminData />} />
                 <Route path="/admin/users" element={<AdminUsers />} />
                 <Route path="/members" element={<AdminUsers />} />
+                <Route path="/projects" element={<Projects />} />
                 {/* </routes> */}
                   <Route
                     path="*"

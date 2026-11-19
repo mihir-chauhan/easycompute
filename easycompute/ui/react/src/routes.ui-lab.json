@@ -7,5 +7,6 @@
   { "path": "/runs/:id", "element": "pages/Runs/RunDetail", "export": "default", "section": "lab" },
   { "path": "/monitor", "element": "pages/Runs/LiveMonitor", "export": "default", "navLabel": "Live monitor", "icon": "Activity", "section": "lab", "group": "During a run", "badge": "live" },
   { "path": "/guardrails", "element": "pages/Guardrails/Guardrails", "export": "default", "navLabel": "Guardrails", "icon": "Zap", "section": "lab", "group": "During a run", "badge": "New" },
+  { "path": "/projects", "element": "pages/Projects/Projects", "export": "default", "navLabel": "Projects", "icon": "FolderKanban", "section": "lab", "group": "Lab" },
   { "path": "/history", "element": "pages/History/History", "export": "default", "navLabel": "Allocations & usage", "icon": "Wallet", "section": "lab", "group": "Lab" }
 ]
