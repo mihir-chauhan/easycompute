@@ -202,7 +202,6 @@ export interface RunPlan {
   gpus?: number;
   nodes?: number;
   walltimeHours?: number;
-  estWaitHours?: number;
   estDurationHours?: number;
   estCostUnits?: number;
   estCostUsd?: number;
@@ -214,8 +213,6 @@ export interface RunPlan {
   qos?: string;
   account?: string;
   slurmPartition?: string;
-  waitBucket?: string;
-  waitReason?: string;
   chainedJobs?: number;
   preemptionRisk?: number;
   gpuMemNeedGb?: number;
@@ -225,8 +222,6 @@ export interface RunPlan {
   ruleWarnings?: number;
   /** AnvilRuntimeQ50Q90 P90 (estDurationHours is the P50). */
   estDurationP90Hours?: number;
-  /** AnvilQueueWaitQ50Q90 P90 (estWaitHours is the P50). */
-  estWaitP90Hours?: number;
   /** AnvilHostMemoryQ50Q90 sized --mem. */
   memRequestGb?: number;
   cpuEvidence?: unknown;
@@ -381,7 +376,6 @@ export interface LabSummary {
   kpis: {
     liveJobs?: number;
     runningJobs?: number;
-    pendingJobs?: number;
     runningGpus?: number;
     openAlerts?: number;
     criticalAlerts?: number;
@@ -483,14 +477,12 @@ export interface SnapJob {
   submitTime?: string;
   startTime?: string;
   endTime?: string;
-  etaStartAt?: string | null;
-  queuePosition?: number | null;
   elapsedHours?: number;
   timelimitHours?: number;
   remainingHours?: number;
   costUnits?: number;
   costUsd?: number;
-  /** elapsedHours gained per real second (demo time scale). */
+  /** elapsedHours gained per real second. */
   progressPerRealSec?: number;
   latest?: Omit<JobMetric, 'id'> | null;
   alerts?: { id: string; alertType: AlertType; severity: AlertSeverity; status: AlertStatus }[];
@@ -499,8 +491,8 @@ export interface SnapJob {
 /** `RunMonitor.liveSnapshot(labId)`: cheap live state, polled every 5-10 s. */
 export interface LiveSnapshot {
   serverTime?: string;
-  simulator?: { enabled?: boolean; demoTimeScale?: number; queueWaitCompression?: number; lastTickAt?: string; nextTickInSec?: number };
-  counts?: { running?: number; pending?: number; openAlerts?: number; criticalAlerts?: number; awaitingConfirmation?: number };
+  simulator?: { enabled?: boolean; demoTimeScale?: number; lastTickAt?: string; nextTickInSec?: number };
+  counts?: { running?: number; openAlerts?: number; criticalAlerts?: number; awaitingConfirmation?: number };
   jobs?: SnapJob[];
   partitions?: { id: string; clusterId?: string; utilizationPct?: number; currentQueueDepth?: number; avgWaitHours?: number }[];
   clusters?: { id: string; status?: string; healthPct?: number; liveUtilizationPct?: number }[];

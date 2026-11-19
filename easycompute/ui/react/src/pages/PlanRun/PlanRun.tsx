@@ -77,7 +77,6 @@ function Stepper({ step, reached, onJump }: { step: number; reached: number; onJ
   );
 }
 
-const WAIT_RANGE: Record<string, string> = { '<15 min': '0-15 min', '15 min-2 h': '15 min-2 h', '2-12 h': '2-12 h', '>12 h': '12 h+' };
 
 function PlanCard({ plan, selected, deadlineLabel, pred, fairShare, onSelect }: { plan: RunPlan; selected: boolean; deadlineLabel?: string; pred?: DurationPrediction | null; fairShare?: RuleCheck; onSelect: () => void }) {
   const label = plan.label ?? `Plan ${plan.rank}`;
@@ -131,16 +130,6 @@ function PlanCard({ plan, selected, deadlineLabel, pred, fairShare, onSelect }: 
                   support={pred?.sampleSize != null ? `${formatInt(pred.sampleSize as number)} jobs` : undefined}
                   extra={typeof pred?.explanation === 'string' ? pred.explanation : undefined}
                 />
-              </span>,
-            ],
-            [
-              'Queue wait',
-              <span key="w" className="flex flex-col gap-1">
-                <span>
-                  {plan.estWaitP90Hours != null ? `P50 ${formatDuration(plan.estWaitHours)} · P90 ${formatDuration(plan.estWaitP90Hours)}` : `~${formatDuration(plan.estWaitHours)}`}
-                  {plan.estWaitP90Hours == null && plan.waitBucket ? <span className={muted}>{` (P50-P90 ${WAIT_RANGE[plan.waitBucket] ?? plan.waitBucket})`}</span> : null}
-                </span>
-                <ModelProvenance name="AnvilQueueWaitQ50Q90" provenance={provenanceFor(plan, 'AnvilQueueWaitQ50Q90')} confidence="low" extra={plan.waitReason} />
               </span>,
             ],
             [
@@ -458,13 +447,13 @@ const PlanRun: React.FC = () => {
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="text-lg font-medium text-[var(--c3-style-basic-fg-primary)]">Ranked configurations</h2>
               <span className="flex flex-wrap items-center gap-2">
-                <HeadNote>Ranked by deadline slack, then lab cost, then queue wait</HeadNote>
+                <HeadNote>Ranked by deadline slack, then lab cost, then runtime</HeadNote>
                 <ModelProvenance name="AnvilHostMemoryQ50Q90" extra="Host memory request sized from P90 of similar jobs (--mem in the script)." />
               </span>
             </div>
             {plans === null ? (
               <SectionCard>
-                <ModelsComputing names={['AnvilRuntimeQ50Q90', 'AnvilQueueWaitQ50Q90', 'AnvilHostMemoryQ50Q90', 'GPUShapeAdvisor', 'LabFairShareAllocator']} />
+                <ModelsComputing names={['AnvilRuntimeQ50Q90', 'AnvilHostMemoryQ50Q90', 'GPUShapeAdvisor', 'LabFairShareAllocator']} />
               </SectionCard>
             ) : plans.length === 0 ? (
               <SectionCard>
@@ -534,8 +523,8 @@ const PlanRun: React.FC = () => {
                   </div>
                   <div className={cn('text-[13px]', muted)}>
                     {chained > 1
-                      ? `Job 1 is queued now; jobs 2-${chained} are chained with afterok and resume from checkpoint. Live monitoring starts automatically.`
-                      : `Expected to finish ${plan.finishBy ? formatDateTime(plan.finishBy) : 'soon'} for about ${formatUsd(plan.estCostUsd)}. Live monitoring starts automatically.`}
+                      ? `Job 1 starts running immediately; jobs 2-${chained} are chained with afterok and resume from checkpoint. Live monitoring starts automatically.`
+                      : `Expected to finish ${plan.finishBy ? formatDateTime(plan.finishBy) : 'soon'} for about ${formatUsd(plan.estCostUsd)}. Starts running immediately; live monitoring starts automatically.`}
                   </div>
                 </div>
                 <Button variant="outline" appearance="secondary" onClick={() => setStep(2)}>

@@ -99,7 +99,7 @@ Tools (all read-only):
   (ids like P-01, U-02, L-03), the lab context sentences (<labId>#n) and projects. Use it for any rule, limit, QOS,
   charge, storage or "what did our lab say" question.
 - evaluateRun: what-if check of a planned run: real rule checks (ClusterPolicyEngine; cite each rule by its ruleId) and
-  3 ranked plans with wait, duration, finish, cost, meetsDeadline, plus allocations left. Pass project (e.g. "CVPR"),
+  3 ranked plans with duration, finish, cost, meetsDeadline, plus allocations left. Pass project (e.g. "CVPR"),
   workloadType (FINETUNE for fine-tunes) and deadline when the user names a day. Do not call labContext after it.
 - liveJobs / jobHealth: live job evidence (GPU util, memory, checkpoint age, walltime left, alerts); cite jobs by job id.
 - labContext (constraints extracted from the lab text; UNCONFIRMED ones are hints only), labSummary, listPolicies,

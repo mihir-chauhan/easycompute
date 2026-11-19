@@ -28,7 +28,7 @@ import { fetchLiveJobs, fetchLiveMetrics, fetchOpenAlerts } from '@/features/lab
 import { HeadNote, JobStateBadge, Mono, muted } from '@/features/lab/components';
 import { ALERT_TYPE_LABEL, formatDuration, formatPct100, formatRelative, formatUsd, walltimeLeft } from '@/features/lab/format';
 import { LIVE_POLL_MS, LiveBadge, liveJob, mergeSnap, snapToJob, useLiveSnapshot, useNow, withLatest } from '@/features/lab/live';
-import { buildTelemetry, queueStatus, TELEMETRY_TICK_MS, type TelemetryPoint } from '@/features/lab/telemetry';
+import { buildTelemetry, TELEMETRY_TICK_MS, type TelemetryPoint } from '@/features/lab/telemetry';
 import type { Alert, JobMetric, SnapJob } from '@/features/lab/types';
 import { useLoad } from '@/features/lab/useLoad';
 import { cn } from '@/lib/utils';
@@ -40,13 +40,12 @@ const CARD_WINDOW_MS = 10 * 60_000;
 
 const lastOf = (pts: TelemetryPoint[], k: 'gpuUtilPct' | 'gpuMemPct') => [...pts].reverse().find((p) => p[k] != null)?.[k] ?? null;
 
-function JobCard({ job, series, alerts, now, onOpen }: { job: LiveJob; series: TelemetryPoint[]; alerts: Alert[]; now: number; onOpen: () => void }) {
+function JobCard({ job, series, alerts, onOpen }: { job: LiveJob; series: TelemetryPoint[]; alerts: Alert[]; onOpen: () => void }) {
   const running = job.state === 'RUNNING';
   const util = lastOf(series, 'gpuUtilPct');
   const mem = lastOf(series, 'gpuMemPct');
   const left = walltimeLeft(job);
   const frac = job.timelimitHours ? (job.elapsedHours ?? 0) / job.timelimitHours : 0;
-  const qs = running ? null : queueStatus(job, now);
   const worst = [...alerts].sort((a, b) => (SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9))[0];
   return (
     <button
@@ -69,10 +68,6 @@ function JobCard({ job, series, alerts, now, onOpen }: { job: LiveJob; series: T
         {running ? (
           <Pill tone="accent" dot pulse>
             Running
-          </Pill>
-        ) : qs?.starting ? (
-          <Pill tone="info" dot pulse>
-            Starting
           </Pill>
         ) : (
           <JobStateBadge value={job.state} />
@@ -107,8 +102,6 @@ function JobCard({ job, series, alerts, now, onOpen }: { job: LiveJob; series: T
         </>
       ) : (
         <div className="flex flex-col gap-1.5">
-          <div className="text-sm text-[var(--ec-fg-hi)] tabular-nums">{qs?.label}</div>
-          <ProgressBar value={qs?.progress ?? 0} tone="info" ariaLabel="Queue wait elapsed" />
           <div className={cn('text-xs', muted)}>{`Submitted ${formatRelative(job.submitTime)} · ${formatDuration(job.timelimitHours)} limit`}</div>
         </div>
       )}
@@ -127,7 +120,7 @@ function JobCard({ job, series, alerts, now, onOpen }: { job: LiveJob; series: T
   );
 }
 
-/** Live monitor: every running and queued job of the current lab, streaming. */
+/** Live monitor: every running job of the current lab, streaming. */
 const LiveMonitor: React.FC = () => {
   const navigate = useNavigate();
   const { labId, clusterId } = useAppShell();
@@ -142,7 +135,7 @@ const LiveMonitor: React.FC = () => {
     const extra = (snap.snap?.jobs ?? []).filter((s: SnapJob) => !seen.has(s.id)).map(snapToJob);
     return [...fetched, ...extra]
       .map((j) => mergeSnap(j, snap.byJob[j.id]))
-      .filter((j) => (j.state === 'RUNNING' || j.state === 'PENDING') && (!clusterId || j.cluster?.id === clusterId));
+      .filter((j) => j.state === 'RUNNING' && (!clusterId || j.cluster?.id === clusterId));
   }, [fetched, snap, clusterId]);
 
   const metricsByJob = useMemo(() => {
@@ -173,11 +166,7 @@ const LiveMonitor: React.FC = () => {
   const readAt = snap.updatedAt ?? data.updatedAt;
   const shown = jobs.map((j) => liveJob(j, readAt, now, j.progressPerRealSec) as LiveJob);
   const running = shown.filter((j) => j.state === 'RUNNING');
-  const queued = shown.filter((j) => j.state === 'PENDING');
-  const ordered = [
-    ...running.sort((a, b) => Math.min(9, ...(alertsByJob[a.id] ?? []).map((x) => SEV_RANK[x.severity] ?? 9)) - Math.min(9, ...(alertsByJob[b.id] ?? []).map((x) => SEV_RANK[x.severity] ?? 9)) || (b.allocGpus ?? 0) - (a.allocGpus ?? 0)),
-    ...queued.sort((a, b) => (a.queuePosition ?? 99) - (b.queuePosition ?? 99)),
-  ];
+  const ordered = running.sort((a, b) => Math.min(9, ...(alertsByJob[a.id] ?? []).map((x) => SEV_RANK[x.severity] ?? 9)) - Math.min(9, ...(alertsByJob[b.id] ?? []).map((x) => SEV_RANK[x.severity] ?? 9)) || (b.allocGpus ?? 0) - (a.allocGpus ?? 0));
   const gpus = running.reduce((n, j) => n + (j.allocGpus ?? 0), 0);
   const utils = running.map((j) => lastOf(series[j.id] ?? [], 'gpuUtilPct')).filter((v): v is number => v != null);
   const avgUtil = utils.length ? utils.reduce((a, b) => a + b, 0) / utils.length : null;
@@ -198,7 +187,7 @@ const LiveMonitor: React.FC = () => {
   return (
     <PageFrame
       title="Live monitor"
-      description="Every running and queued job in your lab, streaming GPU, memory, walltime and cost."
+      description="Every running job in your lab, streaming GPU, memory, walltime and cost."
       badges={<LiveBadge updatedAt={readAt} />}
       actions={
         <Button leadingIcon={<Rocket />} onClick={() => navigate('/plan')}>
@@ -211,9 +200,8 @@ const LiveMonitor: React.FC = () => {
       {loading ? (
         <KpiRowSkeleton />
       ) : (
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
           <KpiTile label="Running" value={running.length} tone={running.length ? 'good' : 'neutral'} caption={`${new Set(running.map((j) => j.cluster?.id)).size} clusters`} onClick={() => navigate('/runs?view=running')} />
-          <KpiTile label="Queued" value={queued.length} caption={queued.length ? `next starts ${queueStatus(queued[0], now).starting ? 'now' : 'soon'}` : 'Queue is empty'} onClick={() => navigate('/runs?view=queued')} />
           <KpiTile label="GPUs in use" value={gpus} caption={`across ${running.length} run${running.length === 1 ? '' : 's'}`} />
           <KpiTile label="Avg GPU util" value={formatPct100(avgUtil)} tone={avgUtil == null ? undefined : utilTone(avgUtil)} trend={fleetTrend} trendTone={utilTone(avgUtil)} caption="live, across running jobs" />
           <KpiTile label="Open alerts" value={openAlerts.length} tone={critical ? 'bad' : openAlerts.length ? 'warn' : 'good'} caption={critical ? `${critical} critical` : 'none critical'} />
@@ -222,7 +210,7 @@ const LiveMonitor: React.FC = () => {
       )}
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
-        <SectionCard title="Live jobs" actions={<HeadNote>{`${running.length} running · ${queued.length} queued`}</HeadNote>}>
+        <SectionCard title="Live jobs" actions={<HeadNote>{`${running.length} running`}</HeadNote>}>
           {loading ? (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {[0, 1, 2, 3].map((i) => (
@@ -232,7 +220,7 @@ const LiveMonitor: React.FC = () => {
           ) : ordered.length === 0 ? (
             <EmptyState
               icon={<Activity />}
-              title="No running or queued jobs"
+              title="No running jobs"
               hint="Launch a run and it appears here with live GPU, memory, walltime and cost."
               action={
                 <Button size="sm" leadingIcon={<Rocket />} onClick={() => navigate('/plan')}>
@@ -243,7 +231,7 @@ const LiveMonitor: React.FC = () => {
           ) : (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {ordered.map((j) => (
-                <JobCard key={j.id} job={j} series={series[j.id] ?? []} alerts={alertsByJob[j.id] ?? []} now={now} onOpen={() => navigate(`/runs/${encodeURIComponent(j.id)}`)} />
+                <JobCard key={j.id} job={j} series={series[j.id] ?? []} alerts={alertsByJob[j.id] ?? []} onOpen={() => navigate(`/runs/${encodeURIComponent(j.id)}`)} />
               ))}
             </div>
           )}

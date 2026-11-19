@@ -340,7 +340,7 @@ export default function AdminPolicies() {
     >
       <Note title="Changed upstream on Nov 2">
         Gautschi now gives each group a GPU share based on its semester usage, and normal QOS on the ai partition is limited to 4 days (was 14). EasyCompute updated the
-        affected rules and re-planned queued runs.
+        affected rules and re-planned affected runs.
       </Note>
 
       {error ? <ErrorState message={`Could not load policies: ${error}`} onRetry={reload} /> : null}

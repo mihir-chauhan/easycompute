@@ -17,7 +17,6 @@ export type ModelName =
   | 'LabContextExtractor'
   | 'ClusterPolicyEngine'
   | 'AnvilRuntimeQ50Q90'
-  | 'AnvilQueueWaitQ50Q90'
   | 'AnvilTaskCPUQ50Q90'
   | 'AnvilHostMemoryQ50Q90'
   | 'GPUShapeAdvisor'
@@ -30,7 +29,6 @@ export const MODEL_INFO: Record<ModelName, { method: string; version: string; hi
   LabContextExtractor: { method: 'schema-constrained LLM + validation', version: 'v1', note: 'Every extracted field cites its evidence and needs lab confirmation.' },
   ClusterPolicyEngine: { method: 'versioned deterministic rules', version: 'policy set 2026-11-02', note: 'Exact and explainable; nothing can waive a BLOCK rule.' },
   AnvilRuntimeQ50Q90: { method: 'LinearQuantileRegressor (pinball loss)', version: 'v1', historical: true, note: 'P50/P90 trained on completed jobs, temporal holdout.' },
-  AnvilQueueWaitQ50Q90: { method: 'LinearQuantileRegressor', version: 'v1', historical: true, note: 'Low confidence: no live backlog snapshots.' },
   AnvilTaskCPUQ50Q90: { method: 'LinearQuantileRegressor', version: 'v1', historical: true, note: 'Per-task core-equivalent; right-sizing evidence only.' },
   AnvilHostMemoryQ50Q90: { method: 'LinearQuantileRegressor', version: 'v1', historical: true, note: 'Host RAM only; the archive has no GPU VRAM.' },
   GPUShapeAdvisor: { method: 'hardware catalogue + deterministic rules', version: 'v1', note: 'No learned GPU model (no GPU evidence in the archive).' },

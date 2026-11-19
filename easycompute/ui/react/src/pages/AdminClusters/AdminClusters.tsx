@@ -26,7 +26,7 @@ import {
   type Billing,
 } from '@/components/app';
 import { getLiveSnapshot, getUniversityOverview, listClusters, mergeLiveClusters } from '@/features/admin/api';
-import { compact, hours, num, pct, unitPrice, usd } from '@/features/admin/components';
+import { compact, num, pct, unitPrice, usd } from '@/features/admin/components';
 import type { ComputeCluster, OverviewCluster } from '@/features/admin/types';
 import { cn } from '@/lib/utils';
 
@@ -153,7 +153,7 @@ export default function AdminClusters() {
                   <ProgressBar value={hasGpus && live ? live.gpuUtilizationPct / 100 : 0} tone={utilTone(live?.gpuUtilizationPct)} />
                 </div>
                 <div className="grid grid-cols-3 gap-3">
-                  <Metric label="Queue / wait" value={live ? `${num(live.queueDepth)} · ${hours(live.avgWaitHours)}` : '—'} />
+                  <Metric label="Live jobs" value={live ? num(live.liveJobs) : '—'} />
                   <Metric label="Cores" value={compact(c.totalCores)} />
                   <Metric label="Storage" value={c.storageTb ? `${compact(c.storageTb)} TB` : '—'} />
                 </div>

@@ -60,13 +60,6 @@ function fmtHours(h) {
   return round(h / 24, 1) + ' days';
 }
 
-function waitBucket(h) {
-  if (h < 0.25) return '<15 min';
-  if (h < 2) return '15 min-2 h';
-  if (h < 12) return '2-12 h';
-  return '>12 h';
-}
-
 function slug(s) {
   var out = String(s || 'run').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return out.substring(0, 40) || 'run';
@@ -326,7 +319,8 @@ function scalingEfficiency(gpus, nodes) {
 }
 
 /**
- * Models one (partition, GPU count) option: duration, walltime (chained when needed), wait, cost, deadline, risk.
+ * Models one (partition, GPU count) option: duration, walltime (chained when needed), cost, deadline, risk. Runs start
+ * immediately on submit (no queue), so the finish time is runtime only.
  * Returns null when the option is physically impossible (memory, walltime without checkpointing).
  */
 function modelCandidate(ctx, p, gpus, q) {
@@ -370,17 +364,6 @@ function modelCandidate(ctx, p, gpus, q) {
   var memFit = !isGpu || ctx.memNeedGb <= 0 || ctx.memNeedGb <= gpus * num(gpuType.memoryGb, 40) * 0.9;
 
   var util = num(p.utilizationPct, 50);
-  var base = num(p.avgWaitHours, 0.5);
-  var pressure = 1 + Math.max(0, (util - 80) / 20);
-  var wait = base * pressure * (1 + 0.25 * (Math.log(Math.max(1, gpus)) / Math.LN2)) * (nodes > 1 ? 1.3 : 1);
-  if (chained > 1) wait = wait * 1.5;
-  var waitP90 = wait * 2;
-  var waitSource = 'partition';
-  var waitHistory = q && q.waitHistory ? q.waitHistory : null;
-  var waitReason =
-    (p.name || p.id) + ' is ' + Math.round(util) + '% busy with ' + num(p.currentQueueDepth, 0) + ' jobs queued (typical wait ' +
-    fmtHours(base) + ')' + (gpus > 1 ? '; ' + gpus + (isGpu ? ' GPUs' : ' nodes') + (nodes > 1 && isGpu ? ' across ' + nodes + ' nodes' : '') + ' take longer to schedule' : '') + '.';
-  if (waitHistory) waitReason += ' Historically (AnvilQueueWaitQ50Q90, Anvil 2021, low confidence, not live) similar jobs waited P50 ' + fmtHours(waitHistory.p50) + ' / P90 ' + fmtHours(waitHistory.p90) + '.';
   var nodeShareGb = isGpu ? Math.max(8, Math.round(((num(p.memPerNodeGb, 256) * Math.min(gpus, gpusPerNode)) / gpusPerNode) * 0.9)) : Math.round(num(p.memPerNodeGb, 256) * 0.9);
   var memRequestGb = nodeShareGb;
   var memSource = 'heuristic';
@@ -394,7 +377,7 @@ function modelCandidate(ctx, p, gpus, q) {
   var resourceHours = isGpu ? gpus * duration : nodes * coresPerNode * duration;
   var costUnits = resourceHours * rates.unitsPerHour;
   var costUsd = resourceHours * rates.usdPerHour;
-  var finishHours = wait + duration * 1.2;
+  var finishHours = duration * 1.2;
   var slack = ctx.deadlineMs != null ? (ctx.deadlineMs - ctx.now) / HOUR_MS - finishHours : null;
   var preemptionRisk = p.preemptible ? 1 - Math.exp(-duration * 0.02 * Math.max(0.5, util / 80)) : 0.01;
 
@@ -408,16 +391,12 @@ function modelCandidate(ctx, p, gpus, q) {
     duration: duration,
     durationP90: durationP90,
     runtimeSource: runtimeSource,
-    waitP90: waitP90,
-    waitSource: waitSource,
     memRequestGb: memRequestGb,
     memSource: memSource,
     cpuEvidence: cpuEvidence,
     shape: isGpu ? ctx.shapes[gpuType.id] || null : null,
     walltime: walltime,
     chained: chained,
-    wait: wait,
-    waitReason: waitReason,
     costUnits: costUnits,
     costUsd: costUsd,
     usdPerGpuHour: isGpu ? rates.usdPerHour : null,
@@ -684,8 +663,8 @@ function deadlineCheck(ctx, c) {
   if (ctx.deadlineMs == null) return { ok: true, msg: 'No deadline set.' };
   var left = (ctx.deadlineMs - ctx.now) / HOUR_MS;
   return c.meetsDeadline
-    ? { ok: true, msg: 'Wait ' + fmtHours(c.wait) + ' + 1.2 x runtime ' + fmtHours(c.duration) + ' finishes ' + fmtHours(c.slack) + ' before ' + ctx.deadlineLabel + '.' }
-    : { ok: false, msg: 'Wait ' + fmtHours(c.wait) + ' + 1.2 x runtime ' + fmtHours(c.duration) + ' = ' + fmtHours(c.finishHours) + ', but ' + ctx.deadlineLabel + ' is in ' + fmtHours(Math.max(0, left)) + '.' };
+    ? { ok: true, msg: '1.2 x runtime ' + fmtHours(c.duration) + ' finishes ' + fmtHours(c.slack) + ' before ' + ctx.deadlineLabel + '.' }
+    : { ok: false, msg: '1.2 x runtime ' + fmtHours(c.duration) + ' = ' + fmtHours(c.finishHours) + ', but ' + ctx.deadlineLabel + ' is in ' + fmtHours(Math.max(0, left)) + '.' };
 }
 
 /** Built-in checks that do not depend on Policy rows. Each: { kind, title, severity, ok, msg }. */
@@ -814,8 +793,8 @@ function championPredictions(ctx, opts) {
   var feats = opts.map(function (o) {
     return modelFeatures(ctx, o.p, o.g);
   });
-  var out = { runtime: null, wait: null, mem: null, cpu: null, provenance: {} };
-  [['runtime', 'AnvilRuntimeQ50Q90'], ['wait', 'AnvilQueueWaitQ50Q90'], ['mem', 'AnvilHostMemoryQ50Q90'], ['cpu', 'AnvilTaskCPUQ50Q90']].forEach(function (m) {
+  var out = { runtime: null, mem: null, cpu: null, provenance: {} };
+  [['runtime', 'AnvilRuntimeQ50Q90'], ['mem', 'AnvilHostMemoryQ50Q90'], ['cpu', 'AnvilTaskCPUQ50Q90']].forEach(function (m) {
     var r = plainJson(QuantileModel.predictBatch(m[1], feats));
     out.provenance[m[0]] = r.provenance;
     if (r.available && r.predictions) out[m[0]] = r.predictions;
@@ -849,7 +828,7 @@ function allOptions(ctx, restrict) {
       var usable = function (arr) {
         return arr && onAnvil && arr[i] && !arr[i].lowSupport ? arr[i] : null;
       };
-      q = { runtime: usable(preds.runtime), waitHistory: usable(preds.wait), mem: usable(preds.mem), cpu: usable(preds.cpu) };
+      q = { runtime: usable(preds.runtime), mem: usable(preds.mem), cpu: usable(preds.cpu) };
     }
     var c = modelCandidate(ctx, o.p, o.g, q);
     if (c == null) return;
@@ -865,7 +844,7 @@ function policyProvenance(ctx) {
   return { component: 'ClusterPolicyEngine', version: POLICY_VERSION, method: 'versioned deterministic rules (' + ctx.policies.length + ' active policies + built-in partition/account/memory checks); nothing waives them', status: 'DETERMINISTIC', trainingPeriod: null, sampleSupport: ctx.policies.length, historicalOnly: false, computedAt: new Date(ctx.now).toISOString() };
 }
 
-/** Provenance of one option's duration / wait / memory / CPU estimates: champion model or the labeled fallback. */
+/** Provenance of one option's duration / memory / CPU estimates: champion model or the labeled fallback. */
 function estimateProvenance(ctx, c) {
   var pv = ctx.champions ? ctx.champions.provenance : {};
   var at = new Date(ctx.now).toISOString();
@@ -874,14 +853,9 @@ function estimateProvenance(ctx, c) {
   };
   var why = String(c.cluster.id) != 'anvil' ? 'Trained on Anvil only; ' + c.cluster.name + ' uses the heuristic.' : 'Too few similar Anvil jobs (or artifact not loaded); heuristic used.';
   var runtime = c.runtimeSource == 'model' && pv.runtime ? pv.runtime : fallback('AnvilRuntimeQ50Q90', 'history median of similar completed jobs scaled by GPU throughput and model size', why, ctx.prediction ? num(ctx.prediction.sampleSize, null) : null);
-  var wait = fallback('AnvilQueueWaitQ50Q90', 'live partition average wait x utilization pressure x job size', 'Queue-wait model is historical and low confidence (no backlog snapshots): shown as text on Anvil plans, not used as the estimate.', null);
-  if (pv.wait && pv.wait.status != 'FALLBACK_HEURISTIC' && String(c.cluster.id) == 'anvil') {
-    wait = JSON.parse(JSON.stringify(pv.wait));
-    wait.note = 'Historical P50/P90 shown in the wait reason; the estimate itself uses live partition statistics.';
-  }
   var mem = c.memSource == 'model' && pv.mem ? pv.mem : fallback('AnvilHostMemoryQ50Q90', 'node memory proportional to GPUs requested', why, null);
   var cpu = c.cpuEvidence && pv.cpu ? pv.cpu : fallback('AnvilTaskCPUQ50Q90', 'cores proportional to GPUs requested', why, null);
-  return [runtime, wait, mem, cpu];
+  return [runtime, mem, cpu];
 }
 
 // ---------------------------------------------------------------- checkRules
@@ -1055,7 +1029,7 @@ function sbatchScript(ctx, c, label) {
   L.push('#!/bin/bash');
   L.push('# EasyCompute plan "' + label + '" for "' + (req.name || req.id) + '" (' + (ctx.lab.name || ctx.labId) + ')');
   L.push('# ' + (c.isGpu ? c.gpus + ' x ' + c.gpuType.id : c.nodes + ' node(s), ' + c.nodes * coresPerNode + ' cores') + ' on ' + c.cluster.name + ' ' + (c.p.name || c.p.id) +
-    ' | predicted runtime ' + fmtHours(c.duration) + ' | wait ' + waitBucket(c.wait) + ' | est. cost ' + round(c.costUnits, 1) + ' ' + (c.cluster.unitName || 'units') + ' ($' + round(c.costUsd, 2) + ')');
+    ' | predicted runtime ' + fmtHours(c.duration) + ' | est. cost ' + round(c.costUnits, 1) + ' ' + (c.cluster.unitName || 'units') + ' ($' + round(c.costUsd, 2) + ')');
   if (rcac) L.push('# RCAC requires account (-A), partition (-p) and QOS (-q) on every job' + (cid == 'gilbreth' ? ', plus an explicit --mem on Gilbreth' : '') + '.');
   if (cid == 'anvil') L.push('# Anvil: GPU partitions are charged to the "-gpu" allocation account; no QOS flag.');
   L.push('#SBATCH --job-name=' + name);
@@ -1119,7 +1093,7 @@ function rationale(ctx, c, label, best) {
   else if (label == 'Cheapest') why = cheapest ? 'Lowest cost of all ' + best.n + ' compliant options.' : 'Cheapest alternative to the plans above.';
   else why = 'Best trade-off of finish time, cost, deadline slack and risk.';
   parts.push(why + ' Runs ' + hw + ' on ' + c.cluster.name + ' ' + (c.p.name || c.p.id) + ' (' + partitionQos(c.p) + ' QOS): predicted runtime ' + fmtHours(c.duration) +
-    (c.chained > 1 ? ' as ' + c.chained + ' chained ' + fmtHours(c.walltime) + ' jobs with checkpoints' : '') + ', queue wait about ' + fmtHours(c.wait) + ' (' + waitBucket(c.wait) + ').');
+    (c.chained > 1 ? ' as ' + c.chained + ' chained ' + fmtHours(c.walltime) + ' jobs with checkpoints' : '') + '; starts as soon as you launch.');
   parts.push(ctx.workBasis);
   var alloc = ctx.allocations[c.cluster.id];
   var unit = c.cluster.unitName || 'units';
@@ -1161,7 +1135,6 @@ function recommendPlans() {
     var f = Math.min(1, Math.log(Math.max(c.finishHours, 0.01) / Math.max(minF, 0.01)) / Math.log(4));
     var k = Math.min(1, Math.log((c.costUsd + 1) / (minC + 1)) / Math.log(4));
     var s = 100 * (1 - ((0.45 - shift) * f + (0.3 + shift) * k + 0.15 * c.preemptionRisk + 0.1 * Math.min(1, warns(c.results).length / 3)));
-    if (c.wait > 12) s -= 5;
     if (c.shape && c.shape.fit == 'POOR') s -= 8;
     if (!c.meetsDeadline) s -= 30;
     if (preferred.indexOf(String(c.cluster.id)) >= 0) s += 3;
@@ -1214,7 +1187,7 @@ function recommendPlans() {
       gpus: c.gpus,
       nodes: c.nodes,
       walltimeHours: round(c.walltime, 2),
-      estWaitHours: round(c.wait, 2),
+      estWaitHours: 0,
       estDurationHours: round(c.duration, 2),
       estCostUnits: round(c.costUnits, 2),
       estCostUsd: round(c.costUsd, 2),
@@ -1225,8 +1198,8 @@ function recommendPlans() {
       qos: partitionQos(c.p),
       account: chooseAccount(ctx, c.cluster, c.isGpu),
       slurmPartition: slurmPartitionName(c.p),
-      waitBucket: waitBucket(c.wait),
-      waitReason: c.waitReason,
+      waitBucket: null,
+      waitReason: null,
       chainedJobs: c.chained,
       preemptionRisk: round(c.preemptionRisk, 3),
       gpuMemNeedGb: round(ctx.memNeedGb, 1),
@@ -1235,7 +1208,7 @@ function recommendPlans() {
       deadlineSlackHours: c.slack == null ? null : round(c.slack, 1),
       ruleWarnings: warns(c.results).length,
       estDurationP90Hours: round(c.durationP90, 2),
-      estWaitP90Hours: round(c.waitP90, 2),
+      estWaitP90Hours: 0,
       memRequestGb: round(c.memRequestGb, 0),
       cpuEvidence: c.cpuEvidence,
       shapeReason: c.shape ? 'GPUShapeAdvisor (' + c.shape.fit + '): ' + c.shape.reason : c.isGpu ? null : 'CPU-only work: no GPU requested.',
@@ -1273,11 +1246,6 @@ function submit(planId) {
   var clusterId = String(plan.cluster.id);
   var slurmJobId = nextSlurmJobId(clusterId);
   var jobId = clusterId + '-' + slurmJobId;
-  // always queued first: the live simulator starts it at the demo-compressed ETA (RunSimulatorSettings.queueWaitCompression)
-  var sim = RunSimulatorSettings.make({ id: 'default' }).get('queueWaitCompression');
-  var compression = sim && sim.queueWaitCompression ? Number(sim.queueWaitCompression) : 60;
-  var etaMs = now + Math.max(20 * 1000, Math.min(5 * 60 * 1000, (num(plan.estWaitHours, 0.5) * 3600 * 1000) / compression));
-  var pendingAhead = Job.fetchCount({ filter: Filter.eq('partition.id', plan.partition.id).and().eq('isLive', true).and().eq('state', 'PENDING') });
   var gpus = num(plan.gpus, 0);
   var nodes = Math.max(1, num(plan.nodes, 1));
   var p = plan.partition;
@@ -1299,10 +1267,10 @@ function submit(planId) {
     qos: plan.qos,
     jobName: slug(req.name),
     workloadType: req.workloadType,
-    state: 'PENDING',
+    // no queue: the run starts immediately; RunMonitor.startJob assigns nodes and writes the first samples
+    state: 'RUNNING',
     submitTime: toDt(now),
-    etaStartAt: toDt(etaMs),
-    queuePosition: pendingAhead + 1,
+    startTime: toDt(now),
     simScenario: 'HEALTHY',
     timelimitHours: num(plan.walltimeHours, 4),
     elapsedHours: 0,
@@ -1317,6 +1285,7 @@ function submit(planId) {
     nodeList: null,
     exitCode: null,
   }).create();
+  var started = RunMonitor.startJob(jobId);
 
   RunRequest.make({ id: req.id, status: 'SUBMITTED', chosenPlan: { id: plan.id } }).merge();
   var cmd = 'sbatch -A ' + plan.account + ' -p ' + plan.slurmPartition + ' -q ' + plan.qos + ' --nodes=' + nodes +
@@ -1329,11 +1298,11 @@ function submit(planId) {
     actionType: 'SUBMIT',
     actor: 'USER',
     actedAt: toDt(now),
-    detail: 'Submitted plan "' + plan.label + '" (' + plan.id + '): ' + cmd + ' -> Submitted batch job ' + slurmJobId + ' (queued at position ' + (pendingAhead + 1) + '; expected start ' + new Date(etaMs).toISOString().substring(11, 19) + ' UTC in this demo, plan wait ' + plan.waitBucket + ').',
+    detail: 'Submitted plan "' + plan.label + '" (' + plan.id + '): ' + cmd + ' -> Submitted batch job ' + slurmJobId + ' (running on ' + started.nodeList + ').',
     outcome: 'DONE',
   }).create();
   log.info('submit {}: plan {} -> job {}', req.id, plan.id, jobId);
   return Job.make({ id: jobId }).get(
-    'id, slurmJobId, lab.id, project.id, runRequest.id, user, cluster.id, partition.id, account, qos, jobName, workloadType, state, submitTime, timelimitHours, elapsedHours, allocCpus, allocNodes, allocGpus, gpuType.id, reqMemGb, costUnits, costUsd, isLive, etaStartAt, queuePosition, simScenario'
+    'id, slurmJobId, lab.id, project.id, runRequest.id, user, cluster.id, partition.id, account, qos, jobName, workloadType, state, submitTime, timelimitHours, elapsedHours, allocCpus, allocNodes, allocGpus, gpuType.id, reqMemGb, costUnits, costUsd, isLive, startTime, nodeList, latestSample, simScenario'
   );
 }

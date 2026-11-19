@@ -15,7 +15,7 @@ entity type RunSimulatorSettings {
   demoTimeScale: double
 
   /**
-   * Queue waits are divided by this factor (60 = a 2 h wait starts after about 2 minutes).
+   * Unused: runs no longer queue (RunRequest#submit starts them RUNNING immediately). Kept so existing rows load.
    */
   queueWaitCompression: double
 

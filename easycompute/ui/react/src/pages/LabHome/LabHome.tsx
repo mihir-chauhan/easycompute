@@ -90,7 +90,6 @@ const LabHome: React.FC = () => {
   const usd = allocations.filter(isUsd).sort((a, b) => (b.totalUnits ?? 0) - (a.totalUnits ?? 0))[0];
   const gpuAlloc = allocations.filter(isGpuHours).sort((a, b) => (b.totalUnits ?? 0) - (a.totalUnits ?? 0))[0];
   const running = jobs.filter((j) => j.state === 'RUNNING');
-  const queued = jobs.filter((j) => j.state === 'PENDING');
   const liveGpus = running.reduce((n, j) => n + (j.allocGpus ?? 0), 0);
   const liveClusters = new Set(running.map((j) => j.cluster?.id)).size;
   const next = deadlines[0];
@@ -280,7 +279,6 @@ const LabHome: React.FC = () => {
             label="Live runs"
             tone={running.length ? 'good' : 'neutral'}
             value={formatInt(running.length || s.kpis.runningJobs)}
-            unit={`${formatInt(queued.length || s.kpis.pendingJobs)} queued`}
             caption={`${formatInt(liveGpus || s.kpis.runningGpus)} GPUs in use across ${liveClusters || 0} cluster${liveClusters === 1 ? '' : 's'}`}
             onClick={() => navigate('/runs')}
           />
@@ -364,7 +362,7 @@ const LabHome: React.FC = () => {
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <SectionCard
           flush
-          title="Live and queued runs"
+          title="Live runs"
           actions={
             <Button variant="outline" appearance="secondary" size="sm" onClick={() => navigate('/runs')}>
               View all
@@ -373,7 +371,7 @@ const LabHome: React.FC = () => {
         >
           <DataTable
             columns={recentColumns}
-            rows={[...running, ...queued].slice(0, 6)}
+            rows={running.slice(0, 6)}
             rowKey={(j) => j.id}
             onRowClick={(j) => navigate(`/runs/${encodeURIComponent(j.id)}`)}
             loading={live.loading && !live.data}

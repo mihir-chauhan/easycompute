@@ -12,7 +12,7 @@ import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { checkRules, createRunRequest, extractConstraints, fetchJobMetrics, fetchProjects, getJob, getLabSummary, recommendPlans, submitWithApproval } from '@/features/lab/api';
 import { LiveBadge, liveJob, mergeSnap, SimNote, useLiveSnapshot, useNow, withLatest } from '@/features/lab/live';
-import { queueStatus, useTelemetry } from '@/features/lab/telemetry';
+import { useTelemetry } from '@/features/lab/telemetry';
 import { formatDuration, formatInt, formatUsd, WORKLOAD_LABEL } from '@/features/lab/format';
 import { ModelComputing, ModelProvenance, type ModelName } from '@/features/lab/models';
 import { costPhrase, doneBy, fixesOf, pickPlan, PREFERENCE_LABEL, preferenceFrom, settingsOf, type Preference } from '@/features/lab/oneBox';
@@ -78,7 +78,7 @@ const Home: React.FC = () => {
   const budgetLeft = summary.data?.kpis.allocationRemainingUsd;
 
   const picked = useMemo(() => pickPlan(plans, pref), [plans, pref]);
-  // After launch: follow the job live (queue → node placement → metrics).
+  // After launch: follow the job live (it starts RUNNING on its nodes immediately; metrics stream in).
   const follow = useLoad(() => (launched ? Promise.all([getJob(launched.id), fetchJobMetrics(launched.id)]) : null), [launched?.id], 5000);
   const now = useNow(1000);
   const snap = useLiveSnapshot(launched ? labId : null);
@@ -88,7 +88,6 @@ const Home: React.FC = () => {
   const serverMetrics = useMemo(() => withLatest(follow.data?.[1] ?? [], sj?.latest), [follow.data, sj]);
   const telemetry = useTelemetry(base, serverMetrics, { windowMs: 10 * 60_000, points: 60 });
   const lastMetric = telemetry.at(-1);
-  const qs = lj?.state === 'PENDING' ? queueStatus({ ...lj, queuePosition: sj?.queuePosition, etaStartAt: sj?.etaStartAt }, now) : null;
   const plan = picked.plan;
   const busy = stage !== null;
 
@@ -381,7 +380,6 @@ const Home: React.FC = () => {
                     <div className="flex flex-wrap justify-center gap-1.5">
                       <ModelProvenance name="ClusterPolicyEngine" support={`${checks.length} rules`} />
                       <ModelProvenance name="AnvilRuntimeQ50Q90" />
-                      <ModelProvenance name="AnvilQueueWaitQ50Q90" confidence="low" />
                       <ModelProvenance name="GPUShapeAdvisor" />
                       <ModelProvenance name="LabFairShareAllocator" />
                     </div>
@@ -443,16 +441,12 @@ const Home: React.FC = () => {
               <div className={cn(GLASS, 'flex flex-col gap-4 p-[22px]')}>
                 <div className="flex items-center justify-center gap-2 text-[13px] text-[var(--c3-style-basic-fg-secondary)]">
                   <span className={DOT} />
-                  {`${lj?.state === 'RUNNING' ? 'Running' : 'Launched'} on ${launched.cluster?.name ?? launched.cluster?.id ?? plan?.cluster?.name ?? ''}`}
+                  {`${!lj || lj.state === 'RUNNING' ? 'Running' : 'Launched'} on ${launched.cluster?.name ?? launched.cluster?.id ?? plan?.cluster?.name ?? ''}`}
                 </div>
                 <p className="m-0 text-2xl leading-8 font-medium text-balance text-[var(--c3-style-basic-fg-primary)]">
-                  {lj?.state === 'RUNNING'
-                    ? `Running on ${lj.nodeList ?? 'its node'} as job ${lj.slurmJobId ?? lj.id}.`
-                    : lj?.state === 'PENDING'
-                      ? qs?.starting
-                        ? `Job ${lj.slurmJobId ?? lj.id}: ${qs.label}`
-                        : `Queued as job ${lj.slurmJobId ?? lj.id}${qs?.position != null ? ` (#${qs.position} in line)` : ''}. Starts in about ${qs?.etaMs != null ? formatDuration(Math.max(0, (qs.etaMs - now) / 3600000)) : formatDuration(Math.max(0, (plan?.estWaitHours ?? 0) - (lj.submitTime ? (now - new Date(lj.submitTime).getTime()) / 3600000 : 0)))}.`
-                      : `Job ${lj?.slurmJobId ?? lj?.id} is ${String(lj?.state ?? '').toLowerCase()}.`}{' '}
+                  {!lj || lj.state === 'RUNNING'
+                    ? `Running on ${lj?.nodeList ?? launched.nodeList ?? 'its node'} as job ${lj?.slurmJobId ?? launched.slurmJobId ?? launched.id}.`
+                    : `Job ${lj.slurmJobId ?? lj.id} is ${String(lj.state ?? '').toLowerCase()}.`}{' '}
                   <span className="text-[var(--c3-style-basic-fg-secondary)]">EasyCompute will only message you if something needs you.</span>
                 </p>
                 {lj?.state === 'RUNNING' && telemetry.length > 1 && (
@@ -471,11 +465,6 @@ const Home: React.FC = () => {
                       </div>
                       <Sparkline values={telemetry.map((p) => p.gpuMemPct)} tone="pink" domain={[0, 100]} className="h-10" ariaLabel="GPU memory, live" />
                     </div>
-                  </div>
-                )}
-                {lj?.state === 'PENDING' && qs?.etaMs != null && (
-                  <div className="mx-auto h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-[color-mix(in_srgb,white_8%,transparent)]" role="progressbar" aria-label="Queue wait elapsed" aria-valuenow={Math.round(qs.progress * 100)}>
-                    <div className="h-full rounded-full bg-[var(--ec-blue,var(--c3-style-basic-fg-info))] transition-[width] duration-1000" style={{ width: `${Math.max(2, qs.progress * 100)}%` }} />
                   </div>
                 )}
                 {lj?.state === 'RUNNING' && (

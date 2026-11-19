@@ -226,7 +226,7 @@ export default function DescribeStep({ form, onChange, projects, gpuTypes, clust
         <Container title="How planning works">
           <ol className={`flex flex-col gap-2 text-c3-regular-body-p2 ${muted}`}>
             <li className="flex gap-2"><Sparkles className="mt-0.5 size-4 shrink-0 text-[var(--c3-style-basic-fg-accent)]" aria-hidden />University, cluster, partition and your lab rules are checked first.</li>
-            <li className="flex gap-2"><Sparkles className="mt-0.5 size-4 shrink-0 text-[var(--c3-style-basic-fg-accent)]" aria-hidden />Runtime is predicted from your lab&apos;s past jobs and GPU throughput; queue wait from live partition depth.</li>
+            <li className="flex gap-2"><Sparkles className="mt-0.5 size-4 shrink-0 text-[var(--c3-style-basic-fg-accent)]" aria-hidden />Runtime is predicted from your lab&apos;s past jobs and GPU throughput; launched runs start immediately.</li>
             <li className="flex gap-2"><Sparkles className="mt-0.5 size-4 shrink-0 text-[var(--c3-style-basic-fg-accent)]" aria-hidden />You get the fastest, cheapest and best-balanced plan with a ready sbatch script.</li>
           </ol>
         </Container>

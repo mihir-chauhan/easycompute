@@ -329,8 +329,6 @@ export interface LiveJob {
   submitTime?: string;
   startTime?: string | null;
   endTime?: string | null;
-  etaStartAt?: string | null;
-  queuePosition?: number | null;
   elapsedHours?: number;
   timelimitHours?: number;
   remainingHours?: number;
@@ -344,8 +342,8 @@ export interface LiveJob {
 
 export interface LiveSnapshot {
   serverTime?: string;
-  simulator?: { enabled?: boolean; demoTimeScale?: number; queueWaitCompression?: number; lastTickAt?: string | null; nextTickInSec?: number };
-  counts?: { running?: number; pending?: number; openAlerts?: number; criticalAlerts?: number; awaitingConfirmation?: number };
+  simulator?: { enabled?: boolean; demoTimeScale?: number; lastTickAt?: string | null; nextTickInSec?: number };
+  counts?: { running?: number; openAlerts?: number; criticalAlerts?: number; awaitingConfirmation?: number };
   jobs?: LiveJob[];
   partitions?: Array<{ id: string; clusterId?: string; utilizationPct?: number; currentQueueDepth?: number; avgWaitHours?: number }>;
   clusters?: Array<{ id: string; status?: string; healthPct?: number; liveUtilizationPct?: number }>;
@@ -381,7 +379,7 @@ export function mergeLiveClusters<T extends { id: string; gpuUtilizationPct?: nu
   if (!snap?.clusters?.length) return rows;
   const by = new Map(snap.clusters.map((c) => [c.id, c]));
   const liveByCluster = new Map<string, number>();
-  (snap.jobs ?? []).forEach((j) => j.clusterId && (j.state === 'RUNNING' || j.state === 'PENDING') && liveByCluster.set(j.clusterId, (liveByCluster.get(j.clusterId) ?? 0) + 1));
+  (snap.jobs ?? []).forEach((j) => j.clusterId && j.state === 'RUNNING' && liveByCluster.set(j.clusterId, (liveByCluster.get(j.clusterId) ?? 0) + 1));
   return rows.map((r) => {
     const l = by.get(r.id);
     if (!l) return r;

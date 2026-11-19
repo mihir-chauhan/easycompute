@@ -84,7 +84,7 @@ const RAILS: Rail[] = [
 
 const SIGNALS: [string, string[]][] = [
   ['GPU (DCGM)', ['SM active', 'Memory used', 'Power', 'Xid errors']],
-  ['Scheduler (Slurm)', ['Job state', 'Walltime left', 'Queue position', 'Preemption', 'Charged units']],
+  ['Scheduler (Slurm)', ['Job state', 'Walltime left', 'Preemption', 'Charged units']],
   ['Host', ['CPU util', 'RAM', 'Scratch I/O']],
   ['Training', ['Loss', 'Checkpoint age']],
 ];

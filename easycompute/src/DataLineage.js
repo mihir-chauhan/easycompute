@@ -12,7 +12,7 @@ var FEEDS = [
   { name: 'SlurmSacctFeed', label: 'Slurm sacct export', detail: 'Accounting records (sacct, pipe-delimited) from Anvil, Gilbreth, Gautschi, Negishi', targets: ['Job'] },
   { name: 'JobTelemetryFeed', label: 'Job telemetry', detail: 'Per-job GPU/CPU/memory/I/O samples (DCGM + cgroup exporters)', targets: ['JobMetric'] },
   { name: 'AllocationLedgerFeed', label: 'Allocation ledger', detail: 'Node-share / GPU-hour bank / ACCESS SU balances per lab', targets: ['Allocation'] },
-  { name: 'ClusterStatusFeed', label: 'Cluster status', detail: 'Partition queue depth, wait and utilization (sinfo/showpartitions)', targets: ['Partition', 'ComputeCluster'] },
+  { name: 'ClusterStatusFeed', label: 'Cluster status', detail: 'Partition utilization and limits (sinfo/showpartitions)', targets: ['Partition', 'ComputeCluster'] },
 ];
 
 /** Package entities: group, freshness field (the record's own timestamp) and whether it is a live feed. */

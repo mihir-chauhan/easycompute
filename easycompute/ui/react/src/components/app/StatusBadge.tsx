@@ -11,7 +11,7 @@ import { TONE_BG, TONE_PILL, type Tone } from './tone';
 /** Enum value -> [tone, label] per SPEC enum. Unknown values render neutral with a humanised label. */
 export const STATUS_MAPS = {
   jobState: {
-    PENDING: ['info', 'Queued'],
+    PENDING: ['info', 'Starting'],
     RUNNING: ['accent', 'Running'],
     COMPLETED: ['good', 'Completed'],
     FAILED: ['bad', 'Failed'],

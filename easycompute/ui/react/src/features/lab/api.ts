@@ -166,7 +166,7 @@ export const fetchHistoryJobs = (labId: string, limit = 2000) =>
 
 export const getJob = (id: string) =>
   labCall<Job | null>('Job', 'get', { id }, [
-    `this, ${JOB_LIST_INCLUDE}, lab.id, lab.name, runRequest.id, gpuType.memoryGb, partition.avgWaitHours, partition.currentQueueDepth`,
+    `this, ${JOB_LIST_INCLUDE}, lab.id, lab.name, runRequest.id, gpuType.memoryGb`,
   ]);
 
 /** Recent metric samples for the lab's live jobs (newest first), for list sparklines. */
@@ -322,7 +322,7 @@ export async function submitWithApproval(runRequestId: string, planId: string, c
     const rr = await getRunRequest(runRequestId).catch(() => null);
     if (rr?.approvalStatus !== 'PENDING') throw err;
     if (!canApprove) {
-      throw new Error(`This run needs PI approval${rr.approvalReason ? ` (${rr.approvalReason})` : ''}. It is waiting in your PI's approval queue; you will be able to launch it once approved.`);
+      throw new Error(`This run needs PI approval${rr.approvalReason ? ` (${rr.approvalReason})` : ''}. Your PI has been asked to approve it; you can launch it once approved.`);
     }
     await decideApproval(`RR:${runRequestId}`, true, 'Approved by the PI at launch');
     return submitPlan(runRequestId, planId);

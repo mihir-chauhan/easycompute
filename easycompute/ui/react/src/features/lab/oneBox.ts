@@ -29,7 +29,7 @@ export function preferenceFrom(text: string): Preference | null {
 const isPreemptible = (p: RunPlan) => /preempt|standby/i.test(`${p.qos ?? ''} ${p.partition?.id ?? ''}`);
 const isFree = (p: RunPlan) => (p.estCostUsd ?? 1) === 0 || p.cluster?.id === 'anvil' || /standby/i.test(p.qos ?? '');
 const by = (f: (p: RunPlan) => number) => (a: RunPlan, b: RunPlan) => f(a) - f(b);
-const finish = (p: RunPlan) => (p.finishBy ? new Date(p.finishBy).getTime() : (p.estWaitHours ?? 0) + (p.estDurationHours ?? 0));
+const finish = (p: RunPlan) => (p.finishBy ? new Date(p.finishBy).getTime() : p.estDurationHours ?? 0);
 
 /** The plan for a preference, plus a note when no plan really matches it. */
 export function pickPlan(plans: RunPlan[], pref: Preference): { plan: RunPlan | null; note?: string } {
@@ -61,7 +61,7 @@ export function costPhrase(p: RunPlan, allocations: SummaryAllocation[]): string
 }
 
 export const doneBy = (p: RunPlan): string =>
-  p.finishBy ? new Date(p.finishBy).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : `in ${formatDuration((p.estWaitHours ?? 0) + (p.estDurationHours ?? 0))}`;
+  p.finishBy ? new Date(p.finishBy).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : `in ${formatDuration(p.estDurationHours ?? 0)}`;
 
 /** The settings EasyCompute chose for this plan, as label/value chips. */
 export function settingsOf(p: RunPlan, allocations: SummaryAllocation[]): [string, string][] {

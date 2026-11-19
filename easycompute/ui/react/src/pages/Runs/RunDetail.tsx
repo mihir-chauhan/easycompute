@@ -31,7 +31,6 @@ import {
   LoadingState,
   MetricChart,
   PageFrame,
-  ProgressBar,
   SectionCard,
   StatusBadge,
   ToneBadge,
@@ -55,7 +54,7 @@ import { ACTION_LABEL, ALERT_TYPE_LABEL, formatShortDateTime, formatClock, forma
 import type { ActionType, Alert, JobMetric } from '@/features/lab/types';
 import { alertModel, ModelComputing, ModelProvenance, WhyFired } from '@/features/lab/models';
 import { LIVE_POLL_MS, LiveBadge, liveJob, mergeSnap, SimNote, useLiveSnapshot, useNow, withLatest } from '@/features/lab/live';
-import { queueStatus, useTelemetry } from '@/features/lab/telemetry';
+import { useTelemetry } from '@/features/lab/telemetry';
 import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { formatDateTime } from '@/lib/format';
@@ -117,7 +116,7 @@ const RunDetail: React.FC = () => {
   const j = merged ? liveJob(merged, sj ? snap.updatedAt : job.updatedAt, now, merged.progressPerRealSec) : null;
   const latest = metrics.at(-1);
   const openAlerts = alerts.filter((a) => a.status === 'OPEN' || a.status === 'ACKED');
-  const live = j?.state === 'RUNNING' || j?.state === 'PENDING';
+  const live = j?.state === 'RUNNING';
   const lr = useLabRole();
   const canAct = Boolean(j && lr.canActOn(j.user));
 
@@ -203,9 +202,6 @@ const RunDetail: React.FC = () => {
   }
 
   const left = walltimeLeft(j);
-  const part = j.partition as (typeof j.partition & { avgWaitHours?: number; currentQueueDepth?: number }) | undefined;
-  const queueDepth = part?.currentQueueDepth ?? null;
-  const qs = queueStatus({ ...j, partition: part, queuePosition: merged?.queuePosition, etaStartAt: merged?.etaStartAt }, now);
   const wallFrac = j.timelimitHours ? (j.elapsedHours ?? 0) / j.timelimitHours : 0;
   const burn = j.elapsedHours ? (j.costUsd ?? 0) / j.elapsedHours : null;
   const ckpt = latest?.checkpointAgeMin;
@@ -228,7 +224,7 @@ const RunDetail: React.FC = () => {
         error={detail.error}
         onRetry={detail.reload}
         empty={metrics.length < 2}
-        emptyLabel={j.state === 'PENDING' ? 'Waiting for the job to start' : 'No samples yet'}
+        emptyLabel="No samples yet"
         heightClass={height}
         live={j.state === 'RUNNING'}
         ariaLabel={c.title}
@@ -292,21 +288,6 @@ const RunDetail: React.FC = () => {
           )}
         </div>
       ))}
-      {j.state === 'PENDING' && (
-        <div role="status" className="flex flex-wrap items-center gap-4 rounded-[var(--ec-card-radius,8px)] border border-[var(--c3-style-basic-border-info,var(--c3-style-basic-border-border))] bg-[var(--c3-style-basic-bg-info,var(--c3-style-basic-bg-secondary))] px-5 py-4">
-          <span aria-hidden className="ec-pulse inline-block size-2.5 rounded-full bg-[var(--c3-style-basic-fg-info)]" />
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">
-              {qs.starting ? qs.label : `Queued on ${j.cluster?.name ?? j.cluster?.id} ${j.partition?.slurmPartition ?? j.partition?.name ?? ''}${merged?.queuePosition != null ? ` · position #${merged.queuePosition}` : queueDepth != null ? ` · about ${formatInt(queueDepth + 1)} jobs ahead in this partition` : ''}`}
-            </div>
-            <div className={`text-[13px] ${muted}`}>
-              {`Submitted ${formatRelative(j.submitTime)}${qs.etaMs ? ` · ${qs.starting ? 'Slurm is placing it now' : qs.label}` : ''}. Metrics start flowing as soon as Slurm places it on a node.`}
-            </div>
-            {qs.etaMs != null && <ProgressBar value={qs.progress} tone="info" size="sm" className="mt-2 max-w-sm" ariaLabel="Queue wait elapsed" />}
-          </div>
-          <ModelProvenance name="AnvilQueueWaitQ50Q90" confidence="low" />
-        </div>
-      )}
       {busy === 'tick' && (
         <Notice>
           <span className="flex flex-wrap gap-4">
@@ -348,7 +329,7 @@ const RunDetail: React.FC = () => {
           label="Walltime"
           value={formatDuration(j.elapsedHours)}
           unit={`of ${formatDuration(j.timelimitHours)}`}
-          caption={j.state === 'RUNNING' ? `${formatDuration(left)} left · ticking` : (j.startTime ? `Started ${formatDateTime(j.startTime)}` : `Queued ${formatRelative(j.submitTime)}`)}
+          caption={j.state === 'RUNNING' ? `${formatDuration(left)} left · ticking` : (j.startTime ? `Started ${formatDateTime(j.startTime)}` : `Submitted ${formatRelative(j.submitTime)}`)}
           tone={wallFrac > 0.9 ? 'bad' : wallFrac > 0.75 ? 'warn' : 'good'}
         />
         <KpiTile

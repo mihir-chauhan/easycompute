@@ -466,7 +466,7 @@ interface AppShellProps {
   children: ReactNode;
 }
 
-const DEFAULT_BANNER = 'Gautschi scheduler update (Nov 2): GPU shares now follow each lab’s semester usage. EasyCompute re-planned queued runs.';
+const DEFAULT_BANNER = 'Gautschi scheduler update (Nov 2): GPU shares now follow each lab’s semester usage. EasyCompute re-planned affected runs.';
 
 interface Meter {
   label: string;
@@ -513,7 +513,7 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
       const usedBy = new Map((snap.allocations ?? []).map((a) => [a.id, a.usedUnits]));
       return {
         ...s,
-        kpis: { ...s.kpis, liveJobs: c.running != null && c.pending != null ? c.running + c.pending : s.kpis.liveJobs, openAlerts: c.openAlerts ?? s.kpis.openAlerts },
+        kpis: { ...s.kpis, liveJobs: c.running ?? s.kpis.liveJobs, openAlerts: c.openAlerts ?? s.kpis.openAlerts },
         allocations: (s.allocations ?? []).map((a) => (usedBy.get(a.id) != null ? { ...a, usedUnits: usedBy.get(a.id) as number } : a)),
       };
     },

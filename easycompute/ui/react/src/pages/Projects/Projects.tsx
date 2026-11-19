@@ -155,7 +155,6 @@ interface Agg {
   project: Project | null;
   jobs: J[];
   running: J[];
-  queued: J[];
   gpus: number;
   cpus: number;
   gpusByType: [string, number][];
@@ -222,7 +221,6 @@ function aggregate(projects: Project[], jobs: J[], at: number): Agg[] {
     const project = projects.find((p) => p.id === id) ?? null;
     const js = byProject.get(id) ?? [];
     const running = js.filter((j) => j.state === 'RUNNING');
-    const queued = js.filter((j) => j.state === 'PENDING');
     const types = new Map<string, number>();
     running.forEach((j) => j.gpus && types.set(j.gpuTypeId ?? 'GPU', (types.get(j.gpuTypeId ?? 'GPU') ?? 0) + j.gpus));
     const gpus = running.reduce((a, j) => a + j.gpus, 0);
@@ -236,7 +234,6 @@ function aggregate(projects: Project[], jobs: J[], at: number): Agg[] {
       project,
       jobs: js,
       running,
-      queued,
       gpus,
       cpus: running.reduce((a, j) => a + j.cpus, 0),
       gpusByType: [...types.entries()].sort((a, b) => b[1] - a[1]),
@@ -250,7 +247,7 @@ function aggregate(projects: Project[], jobs: J[], at: number): Agg[] {
       burnPerHour: running.reduce((a, j) => a + (j.elapsedHours > 0 ? j.costUsd / j.elapsedHours : 0), 0),
       idleJobs: running.filter((j) => j.idle).length,
       share: 0,
-      active: running.length > 0 || queued.length > 0 || gpuH7d > 0 || js.length > 0 || (deadline != null && deadline > at && deadline - at < 30 * DAY_MS),
+      active: running.length > 0 || gpuH7d > 0 || js.length > 0 || (deadline != null && deadline > at && deadline - at < 30 * DAY_MS),
     };
   });
   const labGpuH = rows.reduce((a, r) => a + r.gpuH7d, 0);
@@ -385,7 +382,6 @@ function ProjectRow({ a, admin, open, onToggle, updatedAt, samples, now }: RowPr
             <span aria-hidden className={cn('size-1.5 rounded-full', a.running.length ? 'ec-pulse bg-[var(--ec-accent-hi)]' : 'bg-[var(--ec-fg-3)]')} />
             {`${a.running.length} running`}
           </span>
-          <span className={cn('tabular-nums', a.queued.length ? 'text-[var(--ec-blue)]' : fg3)}>{`${a.queued.length} queued`}</span>
         </Cell>
 
         <Cell label="GPU utilization (10 min)" className="col-span-2 sm:col-span-1">
@@ -453,8 +449,8 @@ function ProjectRow({ a, admin, open, onToggle, updatedAt, samples, now }: RowPr
 
 /** Admin mode only: what the project is about and which jobs are running for it. */
 function ProjectDetails({ id, p, a }: { id: string; p: Project; a: Agg }) {
-  const live = [...a.running, ...a.queued];
-  const ended = a.jobs.filter((j) => j.state !== 'RUNNING' && j.state !== 'PENDING');
+  const live = a.running;
+  const ended = a.jobs.filter((j) => j.state !== 'RUNNING');
   const failed = ended.filter((j) => j.state && ['FAILED', 'TIMEOUT', 'OUT_OF_MEMORY', 'CANCELLED', 'PREEMPTED'].includes(j.state)).length;
   return (
     <div id={id} className="grid gap-4 border-t border-[var(--ec-line)] bg-[var(--ec-card-2)] px-4 py-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
@@ -573,7 +569,6 @@ export default function Projects() {
   }, [rows]);
   const gpuHToday = useAccrual(totals.gpuHToday, totals.gpuHRate, live.updatedAt);
   const cost7d = useAccrual(totals.cost7d, totals.costRate, live.updatedAt);
-  const queued = snap?.counts?.pending ?? rows?.reduce((x, r) => x + r.queued.length, 0) ?? null;
   const soon = projectRows.filter((r) => {
     const d = ms(r.project?.deadline);
     return d != null && d > now && d - now < 30 * DAY_MS;
@@ -611,7 +606,7 @@ export default function Projects() {
           />
           <KpiTile label="GPU-hours today" value={<LiveNumber value={gpuHToday} format={fmtGpuH} />} caption={`${fmtGpuH(totals.gpuH7d)} in the last 7 days`} />
           <KpiTile label="Spend rate" value={<LiveNumber value={totals.burn} format={(v) => `${formatUsd(v)}/h`} />} caption={<span>{'7 d spend '}<LiveNumber value={cost7d} format={(v) => formatUsd(v)} /></span>} />
-          <KpiTile label="Queued jobs" value={<LiveNumber value={queued} />} caption={`${totals.running} running`} tone={queued ? 'info' : undefined} />
+          <KpiTile label="Running jobs" value={<LiveNumber value={snap?.counts?.running ?? totals.running} />} caption={`${projectRows.length} active project${projectRows.length === 1 ? '' : 's'}`} />
         </KpiRow>
       )}
 
@@ -630,7 +625,7 @@ export default function Projects() {
         {loading || !rows ? (
           <TableSkeleton rows={4} />
         ) : !activeRows.length ? (
-          <EmptyState icon={<FolderKanban />} title="No active projects" hint="Projects appear here when they have running or queued jobs, ran in the last 7 days, or have a deadline within 30 days." />
+          <EmptyState icon={<FolderKanban />} title="No active projects" hint="Projects appear here when they have running jobs, ran in the last 7 days, or have a deadline within 30 days." />
         ) : (
           <>
             <div className={cn('hidden gap-x-4 border-b border-[var(--ec-line)] px-4 py-2 text-xs font-medium lg:grid', GRID, fg3)}>

@@ -6,7 +6,6 @@
 /*
  * Live job telemetry for charts, cards and sparklines.
  *   const series = useTelemetry(job, serverMetrics);            // JobMetric[] from start to now, extends every 2 s
- *   const q = queueStatus(job, now);                             // pending jobs: position, ETA, "Starting on …"
  * Server JobMetric samples are always kept as-is. Where they are missing (before the first sample, gaps, after the last
  * sample) the series is completed from the job's workload profile (deterministic per job id) and shifted so it joins
  * the server samples exactly, so it never contradicts them.
@@ -246,43 +245,6 @@ export function useTelemetry(job: TelemetryJob | null | undefined, server: JobMe
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [job?.id, job?.state, job?.workloadType, job?.startTime, job?.progressPerRealSec, job?.gpuType?.id, job?.gpuTypeId, server, now, windowMs, points],
   );
-}
-
-/** Pending job: queue position, ETA and fraction of the predicted wait already elapsed. */
-export interface QueueStatus {
-  position: number | null;
-  etaMs: number | null;
-  /** 0-1 share of the expected wait already elapsed. */
-  progress: number;
-  /** The ETA has passed and the scheduler is placing the job. */
-  starting: boolean;
-  label: string;
-}
-
-const waitText = (ms: number) => {
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`;
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
-};
-
-export function queueStatus(
-  job: { submitTime?: string; nodeList?: string; queuePosition?: number | null; etaStartAt?: string | null; partition?: { slurmPartition?: string; name?: string; avgWaitHours?: number }; cluster?: { id: string; name?: string } },
-  now: number,
-): QueueStatus {
-  const submit = job.submitTime ? Date.parse(job.submitTime) : NaN;
-  let eta = job.etaStartAt ? Date.parse(job.etaStartAt) : NaN;
-  if (!Number.isFinite(eta) && Number.isFinite(submit) && job.partition?.avgWaitHours != null) eta = submit + job.partition.avgWaitHours * 3600_000;
-  const etaMs = Number.isFinite(eta) ? eta : null;
-  const position = job.queuePosition ?? null;
-  const starting = etaMs != null && etaMs <= now;
-  const progress = etaMs != null && Number.isFinite(submit) && etaMs > submit ? clamp((now - submit) / (etaMs - submit), 0, 1) : 0;
-  const where = job.nodeList || [job.cluster?.name ?? job.cluster?.id, job.partition?.slurmPartition ?? job.partition?.name].filter(Boolean).join(' ') || 'its node';
-  const label = starting
-    ? `Starting on ${where}…`
-    : `${position != null ? `Queue #${position}` : 'Queued'}${etaMs != null ? ` · starts in ${waitText(etaMs - now)}` : ''}`;
-  return { position, etaMs, progress: starting ? 1 : progress, starting, label };
 }
 
 /**

@@ -77,8 +77,7 @@ export default function AdminOverview() {
       const kpis = {
         ...ov.kpis,
         runningJobs: c.running ?? ov.kpis.runningJobs,
-        pendingJobs: c.pending ?? ov.kpis.pendingJobs,
-        liveJobs: c.running != null && c.pending != null ? c.running + c.pending : ov.kpis.liveJobs,
+        liveJobs: c.running ?? ov.kpis.liveJobs,
         openAlerts: c.openAlerts ?? ov.kpis.openAlerts,
         criticalAlerts: c.criticalAlerts ?? ov.kpis.criticalAlerts,
         busyGpus: busy || ov.kpis.busyGpus,
@@ -171,8 +170,6 @@ export default function AdminOverview() {
       sortValue: (c) => (c.totalGpus > 0 ? c.gpuUtilizationPct : -1),
     },
     { key: 'gpus', header: 'GPUs busy', align: 'right', render: (c) => (c.totalGpus ? `${num(c.busyGpus)} / ${num(c.totalGpus)}` : '—'), sortValue: (c) => c.totalGpus, hideBelow: 'sm' },
-    { key: 'queue', header: 'Queue', align: 'right', render: (c) => num(c.queueDepth), sortValue: (c) => c.queueDepth, hideBelow: 'md' },
-    { key: 'wait', header: 'Avg wait', align: 'right', render: (c) => hours(c.avgWaitHours), sortValue: (c) => c.avgWaitHours, hideBelow: 'md' },
     { key: 'storage', header: 'Storage', align: 'right', render: (c) => (c.storageTb ? `${compact(c.storageTb)} TB` : '—'), sortValue: (c) => c.storageTb, hideBelow: 'lg' },
     { key: 'cost', header: 'Spend', align: 'right', render: (c) => usd(c.costUsd), sortValue: (c) => c.costUsd },
   ];
@@ -231,7 +228,7 @@ export default function AdminOverview() {
             label="Open alerts"
             value={<LiveNumber value={k.openAlerts} />}
             tone={k.criticalAlerts > 0 ? 'bad' : k.openAlerts > 0 ? 'warn' : 'good'}
-            caption={`${num(k.criticalAlerts)} critical · ${num(k.runningJobs)} running, ${num(k.pendingJobs)} pending jobs`}
+            caption={`${num(k.criticalAlerts)} critical · ${num(k.runningJobs)} running jobs`}
             onClick={() => navigate('/admin/labs')}
           />
         </KpiRow>
@@ -407,7 +404,7 @@ export default function AdminOverview() {
                       <ToneBadge tone={PRESSURE_TONE[d.pressure] ?? 'neutral'}>{d.pressure.charAt(0) + d.pressure.slice(1).toLowerCase()}</ToneBadge>
                     </div>
                     <p className="text-xs tabular-nums text-[var(--c3-style-basic-fg-secondary)]">
-                      {d.gpuTypeId ?? 'CPU'} · {pct(d.utilizationPct)} busy → {pct(d.forecastUtilizationPct)} forecast · {num(d.queueDepth)} queued · {hours(d.avgWaitHours)} wait
+                      {d.gpuTypeId ?? 'CPU'} · {pct(d.utilizationPct)} busy → {pct(d.forecastUtilizationPct)} forecast utilization
                     </p>
                     {d.recommendation ? <p className="text-[13px] text-[var(--c3-style-basic-fg-primary)]">{d.recommendation}</p> : null}
                   </li>
@@ -420,7 +417,7 @@ export default function AdminOverview() {
       <SectionCard
         flush
         title="Clusters and storage"
-        subtitle="Capacity, load, wait and spend per cluster; select a row for partitions"
+        subtitle="Capacity, utilization and spend per cluster; select a row for partitions"
         actions={
           <Button variant="ghost" appearance="secondary" size="sm" onClick={() => navigate('/admin/clusters')}>
             All clusters

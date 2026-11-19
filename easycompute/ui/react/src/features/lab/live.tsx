@@ -94,7 +94,7 @@ export function seeded(key: string, n: number): number {
 export const SimNote = () => null;
 
 /** Overlay a liveSnapshot entry on a fetched Job (snapshot wins: it is newer). */
-export function mergeSnap(j: Job, s?: SnapJob): Job & { queuePosition?: number | null; etaStartAt?: string | null; progressPerRealSec?: number; latest?: SnapJob['latest'] } {
+export function mergeSnap(j: Job, s?: SnapJob): Job & { progressPerRealSec?: number; latest?: SnapJob['latest'] } {
   if (!s) return j;
   return {
     ...j,
@@ -109,8 +109,6 @@ export function mergeSnap(j: Job, s?: SnapJob): Job & { queuePosition?: number |
     costUsd: s.costUsd ?? j.costUsd,
     allocGpus: s.gpus ?? j.allocGpus,
     qos: s.qos ?? j.qos,
-    queuePosition: s.queuePosition,
-    etaStartAt: s.etaStartAt,
     progressPerRealSec: s.progressPerRealSec,
     latest: s.latest,
   };

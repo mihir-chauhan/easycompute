@@ -268,7 +268,7 @@ function planRun(labId, description, workloadType, gpus, gpuTypeId, walltimeHour
     RunPlan.fetch({
       filter: Filter.eq('runRequest.id', rrId),
       include:
-        'id, rank, label, cluster.id, partition.id, gpuType.id, gpus, nodes, walltimeHours, estWaitHours, estDurationHours, ' +
+        'id, rank, label, cluster.id, partition.id, gpuType.id, gpus, nodes, walltimeHours, estDurationHours, ' +
         'estCostUnits, estCostUsd, meetsDeadline, score, rationale, finishBy, deadlineSlackHours, qos, account, slurmPartition, ' +
         'chainedJobs, preemptionRisk, sbatchScript',
       order: 'ascending(rank)',
@@ -289,7 +289,6 @@ function planRun(labId, description, workloadType, gpus, gpuTypeId, walltimeHour
       nodes: num(p.nodes),
       walltimeHours: num(p.walltimeHours),
       chainedJobs: num(p.chainedJobs),
-      estWaitHours: round(num(p.estWaitHours), 1),
       estDurationHours: round(num(p.estDurationHours), 1),
       finishBy: iso(p.finishBy),
       estCostUnits: round(num(p.estCostUnits), 1),
@@ -464,7 +463,7 @@ var PROMPTS = [
       '2. Call the EasyCompute planRun tool with labId "{labId}", the description and those values. It only creates a DRAFT ' +
       'request and never submits anything.\n' +
       '3. Explain every FAIL and WARN rule check (rule id and message), then compare the Fastest, Cheapest and Balanced plans ' +
-      '(cluster, partition, GPUs, walltime, wait, duration, cost, deadline fit) and recommend one with a one-sentence reason.\n' +
+      '(cluster, partition, GPUs, walltime, duration, cost, deadline fit) and recommend one with a one-sentence reason.\n' +
       '4. Show the sbatch script of the recommended plan in a code block and remind the user to launch it from the ' +
       'EasyCompute Launch planner.',
   },

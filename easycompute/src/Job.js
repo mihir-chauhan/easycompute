@@ -180,8 +180,8 @@ function applyAction(actionType, actor) {
       detail = 'No preemptible/standby partition with ' + (job.gpuType ? job.gpuType.id : 'the same hardware') + ' on ' + (job.cluster ? job.cluster.name : 'this cluster') + '.';
     } else {
       var q = sp.qos ? String(sp.qos) : /standby/i.test(String(sp.name || sp.id)) ? 'standby' : 'preemptible';
-      update = { partition: { id: sp.id }, qos: q, state: 'PENDING' };
-      detail = 'scontrol requeue ' + sid + ' && scontrol update JobId=' + sid + ' Partition=' + (sp.slurmPartition || sp.name || sp.id) + ' QOS=' + q + ' — requeued to ' + (sp.name || sp.id) + ' (' + round(num(sp.chargeFactor, 0), 2) + 'x charge), resuming from the last checkpoint.';
+      update = { partition: { id: sp.id }, qos: q, state: 'RUNNING' };
+      detail = 'scontrol requeue ' + sid + ' && scontrol update JobId=' + sid + ' Partition=' + (sp.slurmPartition || sp.name || sp.id) + ' QOS=' + q + ' — requeued to ' + (sp.name || sp.id) + ' (' + round(num(sp.chargeFactor, 0), 2) + 'x charge), resumed immediately from the last checkpoint.';
     }
   } else if (type == 'CHECKPOINT_NOW') {
     if (st != 'RUNNING') {

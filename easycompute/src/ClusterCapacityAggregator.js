@@ -42,12 +42,6 @@ function cellNum(tuple, idx) {
   return v == null ? 0 : Number(v);
 }
 
-function fmtHours(h) {
-  if (h < 1) return Math.max(1, Math.round(h * 60)) + ' min';
-  if (h < 48) return round(h, 1) + ' h';
-  return round(h / 24, 1) + ' days';
-}
-
 /** Monday (UTC) of the ISO week containing t, as YYYY-MM-DD. */
 function weekKey(t) {
   var d = new Date(t);
@@ -403,8 +397,8 @@ function overview() {
       var wait = num(r.p.avgWaitHours, 0);
       var pressure = forecast >= 90 || wait >= 8 ? 'HIGH' : forecast >= 75 || wait >= 3 ? 'MEDIUM' : 'LOW';
       var rec = pressure == 'HIGH'
-        ? 'Add ' + gt + ' capacity or shift work: forecast ' + Math.round(forecast) + '% busy, ' + fmtHours(wait) + ' typical wait, ' + Math.round(r.backlog) + ' GPU-hours queued.'
-        : pressure == 'MEDIUM' ? 'Watch: ' + Math.round(forecast) + '% forecast utilization.' : 'Headroom available (' + Math.round(100 - r.util) + '% idle); steer queued work here.';
+        ? 'Add ' + gt + ' capacity or shift work: forecast ' + Math.round(forecast) + '% utilization.'
+        : pressure == 'MEDIUM' ? 'Watch: ' + Math.round(forecast) + '% forecast utilization.' : 'Headroom available (' + Math.round(100 - r.util) + '% idle); steer new work here.';
       return {
         partitionId: r.p.id,
         name: r.p.name,
@@ -425,12 +419,10 @@ function overview() {
 
   var byGt = {};
   demandParts.forEach(function (d) {
-    var e = (byGt[d.gpuTypeId] = byGt[d.gpuTypeId] || { gpuTypeId: d.gpuTypeId, score: 0, n: 0, wait: 0, util: 0, backlog: 0 });
+    var e = (byGt[d.gpuTypeId] = byGt[d.gpuTypeId] || { gpuTypeId: d.gpuTypeId, score: 0, n: 0, util: 0 });
     e.score += d.pressure == 'HIGH' ? 2 : d.pressure == 'MEDIUM' ? 1 : 0;
     e.n++;
-    e.wait = Math.max(e.wait, d.avgWaitHours);
     e.util = Math.max(e.util, d.forecastUtilizationPct);
-    e.backlog += d.pendingGpuHours;
   });
   var needs = Object.keys(byGt)
     .map(function (g) {
@@ -440,7 +432,7 @@ function overview() {
         gpuTypeId: g,
         pressure: avg >= 1.5 ? 'HIGH' : avg >= 0.75 ? 'MEDIUM' : 'LOW',
         score: round(avg, 2),
-        reason: 'Up to ' + Math.round(e.util) + '% forecast utilization, waits up to ' + fmtHours(e.wait) + ', ' + Math.round(e.backlog) + ' GPU-hours queued' + (gtTrend[g] != null ? '; demand ' + (gtTrend[g] >= 0 ? '+' : '') + round(gtTrend[g] * 100, 1) + '%/week' : '') + '.',
+        reason: 'Up to ' + Math.round(e.util) + '% forecast utilization' + (gtTrend[g] != null ? '; demand ' + (gtTrend[g] >= 0 ? '+' : '') + round(gtTrend[g] * 100, 1) + '%/week' : '') + '.',
       };
     })
     .sort(function (a, b) {

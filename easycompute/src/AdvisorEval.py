@@ -251,7 +251,7 @@ def _case_cheapest_plan():
                 f"{cheapest.get('cluster')} / {cheapest.get('partition')}"
                 f"{' (QOS ' + cheapest['qos'] + ')' if cheapest.get('qos') else ''}, walltime "
                 f"{_fmt(cheapest.get('walltimeHours'), 1)} h, about ${_fmt(cheapest.get('estCostUsd'))} with "
-                f"~{_fmt(cheapest.get('estWaitHours'), 1)} h wait and ~{_fmt(cheapest.get('estDurationHours'), 1)} h runtime"
+                f"~{_fmt(cheapest.get('estDurationHours'), 1)} h runtime"
             )
             others = [
                 f"{p.get('label')}: {p.get('gpus')}x {p.get('gpuType')} on {p.get('partition')}, ~${_fmt(p.get('estCostUsd'))}"
@@ -274,7 +274,7 @@ def _case_cheapest_plan():
         "expected_output": "For a 4-GPU FINETUNE of a 7B model, " + plan_line
         + ". The advisor should evaluate the run with the planner, name the Cheapest plan with its cost and cluster/"
         "partition, mention rule warnings if any, and not submit anything without the user's confirmation. Plans can "
-        "shift with live queue state, so another compliant plan that the planner ranks cheapest is acceptable.",
+        "shift with live cluster load, so another compliant plan that the planner ranks cheapest is acceptable.",
         "keywords": kws + [["cheapest"], ["$", "free", "no cost", "su"]],
         "rubric": [
             {"criterion": "Uses the planner and recommends a specific cheapest plan (cluster, partition, GPU type)", "points": 4},

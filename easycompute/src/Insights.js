@@ -434,7 +434,7 @@ function labSummary(labId) {
   var avgUtil = k.utilW > 0 ? k.utilSum / k.utilW : null;
   var recs = [];
   if (walltimeN >= 5 && walltimeOver / walltimeN > 0.25) {
-    recs.push({ kind: 'WALLTIME', title: 'Request shorter walltimes', detail: round((walltimeOver / walltimeN) * 100, 0) + '% of completed jobs used under 30% of their time limit. Tighter limits backfill sooner; the planner sizes walltime at 1.2 x predicted p90.', impact: 'Shorter queue waits' });
+    recs.push({ kind: 'WALLTIME', title: 'Request shorter walltimes', detail: round((walltimeOver / walltimeN) * 100, 0) + '% of completed jobs used under 30% of their time limit. Tighter limits backfill sooner; the planner sizes walltime at 1.2 x predicted p90.', impact: 'Tighter, more accurate requests' });
   }
   if (k.wasted > 0 && k.gpuHours > 0 && k.wasted / k.gpuHours > 0.3) {
     recs.push({ kind: 'IDLE', title: 'Cut idle GPU time', detail: round(k.wasted, 0) + ' of ' + round(k.gpuHours, 0) + ' GPU-hours (' + round((k.wasted / k.gpuHours) * 100, 0) + '%) were allocated but idle. Enable autopilot idle cancellation and fix data-loader stalls.', impact: '~$' + round((k.costUsd * k.wasted) / k.gpuHours, 0) + ' recoverable' });

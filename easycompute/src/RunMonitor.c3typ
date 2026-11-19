@@ -7,9 +7,16 @@ type RunMonitor {
    * Advances the live cluster by the real time elapsed since the last tick (job progress at
    * {@link RunSimulatorSettings#demoTimeScale}, plus `fastForwardMinutes` of progress for the "Simulate next 15 min" button):
    * telemetry samples, job lifecycle, partition / cluster drift, allocation charges, guardrails and autopilot. Run every
-   * minute by the `EasyComputeMonitorTick` CronJob; does nothing when the simulator is disabled.
+   * minute by the `EasyComputeMonitorTick` CronJob; does nothing when the simulator is disabled. Any PENDING live job
+   * (older rows, requeues) is started RUNNING on the tick; nothing is kept queued.
    */
   tick: function(fastForwardMinutes: int): json js-server
+
+  /**
+   * Starts a just-submitted job right away (called by {@link RunRequest#submit}; nothing queues): assigns an RCAC-style
+   * node list, writes the initial JobMetric samples and the job's `latestSample`, so live charts render immediately.
+   */
+  startJob: function(jobId: string): json js-server
 
   /**
    * Cheap snapshot for live views (poll every 5-10 s): live jobs with their latest sample and alerts, partition and

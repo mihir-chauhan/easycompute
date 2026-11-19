@@ -27,17 +27,17 @@ import {
 import { Button } from '@/components/ui/button';
 import { fetchLiveMetrics, fetchOpenAlerts, fetchRecentJobs } from '@/features/lab/api';
 import { AlertTypeBadge, CliHint, JobStateBadge, Mono, muted } from '@/features/lab/components';
-import { whereLabel, formatDuration, formatPct100, formatRelative, formatUsd } from '@/features/lab/format';
+import { whereLabel, formatDuration, formatPct100, formatUsd } from '@/features/lab/format';
 import type { Alert, Job, JobMetric } from '@/features/lab/types';
-import { queueStatus, useTelemetry, type TelemetryJob } from '@/features/lab/telemetry';
+import { useTelemetry, type TelemetryJob } from '@/features/lab/telemetry';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
 import { LIVE_POLL_MS, LiveBadge, liveJob, mergeSnap, SimNote, useLiveSnapshot, useNow, withLatest } from '@/features/lab/live';
 import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { cn } from '@/lib/utils';
 
-type View = 'all' | 'running' | 'queued' | 'approval' | 'completed' | 'failed';
-const VIEWS: View[] = ['all', 'running', 'queued', 'approval', 'completed', 'failed'];
+type View = 'all' | 'running' | 'approval' | 'completed' | 'failed';
+const VIEWS: View[] = ['all', 'running', 'approval', 'completed', 'failed'];
 const FAILED = ['FAILED', 'TIMEOUT', 'OUT_OF_MEMORY', 'CANCELLED', 'PREEMPTED'];
 
 /** Running job's GPU util: streaming sparkline (last 5 min) and the current value. */
@@ -105,7 +105,6 @@ const RunList: React.FC = () => {
   const inView = (j: Job, v: View) =>
     v === 'all' ||
     (v === 'running' && j.state === 'RUNNING') ||
-    (v === 'queued' && j.state === 'PENDING') ||
     (v === 'approval' && needsApproval(j)) ||
     (v === 'completed' && j.state === 'COMPLETED') ||
     (v === 'failed' && FAILED.includes(j.state ?? ''));
@@ -120,7 +119,6 @@ const RunList: React.FC = () => {
 
   const count = (v: View) => jobs.filter((j) => inView(j, v)).length;
   const running = count('running');
-  const queued = count('queued');
 
 
   const setView = (v: string) =>
@@ -146,16 +144,6 @@ const RunList: React.FC = () => {
         <div className="flex w-36 flex-col gap-1">
           <ProgressBar value={frac} tone={frac > 0.9 ? 'bad' : 'good'} ariaLabel="Walltime used" />
           <span className={cn('text-xs', muted)}>{`${formatDuration(j.elapsedHours)} of ${formatDuration(j.timelimitHours)}`}</span>
-        </div>
-      );
-    }
-    if (j.state === 'PENDING') {
-      const qs = queueStatus(j as Job & { queuePosition?: number | null; etaStartAt?: string | null }, now);
-      if (qs.etaMs == null) return <span className={muted}>{`${qs.position != null ? `Queue #${qs.position}` : 'Waiting'} · queued ${formatRelative(j.submitTime)}`}</span>;
-      return (
-        <div className="flex w-36 flex-col gap-1">
-          <ProgressBar value={qs.progress} tone="info" ariaLabel="Queue wait elapsed" />
-          <span className={cn('text-xs tabular-nums', muted)}>{qs.label}</span>
         </div>
       );
     }
@@ -207,9 +195,7 @@ const RunList: React.FC = () => {
         <span>
           {'There are '}
           <b className="font-semibold text-[var(--c3-style-basic-fg-primary)]">{running}</b>
-          {` run${running === 1 ? '' : 's'} live and `}
-          <b className="font-semibold text-[var(--c3-style-basic-fg-primary)]">{queued}</b>
-          {` queued${mineOnly ? ' of yours' : ''} on `}
+          {` run${running === 1 ? '' : 's'} live${mineOnly ? ' of yours' : ''} on `}
           <b className="font-semibold text-[var(--c3-style-basic-fg-primary)]">{clusterId ? (allJobs.find((j) => j.cluster?.id === clusterId)?.cluster?.name ?? clusterId) : 'all clusters'}</b>.
         </span>
       }
@@ -230,7 +216,6 @@ const RunList: React.FC = () => {
             options={[
               { value: 'all', label: 'All', count: count('all') },
               { value: 'running', label: 'Running', count: running },
-              { value: 'queued', label: 'Queued', count: queued },
               { value: 'approval', label: 'Needs approval', count: count('approval') },
               { value: 'completed', label: 'Completed', count: count('completed') },
               { value: 'failed', label: 'Failed', count: count('failed') },
@@ -267,7 +252,7 @@ const RunList: React.FC = () => {
           }
         />
       </SectionCard>
-      <CliHint command={`easycompute runs list --lab ${labId ?? '<lab>'} --status running,queued --format table`} />
+      <CliHint command={`easycompute runs list --lab ${labId ?? '<lab>'} --status running --format table`} />
       <SimNote />
     </PageFrame>
   );

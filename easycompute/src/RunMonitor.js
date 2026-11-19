@@ -5,15 +5,15 @@
 
 /*
  * Live cluster simulator (SPEC "LIVE CLUSTER SIMULATION", API.md section 8). Timestamps are real wall-clock time; job
- * progress runs at demoTimeScale x real time; queue waits are compressed by queueWaitCompression. Everything is seeded
- * by job / partition id and timestamp, so the same inputs always produce the same telemetry.
+ * progress runs at demoTimeScale x real time. Jobs never queue: a submitted run starts RUNNING immediately (startJob) and
+ * any PENDING live row is started on the next tick. Everything is seeded by job / partition id and timestamp, so the same
+ * inputs always produce the same telemetry.
  */
 
 var log = Logger.for('RunMonitor');
 
 var MIN_MS = 60 * 1000;
-var HOUR_MS = 60 * MIN_MS;
-var DEFAULTS = { enabled: true, demoTimeScale: 10, queueWaitCompression: 60, sampleIntervalSec: 20, maxCatchUpMin: 10, maxSamplesPerJob: 360, respawnScriptedJobs: true };
+var DEFAULTS = { enabled: true, demoTimeScale: 10, sampleIntervalSec: 20, maxCatchUpMin: 10, maxSamplesPerJob: 360, respawnScriptedJobs: true };
 var MAX_SAMPLES_PER_TICK = 30;
 var THIN_JOBS_PER_TICK = 3;
 var ENDED_VISIBLE_MS = 10 * MIN_MS;
@@ -272,7 +272,7 @@ function tick(fastForwardMinutes) {
   var jobs = [];
   Job.fetchObjStream({
     filter: Filter.eq('isLive', true).and().intersects('state', ['RUNNING', 'PENDING']),
-    include: 'this, lab.this, project.priority, cluster.this, partition.this, gpuType.this, runRequest.chosenPlan.estDurationHours, runRequest.chosenPlan.estWaitHours',
+    include: 'this, lab.this, project.priority, cluster.this, partition.this, gpuType.this, runRequest.chosenPlan.estDurationHours',
   }).each(function (j) {
     jobs.push(j);
   });
@@ -292,38 +292,14 @@ function tick(fastForwardMinutes) {
   var finished = [];
   var stillRunning = [];
   var thinCandidates = [];
-  var pendingByPartition = {};
-
-  jobs.forEach(function (j) {
-    if (j.state != 'PENDING') return;
-    var pid = j.partition ? j.partition.id : '';
-    (pendingByPartition[pid] = pendingByPartition[pid] || []).push(j);
-  });
-  Object.keys(pendingByPartition).forEach(function (pid) {
-    pendingByPartition[pid].sort(function (a, b) {
-      return (ms(a.submitTime) || 0) - (ms(b.submitTime) || 0);
-    });
-  });
 
   jobs.forEach(function (j) {
     if (j.state == 'PENDING') {
-      var eta = ms(j.etaStartAt);
-      if (eta == null) {
-        var waitH = j.runRequest && j.runRequest.chosenPlan && j.runRequest.chosenPlan.estWaitHours != null ? num(j.runRequest.chosenPlan.estWaitHours, 0.5) : num(j.partition && j.partition.avgWaitHours, 0.5);
-        eta = Math.max(ms(j.submitTime) || now, now - MIN_MS) + clamp((waitH * HOUR_MS) / cfg.queueWaitCompression, 20 * 1000, 5 * MIN_MS);
-      }
-      var pos = pendingByPartition[j.partition ? j.partition.id : ''].indexOf(j) + 1;
-      if (now + ff * MIN_MS >= eta) {
-        var nodes = Math.max(1, num(j.allocNodes, 1));
-        var names = [];
-        for (var n = 0; n < nodes; n++) names.push(nodeName(j.partition, Math.floor(rand(j.id + ':node') * 90) + n));
-        var first = nextSample(j, j.simScenario || 'HEALTHY', null, 0, 0, now);
-        newMetrics.push(JobMetric.make(withMeta(first, j.id, now)));
-        jobUpdates.push({ id: j.id, state: 'RUNNING', startTime: toDt(now), nodeList: j.nodeList || names.join(','), etaStartAt: null, queuePosition: null, simScenario: j.simScenario || 'HEALTHY', latestSample: latestOf(first, now), lastSimAt: toDt(now) });
-        started.push(j.id);
-      } else {
-        jobUpdates.push({ id: j.id, etaStartAt: toDt(eta), queuePosition: pos });
-      }
+      // no queueing: any PENDING live row (older data, requeue) starts right away
+      var st = startFields(j, now);
+      st.metrics.forEach(function (m) { newMetrics.push(m); });
+      jobUpdates.push(st.update);
+      started.push(j.id);
       return;
     }
 
@@ -464,7 +440,7 @@ function tick(fastForwardMinutes) {
   var superseded = supersedeProposals(resolvedAlerts.concat(finished.map(function (f) { return f.jobId; })), now);
 
   var openAlerts = JobAlert.fetchCount({ filter: Filter.intersects('status', ['OPEN', 'ACKED']) });
-  var liveJobs = Job.fetchCount({ filter: Filter.eq('isLive', true).and().intersects('state', ['RUNNING', 'PENDING']) });
+  var liveJobs = Job.fetchCount({ filter: Filter.eq('isLive', true).and().eq('state', 'RUNNING') });
   var awaiting = actions.filter(function (a) { return a.outcome == 'PENDING_APPROVAL'; }).length;
   var summary = {
     simulatedTo: iso(now),
@@ -486,7 +462,7 @@ function tick(fastForwardMinutes) {
     openAlerts: openAlerts,
     liveJobs: liveJobs,
     provenance: [
-      { component: 'RunMonitor', version: 'live-v2', method: 'live telemetry stream: seeded per-workload telemetry profiles, scenario overrides, compressed queue waits, mean-reverting partition drift', status: 'LIVE', trainingPeriod: null, sampleSupport: null, historicalOnly: false, computedAt: iso(now), note: 'Simulated telemetry for demo' },
+      { component: 'RunMonitor', version: 'live-v2', method: 'live telemetry stream: seeded per-workload telemetry profiles, scenario overrides, immediate job start, mean-reverting partition drift', status: 'LIVE', trainingPeriod: null, sampleSupport: null, historicalOnly: false, computedAt: iso(now) },
       { component: 'GuardrailRuleEngine', version: 'guardrails-hysteresis-v1', method: 'state machine with hysteresis; consequential autopilot actions (cancel, scale down, requeue) wait for user confirmation', status: 'DETERMINISTIC', trainingPeriod: null, sampleSupport: null, historicalOnly: false, computedAt: iso(now) },
       { component: 'GPUUnderuseDetector', version: 'ewma-cusum-v1', method: 'EWMA + CUSUM over each run\'s own GPU-utilization baseline', status: 'DETERMINISTIC', trainingPeriod: null, sampleSupport: null, historicalOnly: false, computedAt: iso(now) },
     ],
@@ -497,6 +473,42 @@ function tick(fastForwardMinutes) {
   RunSimulatorSettings.make({ id: 'default', lastTickAt: toDt(now), lastTickSummary: compact }).merge();
   log.info('tick: {} s real, {} progress-min, {} running, {} started, {} finished, {} samples', round(realMs / 1000, 0), round(progressMin, 1), stillRunning.length, started.length, finished.length, newMetrics.length);
   return summary;
+}
+
+var START_SAMPLES = 4;
+
+/**
+ * A job that starts now: RCAC-style node list and START_SAMPLES initial samples ending at `now`, so live
+ * charts have a line the moment the run page opens. Returns the Job merge fields and the JobMetric objs.
+ */
+function startFields(j, now) {
+  var scenario = j.simScenario || 'HEALTHY';
+  var nodes = Math.max(1, num(j.allocNodes, 1));
+  var names = [];
+  for (var n = 0; n < nodes; n++) names.push(nodeName(j.partition, Math.floor(rand(j.id + ':node') * 90) + n));
+  var t0 = now - (START_SAMPLES - 1) * 250;
+  var metrics = [];
+  var prev = null;
+  for (var i = 0; i < START_SAMPLES; i++) {
+    var t = t0 + i * 250;
+    var s = nextSample(j, scenario, prev, i * 0.25, i ? 0.25 : 0, t);
+    metrics.push(JobMetric.make(withMeta(s, j.id, t)));
+    prev = s;
+  }
+  return {
+    metrics: metrics,
+    update: { id: j.id, state: 'RUNNING', startTime: toDt(now), nodeList: j.nodeList || names.join(','), etaStartAt: null, queuePosition: null, simScenario: scenario, latestSample: latestOf(prev, now), lastSimAt: toDt(now) },
+  };
+}
+
+/** Starts a just-submitted job (RunRequest#submit): node list, initial samples, latest sample. */
+function startJob(jobId) {
+  var j = Job.make({ id: jobId }).get('this, partition.this, gpuType.this');
+  if (j == null) throw new Error('Job ' + jobId + ' not found');
+  var st = startFields(j, Date.now());
+  JobMetric.createBatch(st.metrics);
+  Job.make(st.update).merge();
+  return { jobId: jobId, state: 'RUNNING', nodeList: st.update.nodeList, samplesWritten: st.metrics.length };
 }
 
 function withMeta(s, jobId, t) {
@@ -524,9 +536,8 @@ function driftClusters(jobs, realMs, now) {
   var demand = {};
   jobs.forEach(function (j) {
     if (!j.partition) return;
-    var d = (demand[j.partition.id] = demand[j.partition.id] || { running: 0, pending: 0 });
-    if (j.state == 'RUNNING') d.running += Math.max(1, num(j.allocGpus, 0));
-    else d.pending++;
+    var d = (demand[j.partition.id] = demand[j.partition.id] || { running: 0 });
+    d.running += Math.max(1, num(j.allocGpus, 0));
   });
   var bucket = Math.floor(now / MIN_MS);
   var parts = list(Partition.fetch({ limit: 500 }).objs);
@@ -536,12 +547,12 @@ function driftClusters(jobs, realMs, now) {
     var baseU = num(p.baseUtilizationPct, num(p.utilizationPct, 60));
     var baseQ = num(p.baseQueueDepth, num(p.currentQueueDepth, 5));
     var baseW = num(p.baseAvgWaitHours, num(p.avgWaitHours, 1));
-    var d = demand[p.id] || { running: 0, pending: 0 };
+    var d = demand[p.id] || { running: 0 };
     var cap = Math.max(1, num(p.nodeCount, 4) * Math.max(1, num(p.gpusPerNode, 1)));
     var targetU = clamp(baseU + (d.running / cap) * 100 * 0.3, 0, 99);
     var theta = 1 - Math.exp(-minutes / 30);
     var u = clamp(num(p.utilizationPct, baseU) + (targetU - num(p.utilizationPct, baseU)) * theta + noise(key + ':u', 1.2) * Math.sqrt(minutes), 0, 99.5);
-    var q = Math.max(0, Math.round(num(p.currentQueueDepth, baseQ) + (baseQ + d.pending - num(p.currentQueueDepth, baseQ)) * theta + noise(key + ':q', 1.5) * Math.sqrt(minutes)));
+    var q = Math.max(0, Math.round(num(p.currentQueueDepth, baseQ) + (baseQ - num(p.currentQueueDepth, baseQ)) * theta + noise(key + ':q', 1.5) * Math.sqrt(minutes)));
     var w = Math.max(0, baseW * (1 + Math.max(0, u - baseU) / 20) * (1 + noise(key + ':w', 0.05)));
     if (p.cluster) {
       var c = (clusterUtil[p.cluster.id] = clusterUtil[p.cluster.id] || { sum: 0, n: 0 });
@@ -584,7 +595,7 @@ function thinSamples(jobIds, keep) {
   return removed;
 }
 
-/** A successor for a scripted demo job that ended, queued with the same scenario so demo problems keep firing. */
+/** A successor for a scripted job that ended, started RUNNING right away with the same scenario so problems keep firing. */
 function respawn(j, scenario, now) {
   var cid = j.cluster ? String(j.cluster.id) : 'node';
   var base = Number(String(j.slurmJobId || '0').replace(/\D/g, '')) || 1000000;
@@ -592,7 +603,7 @@ function respawn(j, scenario, now) {
   var limit = num(j.timelimitHours, 24);
   if (scenario == 'WALLTIME_RISK') limit = Math.max(2, Math.round(limit * 0.15));
   var name = String(j.jobName || 'job').replace(/(-r\d+)?$/, '') + '-r' + (1 + (Number((String(j.jobName || '').match(/-r(\d+)$/) || [0, 1])[1]) || 1));
-  Job.make({
+  var succ = {
     id: cid + '-' + newId,
     slurmJobId: newId,
     lab: j.lab ? { id: j.lab.id } : null,
@@ -604,9 +615,8 @@ function respawn(j, scenario, now) {
     qos: j.qos,
     jobName: name,
     workloadType: j.workloadType,
-    state: 'PENDING',
+    state: 'RUNNING',
     submitTime: toDt(now),
-    etaStartAt: toDt(now + (30 + rand(j.id + ':eta') * 90) * 1000),
     timelimitHours: limit,
     elapsedHours: 0,
     allocCpus: j.allocCpus,
@@ -618,8 +628,14 @@ function respawn(j, scenario, now) {
     costUsd: 0,
     isLive: true,
     simScenario: scenario,
-  }).create();
-  return cid + '-' + newId;
+  };
+  var st = startFields({ id: succ.id, allocNodes: succ.allocNodes, allocGpus: succ.allocGpus, workloadType: succ.workloadType, simScenario: scenario, partition: j.partition, gpuType: j.gpuType }, now);
+  Object.keys(st.update).forEach(function (k) {
+    if (k != 'id') succ[k] = st.update[k];
+  });
+  Job.make(succ).create();
+  JobMetric.createBatch(st.metrics);
+  return succ.id;
 }
 
 /** Pending AI-triage / autopilot proposals for alerts (or jobs) that resolved are closed as superseded. */
@@ -651,9 +667,9 @@ function supersedeProposals(ids, now) {
 function liveSnapshot(labId) {
   var now = Date.now();
   var cfg = settings();
-  var jobFilter = Filter.eq('isLive', true).and("state == 'RUNNING' || state == 'PENDING' || endTime >= dateTime('" + new Date(now - ENDED_VISIBLE_MS).toISOString().substring(0, 19) + "')");
+  var jobFilter = Filter.eq('isLive', true).and("state == 'RUNNING' || endTime >= dateTime('" + new Date(now - ENDED_VISIBLE_MS).toISOString().substring(0, 19) + "')");
   if (labId) jobFilter = Filter.eq('lab.id', labId).and(jobFilter);
-  var jobs = list(Job.fetch({ filter: jobFilter, include: 'id, jobName, user, lab, cluster, partition, qos, state, workloadType, allocGpus, gpuType, nodeList, submitTime, startTime, endTime, etaStartAt, queuePosition, elapsedHours, timelimitHours, costUnits, costUsd, latestSample', order: 'descending(submitTime)', limit: 200 }).objs);
+  var jobs = list(Job.fetch({ filter: jobFilter, include: 'id, jobName, user, lab, cluster, partition, qos, state, workloadType, allocGpus, gpuType, nodeList, submitTime, startTime, endTime, elapsedHours, timelimitHours, costUnits, costUsd, latestSample', order: 'descending(submitTime)', limit: 200 }).objs);
   var ids = jobs.map(function (j) { return j.id; });
   var alertsByJob = {};
   var crit = 0;
@@ -669,10 +685,9 @@ function liveSnapshot(labId) {
   var perSec = cfg.demoTimeScale / 3600;
   var out = {
     serverTime: iso(now),
-    simulator: { enabled: !!cfg.enabled, demoTimeScale: cfg.demoTimeScale, queueWaitCompression: cfg.queueWaitCompression, lastTickAt: iso(cfg.lastTickAt), nextTickInSec: 60 - (Math.floor(now / 1000) % 60) },
+    simulator: { enabled: !!cfg.enabled, demoTimeScale: cfg.demoTimeScale, lastTickAt: iso(cfg.lastTickAt), nextTickInSec: 60 - (Math.floor(now / 1000) % 60) },
     counts: {
       running: jobs.filter(function (j) { return j.state == 'RUNNING'; }).length,
-      pending: jobs.filter(function (j) { return j.state == 'PENDING'; }).length,
       openAlerts: open,
       criticalAlerts: crit,
       awaitingConfirmation: awaiting,
@@ -695,8 +710,6 @@ function liveSnapshot(labId) {
         submitTime: iso(ms(j.submitTime)),
         startTime: iso(ms(j.startTime)),
         endTime: iso(ms(j.endTime)),
-        etaStartAt: iso(ms(j.etaStartAt)),
-        queuePosition: j.queuePosition == null ? null : Number(j.queuePosition),
         elapsedHours: round(num(j.elapsedHours, 0), 4),
         timelimitHours: num(j.timelimitHours, null),
         remainingHours: j.timelimitHours == null ? null : round(Math.max(0, num(j.timelimitHours, 0) - num(j.elapsedHours, 0)), 4),
@@ -718,7 +731,7 @@ function liveSnapshot(labId) {
           return { id: a.id, clusterId: a.cluster.id, usedUnits: round(num(a.usedUnits, 0), 3), totalUnits: num(a.totalUnits, 0), unitName: a.unitName };
         })
       : null,
-    provenance: [{ component: 'RunMonitor', version: 'live-v2', method: 'live cluster snapshot', status: 'LIVE', trainingPeriod: null, sampleSupport: null, historicalOnly: false, computedAt: iso(now), note: 'Simulated telemetry for demo' }],
+    provenance: [{ component: 'RunMonitor', version: 'live-v2', method: 'live cluster snapshot', status: 'LIVE', trainingPeriod: null, sampleSupport: null, historicalOnly: false, computedAt: iso(now) }],
   };
   return out;
 }
