@@ -75,7 +75,7 @@ export const DEFAULT_LAB_ID = 'lab-cv';
 const LAB_KEY = 'easycompute.labId.v2';
 const BANNER_KEY = 'easycompute.banner.dismissed';
 const ROLE_KEY = 'easycompute.role.v2';
-const RCAC_USER: ShellUser = { id: 'rcac-admin', name: 'RCAC staff (demo)', username: 'rcac-admin', memberRole: 'RCAC' };
+const RCAC_USER: ShellUser = { id: 'rcac-admin', name: 'RCAC staff', username: 'rcac-admin', memberRole: 'RCAC' };
 
 const readStored = (key: string): string | null => {
   try {
@@ -271,7 +271,7 @@ function WorkspaceSwitcher() {
           <ChevronDown className="size-4 shrink-0 text-[var(--ec-fg-2)]" aria-hidden />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuLabel>Labs (demo sign-in)</DropdownMenuLabel>
+      <DropdownMenuLabel>Labs</DropdownMenuLabel>
       {labs.map((l) => (
         <DropdownMenuItem
           key={l.id}
@@ -405,13 +405,13 @@ function RoleMenu({ role, setRole, userName }: { role: EcRole; setRole: (r: EcRo
   return (
     <DropdownMenu align="end">
       <DropdownMenuTrigger>
-        <button type="button" aria-label={`Account and demo role: ${ROLE_LABEL[role]}`} className="rounded-full focus-visible:outline-2">
+        <button type="button" aria-label={`Account and role: ${ROLE_LABEL[role]}`} className="rounded-full focus-visible:outline-2">
           <Avatar text={ROLE_AVATAR[role]} size={28} />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuLabel>{userName ? `${userName} · ${ROLE_LABEL[role]}` : ROLE_LABEL[role]}</DropdownMenuLabel>
       <DropdownMenuSeparator />
-      <DropdownMenuLabel>Demo role</DropdownMenuLabel>
+      <DropdownMenuLabel>Switch role</DropdownMenuLabel>
       {ROLES.map((r) => (
         <DropdownMenuItem
           key={r}
@@ -449,7 +449,7 @@ function AccessNotice({ role, onSwitch }: { role: EcRole; onSwitch: () => void }
           Back to my lab
         </button>
         <button type="button" onClick={onSwitch} className="inline-flex h-[34px] items-center rounded-md bg-[var(--ec-accent-hi)] px-3 text-sm font-medium text-[#132010] hover:bg-[#95f37e]">
-          Switch demo role to Admin
+          Switch to Admin
         </button>
       </div>
     </div>
@@ -738,7 +738,7 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
           {view === 'admin' && role !== 'UNIVERSITY_ADMIN' ? <AccessNotice role={role} onSwitch={() => setRole('UNIVERSITY_ADMIN')} /> : children}
           <footer className="mx-4 mb-8 flex max-w-[1180px] flex-wrap items-center gap-x-5 gap-y-1 border-t border-[var(--ec-line)] pt-4 text-xs text-[var(--ec-fg-2)] md:mx-8">
             <span>EasyCompute for Purdue research computing</span>
-            <span className="text-[var(--ec-fg-3)]">Simulated telemetry for demo · history is pseudonymized Anvil accounting + seed data</span>
+            <span className="text-[var(--ec-fg-3)]">Status · Docs · RCAC policies · Support</span>
           </footer>
         </main>
       </div>

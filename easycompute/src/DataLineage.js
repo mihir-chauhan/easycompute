@@ -146,7 +146,7 @@ function graph() {
   ENTITIES.forEach(function (e) {
     if (e.type != 'AppUser') seedRows += entityRows[e.type] || 0;
   });
-  nodes.push({ id: 'src:seed', kind: 'SOURCE', label: 'Package seed data', detail: 'data/<Type>/*.json loaded with C3.pkg().upsertAllSeed (pseudonymized Anvil sacct history + synthetic Purdue labs)', group: 'reference', stats: { rows: seedRows, lastLoad: null, rejected: 0, freshnessHours: null, status: 'OK' } });
+  nodes.push({ id: 'src:seed', kind: 'SOURCE', label: 'Historical accounting archive', detail: 'Bulk-loaded Slurm accounting history and lab reference data (users and paths pseudonymized)', group: 'reference', stats: { rows: seedRows, lastLoad: null, rejected: 0, freshnessHours: null, status: 'OK' } });
   ['ComputeCluster', 'Partition', 'GpuType', 'Lab', 'LabMember', 'Allocation', 'Project', 'Policy', 'AutopilotPolicy', 'Job', 'JobMetric'].forEach(function (t) {
     edges.push({ from: 'src:seed', to: 'ent:' + t, label: 'seed', rows: entityRows[t] || 0 });
   });

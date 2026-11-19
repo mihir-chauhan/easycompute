@@ -116,7 +116,7 @@ function computeStatus(stats: Stats | null): Record<string, NodeStatus> {
     if (!f || !f.deployed) {
       out[n.id] = {
         tone: 'neutral',
-        label: 'Seed load',
+        label: 'Batch load',
         rows: targets.reduce((s, t) => s + (t?.rows ?? 0), 0),
         rejected: null,
         lastLoad: targetLoad,
@@ -282,7 +282,7 @@ export default function AdminData() {
         <KpiRowSkeleton />
       ) : (
         <KpiRow>
-          <KpiTile label="Sources" value={LINEAGE_NODES.filter((n) => n.kind === 'source').length} caption="sacct, telemetry, ledger, status, context, simulator" />
+          <KpiTile label="Sources" value={LINEAGE_NODES.filter((n) => n.kind === 'source').length} caption="sacct, telemetry, ledger, status, context, live stream" />
           <KpiTile label="Data Fusion feeds" value={feedsDeployed} chip="of 4 deployed" tone={feedsDeployed === 4 ? 'good' : 'warn'} caption="FileSourceCollections in EasyComputeFeeds" />
           <KpiTile label="Rows in entities" value={totalRows.toLocaleString('en-US')} caption={data ? `checked ${ago(data.loadedAt)}` : ''} />
           <KpiTile

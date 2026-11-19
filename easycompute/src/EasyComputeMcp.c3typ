@@ -1,0 +1,69 @@
+/**
+ * EasyCompute tools for external AI assistants (Claude Desktop, Cursor, VS Code, ...) served by this application's
+ * built-in App MCP server (`/mcp`). Each tool method below is wrapped as a {@link GenaiCore.Tool.C3Method} and enabled in
+ * the MCP server by {@link EasyComputeMcp#ensureMcpTools}, which also registers two {@link Mcp.Prompt}s. Every tool is
+ * read-only except {@link EasyComputeMcp#planRun}, which only creates a DRAFT {@link RunRequest} and never submits it.
+ * Results are plain JSON objects (ids, numbers, ISO date strings) so an assistant can read them directly.
+ */
+type EasyComputeMcp {
+
+  /**
+   * MCP tool: compact dashboard of one research lab from {@link Insights#labSummary}: lab profile, KPIs (live jobs,
+   * open alerts, GPU-hours, cost, waste, failure rate, allocation dollars remaining), every allocation with remaining
+   * units and dollars, upcoming project deadlines, usage by cluster, efficiency and the top recommendations.
+   *
+   * @param labId The lab id, e.g. lab-nlp, lab-cv, lab-bio, lab-climate, lab-chem, lab-physics, lab-robotics or lab-ag.
+   * @return `{asOf, lab, kpis, allocations, deadlines, usageByCluster, efficiency, recommendations}`.
+   */
+  labSummary: function(labId: !string): json js-server
+
+  // c3-analysis-disable c3-excessive-method-params -- flat primitive arguments are what an MCP tool caller can fill in.
+  /**
+   * MCP tool: plans a run without launching it. Creates a DRAFT {@link RunRequest} named "MCP: <description>", runs
+   * {@link RunRequest#checkRules} (university, cluster, partition and lab rules plus budget, deadline and GPU memory fit)
+   * and {@link RunRequest#recommendPlans}, and returns every rule check outcome and the ranked launch plans (Fastest,
+   * Cheapest, Balanced) with cluster, partition, GPUs, walltime, estimated wait, duration, cost, deadline fit and the
+   * ready-to-use sbatch script. It never submits the run; the user launches it from the EasyCompute Launch planner.
+   *
+   * @param labId         The lab id, e.g. lab-nlp.
+   * @param description   What the run does in plain language, e.g. "LoRA fine-tune of Llama-3 8B on 40k dialogues".
+   * @param workloadType  TRAINING, FINETUNE, INFERENCE, SIMULATION, DATA_PROCESSING or INTERACTIVE (default TRAINING).
+   * @param gpus          Requested number of GPUs (optional; 0 or empty lets the planner choose).
+   * @param gpuTypeId     Requested GPU type id, e.g. H100-80GB or A100-40GB (optional).
+   * @param walltimeHours Requested walltime in hours (optional).
+   * @param modelParamsB  Model size in billions of parameters (optional, 0 when the run trains no neural network).
+   * @return `{runRequestId, name, status, approvalStatus, checks: {pass, warn, fail, items}, plans, planError, note}`.
+   */
+  planRun: function(labId: !string, description: !string, workloadType: string, gpus: int, gpuTypeId: string, walltimeHours: double, modelParamsB: double): json js-server
+  // c3-analysis-enable c3-excessive-method-params
+
+  /**
+   * MCP tool: health of one job: its state and sizing, the latest {@link JobMetric} sample, its OPEN {@link JobAlert}s,
+   * the latest {@link JobPrediction} (predicted runtime vs time limit) and the latest {@link GuardrailTriage} of its
+   * alerts, if any. Read-only.
+   *
+   * @param jobId The job id, as returned by liveJobs.
+   * @return `{job, latestMetric, openAlerts, prediction, triage}`; prediction and triage are null when there are none.
+   */
+  jobHealth: function(jobId: !string): json js-server
+
+  /**
+   * MCP tool: the live (running or pending) jobs of one lab, newest first, with GPU count and type, elapsed hours,
+   * walltime left, cost, the latest GPU utilization / memory / checkpoint age and the number of OPEN alerts.
+   *
+   * @param labId The lab id, e.g. lab-nlp.
+   * @return `{labId, count, withOpenAlerts, jobs}`.
+   */
+  liveJobs: function(labId: !string): json js-server
+
+  /**
+   * Creates (or reuses) the {@link GenaiCore.Tool.C3Method} tools of {@link #labSummary}, {@link #planRun},
+   * {@link #jobHealth} and {@link #liveJobs} and enables them in the built-in App MCP server; creates or updates the
+   * {@link Mcp.Prompt}s "easycompute-lab-briefing" (argument labId) and "easycompute-plan-run" (arguments labId,
+   * description) and enables them too. Idempotent: an existing tool is reused while its argument schema still matches
+   * the method, and prompts are upserted by fixed id.
+   *
+   * @return `{tools: [{id, name, enabledInMcpServer, created}], prompts: [{id, name, enabledInMcpServer}]}`.
+   */
+  ensureMcpTools: function(): json js-server
+}

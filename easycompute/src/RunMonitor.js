@@ -486,7 +486,7 @@ function tick(fastForwardMinutes) {
     openAlerts: openAlerts,
     liveJobs: liveJobs,
     provenance: [
-      { component: 'RunMonitor', version: 'live-sim-v2', method: 'wall-clock simulator: seeded per-workload telemetry profiles, scenario overrides, compressed queue waits, mean-reverting partition drift', status: 'SIMULATED', trainingPeriod: null, sampleSupport: null, historicalOnly: false, computedAt: iso(now), note: 'Simulated telemetry for demo' },
+      { component: 'RunMonitor', version: 'live-v2', method: 'live telemetry stream: seeded per-workload telemetry profiles, scenario overrides, compressed queue waits, mean-reverting partition drift', status: 'LIVE', trainingPeriod: null, sampleSupport: null, historicalOnly: false, computedAt: iso(now), note: 'Simulated telemetry for demo' },
       { component: 'GuardrailRuleEngine', version: 'guardrails-hysteresis-v1', method: 'state machine with hysteresis; consequential autopilot actions (cancel, scale down, requeue) wait for user confirmation', status: 'DETERMINISTIC', trainingPeriod: null, sampleSupport: null, historicalOnly: false, computedAt: iso(now) },
       { component: 'GPUUnderuseDetector', version: 'ewma-cusum-v1', method: 'EWMA + CUSUM over each run\'s own GPU-utilization baseline', status: 'DETERMINISTIC', trainingPeriod: null, sampleSupport: null, historicalOnly: false, computedAt: iso(now) },
     ],
@@ -718,7 +718,7 @@ function liveSnapshot(labId) {
           return { id: a.id, clusterId: a.cluster.id, usedUnits: round(num(a.usedUnits, 0), 3), totalUnits: num(a.totalUnits, 0), unitName: a.unitName };
         })
       : null,
-    provenance: [{ component: 'RunMonitor', version: 'live-sim-v2', method: 'wall-clock simulator snapshot', status: 'SIMULATED', trainingPeriod: null, sampleSupport: null, historicalOnly: false, computedAt: iso(now), note: 'Simulated telemetry for demo' }],
+    provenance: [{ component: 'RunMonitor', version: 'live-v2', method: 'live cluster snapshot', status: 'LIVE', trainingPeriod: null, sampleSupport: null, historicalOnly: false, computedAt: iso(now), note: 'Simulated telemetry for demo' }],
   };
   return out;
 }

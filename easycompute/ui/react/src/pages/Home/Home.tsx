@@ -234,7 +234,7 @@ const Home: React.FC = () => {
                   {(shell.user?.name ?? 'You').slice(0, 1).toUpperCase()}
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuLabel>{shell.user ? `${shell.user.name} · ${ROLE_LABEL[shell.role]}` : 'Demo role'}</DropdownMenuLabel>
+              <DropdownMenuLabel>{shell.user ? `${shell.user.name} · ${ROLE_LABEL[shell.role]}` : 'Account'}</DropdownMenuLabel>
               {(['PI', 'MEMBER', 'UNIVERSITY_ADMIN'] as EcRole[]).map((r) => (
                 <DropdownMenuItem key={r} value={r} label={ROLE_LABEL[r]} trailingIcon={shell.role === r ? <Check /> : undefined} onSelect={() => shell.setRole(r)} />
               ))}

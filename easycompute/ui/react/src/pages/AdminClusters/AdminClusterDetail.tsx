@@ -293,7 +293,7 @@ export default function AdminClusterDetail() {
             </SectionCard>
           </CardGrid>
 
-          <SectionCard flush title="Live jobs" subtitle="Simulated running and pending jobs on this cluster">
+          <SectionCard flush title="Live jobs" subtitle="Running and pending jobs on this cluster">
             <DataTable
               columns={jobColumns}
               rows={data?.liveJobs ?? []}

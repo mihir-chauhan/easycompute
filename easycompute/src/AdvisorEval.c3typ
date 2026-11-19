@@ -1,0 +1,51 @@
+/**
+ * Regression evaluation of the "EasyCompute Advisor" {@link GenaiCore.Agent} with the GenaiCore agent evaluation
+ * framework (Studio > Agents > Evaluation). {@link AdvisorEval#ensureExperiment} builds the
+ * {@link GenaiCore.Eval.Dataset} "EasyCompute Advisor smoke" (six {@link GenaiCore.Eval.TestCase.Unstructured} cases whose
+ * expected outputs are computed from the live allocations, jobs, alerts, policies and planner), the rubric-judge
+ * {@link GenaiCore.Eval.Metric.NativePy} "easycompute_advisor_rubric" and the {@link GenaiCore.Eval.Experiment}
+ * "EasyCompute Advisor regression"; {@link AdvisorEval#run} runs that experiment once against the latest agent version.
+ * The agent itself and the Advisor types are not changed.
+ */
+type AdvisorEval {
+
+  /**
+   * Creates or refreshes the dataset, its six test cases, the metric and the experiment. Test cases have fixed ids
+   * (`advisor-smoke-1` .. `advisor-smoke-6`), so calling it again updates the expected outputs from the current data
+   * instead of adding cases. The metric is an LLM rubric judge on the `default-completions` client that falls back to
+   * a keyword check of the case's `keywords` when no LLM answers.
+   *
+   * @return `{datasetId, datasetName, metricId, experimentId, experimentName, testCases: [{id, name, input, expected_output}]}`.
+   */
+  ensureExperiment: function(): json py
+
+  /**
+   * Ensures the experiment ({@link #ensureExperiment}) and starts one evaluation run of it against the latest
+   * {@link GenaiCore.Agent} version named "EasyCompute Advisor": deploys that version temporarily, creates the
+   * {@link GenaiCore.Eval.Run} (named like the Studio runs: A1, B1, ...) and submits {@link #processRun} as an
+   * {@link AsyncAction}, so the test cases run in the background. Poll {@link #results} for scores.
+   *
+   * @return `{experimentId, agentId, agentVer, runs: [{id, name, status}], asyncActionId}`.
+   */
+  run: function(): json py
+
+  /**
+   * Executes one evaluation run synchronously with the experiment's {@link GenaiCore.Eval.Runner}: for each enabled
+   * test case it calls {@link GenaiCore.Eval.Runner#runTestCase} on the run's agent deployment, scores the answer with
+   * {@link GenaiCore.Eval.Runner#evaluate} and upserts the {@link GenaiCore.Eval.TestCase.Result}, then sets the run
+   * status to completed (or error). Background step of {@link #run}; already completed runs are left unchanged.
+   *
+   * @param runId            Id of the {@link GenaiCore.Eval.Run} to execute.
+   * @param removeDeployment If true, removes the run's (temporary) agent deployment when done.
+   * @return the run results, as {@link #results}.
+   */
+  processRun: function(runId: !string, removeDeployment: boolean): json py
+
+  /**
+   * Status and scores of one evaluation run of the experiment.
+   *
+   * @param runId Id of the {@link GenaiCore.Eval.Run}; empty uses the newest run of the experiment.
+   * @return `{runId, name, status, error, completed, total, meanScore, cases: [{testCase, name, status, score, output}]}`.
+   */
+  results: function(runId: string): json py
+}

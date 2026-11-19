@@ -366,7 +366,7 @@ export default function AdminUsers() {
               <div key={r} className={cn('flex flex-col gap-2 rounded-lg bg-[var(--ec-card)] p-4', r === role && 'ring-1 ring-[var(--ec-accent-line)]')}>
                 <div className="flex items-center justify-between gap-2">
                   <Pill tone={ROLE_TONE[r]}>{ROLE_LABEL[r]}</Pill>
-                  {r === role ? <span className="text-xs text-[var(--ec-accent-text)]">your demo role</span> : null}
+                  {r === role ? <span className="text-xs text-[var(--ec-accent-text)]">your role</span> : null}
                 </div>
                 <p className="m-0 text-[13px] text-[var(--ec-fg-2)]">{ROLE_DESCRIPTION[r]}</p>
                 <p className="m-0 text-xs text-[var(--ec-fg-3)] tabular-nums">{countRole(r)} users</p>

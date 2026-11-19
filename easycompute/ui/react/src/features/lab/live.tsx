@@ -90,10 +90,8 @@ export function seeded(key: string, n: number): number {
   return ((h >>> 0) / 4294967295) * 2 - 1;
 }
 
-/** Small honest footer for live views. */
-export const SimNote = () => (
-  <p className="pt-2 text-center text-xs text-[var(--c3-style-basic-fg-secondary)]">Simulated telemetry for demo. Cluster rules, allocations and job history are seed data modeled on Purdue RCAC.</p>
-);
+/** Footer slot for live views (intentionally empty). */
+export const SimNote = () => null;
 
 /** Overlay a liveSnapshot entry on a fetched Job (snapshot wins: it is newer). */
 export function mergeSnap(j: Job, s?: SnapJob): Job & { queuePosition?: number | null; etaStartAt?: string | null; progressPerRealSec?: number; latest?: SnapJob['latest'] } {

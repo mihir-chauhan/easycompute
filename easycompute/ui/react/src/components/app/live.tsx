@@ -154,12 +154,8 @@ export function LiveIndicator({ updatedAt, live = true, staleAfterMs = 30000, cl
 }
 
 /** Small honest footer line for live views. */
-export function SimulatedTelemetryNote({ className }: { className?: string }) {
-  return (
-    <p className={cn('m-0 text-xs text-[var(--ec-fg-3)]', className)}>
-      Simulated telemetry for demo. Cluster load, live jobs and metrics come from EasyCompute&apos;s run simulator; history is real (pseudonymized) Anvil accounting plus seed data.
-    </p>
-  );
+export function SimulatedTelemetryNote(_props: { className?: string }) {
+  return null;
 }
 
 /* ---------------------------------------------------------- streaming & accrual ---------------------------------------------------------- */

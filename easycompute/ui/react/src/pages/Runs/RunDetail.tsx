@@ -11,7 +11,6 @@ import {
   Bot,
   CheckCheck,
   Clock,
-  FastForward,
   Hourglass,
   Layers,
   type LucideIcon,
@@ -49,7 +48,7 @@ import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, ModalSubtitle, ModalTitle } from '@/components/ui/modal';
-import { ackAlert, applyJobAction, decideApproval, fetchJobActions, fetchJobAlerts, fetchJobMetrics, getJob, monitorTick, pendingApprovals } from '@/features/lab/api';
+import { ackAlert, applyJobAction, decideApproval, fetchJobActions, fetchJobAlerts, fetchJobMetrics, getJob, pendingApprovals } from '@/features/lab/api';
 import { ActivityRow, AlertTypeBadge, HeadNote, JobStateBadge, muted, Notice } from '@/features/lab/components';
 import { ACTION_LABEL, ALERT_TYPE_LABEL, formatShortDateTime, formatClock, formatDuration, formatInt, formatPct100, formatRelative, formatUsd, walltimeLeft } from '@/features/lab/format';
 import type { ActionType, Alert, JobMetric } from '@/features/lab/types';
@@ -195,20 +194,6 @@ const RunDetail: React.FC = () => {
     }
   };
 
-  const simulate = async () => {
-    setBusy('tick');
-    setActionError(null);
-    try {
-      const res = await monitorTick();
-      setNote(`Simulated ${res?.stepMinutes ?? 15} minutes: ${formatInt(res?.newAlerts?.length ?? 0)} new alerts, ${formatInt(res?.resolvedAlerts?.length ?? 0)} resolved, ${formatInt(res?.actions?.length ?? 0)} guardrail actions.`);
-      reloadAll();
-    } catch (err) {
-      setActionError(errorMessage(err));
-      reportError(err);
-    } finally {
-      setBusy(null);
-    }
-  };
 
   const crumbs = [{ label: 'Live Runs', href: '#/runs' }, { label: j?.jobName ?? id }];
 
@@ -279,9 +264,6 @@ const RunDetail: React.FC = () => {
       }
       actions={
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" appearance="secondary" leadingIcon={<FastForward />} loading={busy === 'tick'} onClick={simulate}>
-            Simulate next 15 min
-          </Button>
           {live && canAct && (
             <Button variant="outline" appearance="secondary" leadingIcon={<Save />} loading={busy === 'CHECKPOINT_NOW'} onClick={() => run('CHECKPOINT_NOW')}>
               Checkpoint now

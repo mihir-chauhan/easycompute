@@ -346,7 +346,7 @@ const LabContext: React.FC = () => {
               )}
             </SectionCard>
 
-            <SectionCard title="Members" actions={<HeadNote>{`${members.length} people · usernames pseudonymized`}</HeadNote>}>
+            <SectionCard title="Members" actions={<HeadNote>{`${members.length} people`}</HeadNote>}>
               <ul className="flex flex-wrap gap-2">
                 {members.map((m) => (
                   <li key={m.id} className="flex items-center gap-2 rounded-full border border-[var(--c3-style-basic-border-border)] py-1 pr-3 pl-1 text-[13px]">

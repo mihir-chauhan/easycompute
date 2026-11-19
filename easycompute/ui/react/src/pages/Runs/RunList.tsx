@@ -5,7 +5,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { FastForward, Rocket } from 'lucide-react';
+import { Rocket } from 'lucide-react';
 
 import {
   ClearFilters,
@@ -19,16 +19,14 @@ import {
   SectionCard,
   Segmented,
   ToneBadge,
-  errorMessage,
   utilTone,
   TONE_TEXT,
   type Column,
 } from '@/components/app';
-import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { Button } from '@/components/ui/button';
-import { fetchLiveMetrics, fetchOpenAlerts, fetchRecentJobs, monitorTick } from '@/features/lab/api';
-import { AlertTypeBadge, CliHint, JobStateBadge, Mono, muted, Notice } from '@/features/lab/components';
-import { whereLabel, formatClock, formatDuration, formatInt, formatPct100, formatRelative, formatUsd } from '@/features/lab/format';
+import { fetchLiveMetrics, fetchOpenAlerts, fetchRecentJobs } from '@/features/lab/api';
+import { AlertTypeBadge, CliHint, JobStateBadge, Mono, muted } from '@/features/lab/components';
+import { whereLabel, formatClock, formatDuration, formatPct100, formatRelative, formatUsd } from '@/features/lab/format';
 import type { Alert, Job } from '@/features/lab/types';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
 import { LIVE_POLL_MS, LiveBadge, liveJob, mergeSnap, SimNote, useLiveSnapshot, useNow } from '@/features/lab/live';
@@ -42,14 +40,10 @@ const FAILED = ['FAILED', 'TIMEOUT', 'OUT_OF_MEMORY', 'CANCELLED', 'PREEMPTED'];
 
 const RunList: React.FC = () => {
   const navigate = useNavigate();
-  const { reportError } = useErrorBoundary();
   const { labId, error: labError } = useCurrentLab();
   const [params, setParams] = useSearchParams();
   const view: View = VIEWS.find((v) => v === params.get('view')) ?? 'all';
   const [q, setQ] = useState('');
-  const [ticking, setTicking] = useState(false);
-  const [tickNote, setTickNote] = useState<string | null>(null);
-  const [tickError, setTickError] = useState<string | null>(null);
 
   // Live list: background refresh every 30 s while the page is open.
   const data = useLoad(() => (labId ? Promise.all([fetchRecentJobs(labId), fetchOpenAlerts(labId), fetchLiveMetrics(labId)]) : null), [labId], LIVE_POLL_MS);
@@ -105,22 +99,6 @@ const RunList: React.FC = () => {
   const running = count('running');
   const queued = count('queued');
 
-  const simulate = async () => {
-    setTicking(true);
-    setTickError(null);
-    try {
-      const res = await monitorTick();
-      setTickNote(
-        `Simulated ${res?.stepMinutes ?? 15} minutes: ${formatInt(res?.advanced ?? 0)} runs advanced, ${formatInt(res?.started?.length ?? 0)} started, ${formatInt(res?.finished?.length ?? 0)} finished, ${formatInt(res?.newAlerts?.length ?? 0)} new alerts, ${formatInt(res?.actions?.length ?? 0)} guardrail actions.`,
-      );
-      data.reload();
-    } catch (err) {
-      setTickError(errorMessage(err));
-      reportError(err);
-    } finally {
-      setTicking(false);
-    }
-  };
 
   const setView = (v: string) =>
     setParams(
@@ -208,9 +186,6 @@ const RunList: React.FC = () => {
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <LiveBadge updatedAt={snap.updatedAt ?? data.updatedAt} />
-          <Button variant="outline" appearance="secondary" leadingIcon={<FastForward />} loading={ticking} onClick={simulate}>
-            Simulate next 15 min
-          </Button>
           <Button leadingIcon={<Rocket />} onClick={() => navigate('/plan')}>
             Plan a run
           </Button>
@@ -240,8 +215,6 @@ const RunList: React.FC = () => {
       }
     >
       {error && <ErrorState message={`Could not load runs: ${error}`} onRetry={data.reload} />}
-      {tickError && <ErrorState message={`Simulation failed: ${tickError}`} onRetry={simulate} />}
-      {tickNote && !tickError && <Notice>{tickNote}</Notice>}
 
       <SectionCard flush>
         <DataTable
