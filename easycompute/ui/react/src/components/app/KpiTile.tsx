@@ -23,6 +23,8 @@ export interface KpiTileProps {
   value: ReactNode;
   /** Unit rendered small after the value ("GPUs", "%"). */
   unit?: string;
+  /** Small rounded chip after the value, e.g. "of $48,000", "left this semester", "Jan 22". */
+  chip?: ReactNode;
   /** One line, muted. */
   caption?: ReactNode;
   /** Delta text such as "+12% vs last month" with its tone (good = green, bad = red). */
@@ -38,8 +40,8 @@ export interface KpiTileProps {
   className?: string;
 }
 
-/** KPI tile: 13px muted label, 28px semibold tabular value, one-line caption. */
-export function KpiTile({ label, value, unit, caption, delta, tone, trend, trendTone = 'neutral', help, onClick, className }: KpiTileProps) {
+/** KPI tile (mockup ".tile"): #232323 tile, 12px label, 22px value + optional chip, 12px muted caption. */
+export function KpiTile({ label, value, unit, chip, caption, delta, tone, trend, trendTone = 'neutral', help, onClick, className }: KpiTileProps) {
   const labelNode = (
     <MetricCardLabel className="flex items-center gap-1.5">
       {tone ? <span aria-hidden className={cn('inline-block size-2 shrink-0 rounded-full', TONE_BG[tone])} /> : null}
@@ -66,9 +68,14 @@ export function KpiTile({ label, value, unit, caption, delta, tone, trend, trend
           labelNode
         )}
       </MetricCardHeader>
-      <MetricCardValue className="flex items-baseline gap-1">
-        <span className="truncate">{value}</span>
-        {unit ? <span className="text-sm font-medium text-[var(--c3-style-basic-fg-secondary)]">{unit}</span> : null}
+      <MetricCardValue className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+        <span className="truncate">
+          {value}
+          {unit ? <span className="ml-1 text-sm text-[var(--ec-fg-2)]">{unit}</span> : null}
+        </span>
+        {chip != null ? (
+          <span className="rounded-full bg-[var(--ec-card-2)] px-2 text-xs leading-5 whitespace-nowrap text-[var(--ec-fg)]">{chip}</span>
+        ) : null}
       </MetricCardValue>
       {trend && trend.length > 1 ? <Sparkline values={trend} tone={trendTone} ariaLabel={`${label} trend`} /> : null}
       {(delta || caption) && (

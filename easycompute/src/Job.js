@@ -92,7 +92,7 @@ function unitsPerHour(job) {
 // ---------------------------------------------------------------- health rules
 
 /** Returns [{ alertType, severity, message, action }] for the job's current metric window. */
-function detect(job, samples, ap, alloc) {
+function detect(job, samples, ap, alloc, burnPerDay) {
   var out = [];
   if (!samples.length) return out;
   var last = samples[samples.length - 1];
@@ -118,11 +118,12 @@ function detect(job, samples, ap, alloc) {
     return last.trainingLoss == null || s.trainingLoss == null || Math.abs(num(s.trainingLoss, 0) - num(last.trainingLoss, 0)) < 1e-4;
   };
   var hungMin = trailingMinutes(samples, function (s) {
-    return num(s.gpuUtilPct, 0) < 2 && num(s.cpuUtilPct, 0) < 3 && num(s.ioReadMBps, 0) + num(s.ioWriteMBps, 0) < 0.5 && lossFlat(s);
+    return num(s.gpuUtilPct, 0) < 2 && num(s.cpuUtilPct, 0) < 3 && num(s.ioReadMBps, 0) + num(s.ioWriteMBps, 0) < 1 && lossFlat(s);
   });
   if (hungMin >= 30) {
-    out.push({ alertType: 'HUNG_JOB', severity: 'CRITICAL', action: 'CANCEL', message: 'No GPU, CPU or I/O activity and no training progress for ' + fmtMin(hungMin) + ' (GPU ' + round(last.gpuUtilPct, 0) + '%, CPU ' + round(last.cpuUtilPct, 0) + '%). The process is likely deadlocked; cancel or requeue from the checkpoint.' });
-  } else if (gpus > 0) {
+    out.push({ alertType: 'HUNG_JOB', severity: hungMin >= 60 ? 'CRITICAL' : 'WARNING', action: 'CANCEL', message: 'No GPU, CPU or I/O activity and no training progress for ' + fmtMin(hungMin) + ' (GPU ' + round(last.gpuUtilPct, 0) + '%, CPU ' + round(last.cpuUtilPct, 0) + '%). The process is likely deadlocked; cancel or requeue from the checkpoint.' });
+  }
+  if (gpus > 0) {
     var idleMin = trailingMinutes(samples, function (s) {
       return num(s.gpuUtilPct, 0) < 5;
     });
@@ -131,9 +132,9 @@ function detect(job, samples, ap, alloc) {
       out.push({ alertType: 'IDLE_GPU', severity: critical ? 'CRITICAL' : 'WARNING', action: 'CANCEL', message: gpus + ' GPU(s) idle (<5% utilization) for ' + fmtMin(idleMin) + ' while the job holds them' + (critical ? '; past the lab\'s ' + ap.cancelIdleAfterMin + '-minute idle limit.' : '; autopilot cancels at ' + ap.cancelIdleAfterMin + ' min.') + ' Wasting ~' + round((gpus * idleMin) / 60, 1) + ' GPU-hours so far.' });
     } else if (win.length >= 3 && (ms(win[win.length - 1].ts) - ms(win[0].ts)) / MIN_MS >= 40) {
       var u = mean('gpuUtilPct');
-      if (u >= 5 && u < 35) {
+      if (u >= 5 && u < 45) {
         out.push({ alertType: 'LOW_GPU_UTIL', severity: 'WARNING', action: gpus > 1 ? 'SCALE_DOWN' : 'NOTIFY_PI', message: 'GPU utilization averaged ' + round(u, 0) + '% over the last hour on ' + gpus + ' GPU(s)' + (mean('ioReadMBps') > 300 ? ' with heavy reads (' + Math.round(mean('ioReadMBps')) + ' MB/s): likely data-loader bound; add --cpus-per-task workers.' : '.') + (gpus > 1 ? ' Halving to ' + Math.max(1, Math.floor(gpus / 2)) + ' GPU(s) would save ~' + round((gpus - Math.max(1, Math.floor(gpus / 2))) * 24, 0) + ' GPU-hours/day.' : ' A smaller GPU (A30/L40S) would cost less.') });
-      } else if (u >= 35 && u < 50 && gpus > 1) {
+      } else if (u >= 45 && u < 55 && gpus > 1) {
         out.push({ alertType: 'LOW_GPU_UTIL', severity: 'INFO', action: 'SCALE_DOWN', message: 'GPU utilization averaged ' + round(u, 0) + '% on ' + gpus + ' GPUs; scaling efficiency is poor at this size.' });
       }
     }
@@ -157,7 +158,7 @@ function detect(job, samples, ap, alloc) {
   var ckptAge = num(last.checkpointAgeMin, 0);
   if (limit > 0) {
     var overrun = plannedHours != null && plannedHours - elapsed > limit - elapsed + 0.01;
-    var near = remainingMin <= 2 * Math.max(15, ap.checkpointBeforeTimeoutMin) && ckptAge > 30;
+    var near = remainingMin <= Math.max(60, 2 * ap.checkpointBeforeTimeoutMin) || (remainingMin <= 180 && ckptAge > 60);
     if (overrun || near) {
       var crit = remainingMin <= Math.max(15, ap.checkpointBeforeTimeoutMin);
       out.push({
@@ -166,7 +167,7 @@ function detect(job, samples, ap, alloc) {
         action: overrun ? 'EXTEND_WALLTIME' : 'CHECKPOINT_NOW',
         message: overrun
           ? 'Predicted to need ' + round(plannedHours - elapsed, 1) + ' h more but only ' + fmtMin(remainingMin) + ' of walltime remain. Request an extension or checkpoint and chain a continuation job.'
-          : fmtMin(remainingMin) + ' of walltime left and the last checkpoint is ' + fmtMin(ckptAge) + ' old; up to ' + fmtMin(ckptAge) + ' of work is lost at the time limit. Checkpoint now.',
+          : 'Slurm kills the job at its ' + round(limit, 1) + ' h limit in ' + fmtMin(Math.max(0, remainingMin)) + '; the last checkpoint is ' + fmtMin(ckptAge) + ' old. Checkpoint now and chain a continuation job (--dependency=afterany) if it is not done.',
       });
     }
   }
@@ -176,17 +177,29 @@ function detect(job, samples, ap, alloc) {
     var hoursLeft = Math.max(0, (plannedHours != null ? Math.min(plannedHours, limit) : limit) - elapsed);
     var projected = num(alloc.usedUnits, 0) + unitsPerHour(job) * hoursLeft;
     var pct = projected / Number(alloc.totalUnits);
+    var remainingUnits = Number(alloc.totalUnits) - num(alloc.usedUnits, 0);
+    var endMs = ms(alloc.endDate);
+    var runOutDays = burnPerDay > 0 ? Math.max(0, remainingUnits) / burnPerDay : null;
+    var runsOutEarly = runOutDays != null && endMs != null && Date.now() + runOutDays * 24 * HOUR_MS < endMs;
     if (pct >= ap.budgetAlertPct) {
-      out.push({ alertType: 'BUDGET_BURN', severity: pct > 1 ? 'CRITICAL' : 'WARNING', action: 'NOTIFY_PI', message: 'At ' + round(unitsPerHour(job), 1) + ' ' + (alloc.unitName || 'units') + '/h this job brings the ' + (job.cluster ? job.cluster.name : '') + ' allocation to ' + round(pct * 100, 0) + '% of ' + round(alloc.totalUnits, 0) + ' ' + (alloc.unitName || 'units') + ' (alert at ' + round(ap.budgetAlertPct * 100, 0) + '%).' });
+      var unitName = alloc.unitName || 'units';
+      out.push({
+        alertType: 'BUDGET_BURN',
+        severity: pct >= 0.95 || runsOutEarly ? 'CRITICAL' : 'WARNING',
+        action: 'NOTIFY_PI',
+        message: 'At ' + round(unitsPerHour(job), 1) + ' ' + unitName + '/h this job brings the ' + (job.cluster ? job.cluster.name : '') + ' allocation to ' + round(pct * 100, 0) + '% of ' + round(alloc.totalUnits, 0) + ' ' + unitName + ' (alert at ' + round(ap.budgetAlertPct * 100, 0) + '%).' +
+          (runsOutEarly ? ' At the 30-day burn of ' + round(burnPerDay, 0) + ' ' + unitName + '/day the allocation runs out in ' + Math.round(runOutDays) + ' days, before it ends on ' + new Date(endMs).toISOString().substring(0, 10) + '.' : ''),
+      });
     }
   }
 
   // checkpoints
-  if (job.partition && job.partition.preemptible) {
-    if (ckptAge > 30) {
+  if (job.partition && job.partition.preemptible && ckptAge > 30) {
+    {
       out.push({ alertType: 'PREEMPTION_RISK', severity: ckptAge > 60 ? 'CRITICAL' : 'WARNING', action: 'CHECKPOINT_NOW', message: 'Preemptible partition (' + Math.round(num(job.partition.utilizationPct, 0)) + '% busy): a preemption gives 10 minutes notice, but the last checkpoint is ' + fmtMin(ckptAge) + ' old, so ~' + fmtMin(ckptAge) + ' of work would be lost.' });
     }
-  } else if (CHECKPOINTING.indexOf(wt) >= 0 && ckptAge > 120) {
+  }
+  if (CHECKPOINTING.indexOf(wt) >= 0 && ckptAge > 120) {
     out.push({ alertType: 'STALE_CHECKPOINT', severity: ckptAge > 240 ? 'CRITICAL' : 'WARNING', action: 'CHECKPOINT_NOW', message: 'No checkpoint for ' + fmtMin(ckptAge) + '. A node failure now would lose that work; checkpoint now and save every 30-60 min.' });
   }
   return out;
@@ -225,7 +238,17 @@ function evaluateHealth() {
   if (labId && job.cluster) {
     alloc = list(Allocation.fetch({ filter: Filter.eq('lab.id', labId).and().eq('cluster.id', job.cluster.id), order: 'descending(endDate)', limit: 1 }).objs)[0] || null;
   }
-  var found = detect(job, samples, autopilotFor(labId), alloc);
+  var burnPerDay = 0;
+  if (alloc) {
+    var since = new Date(lastTs - 30 * 24 * HOUR_MS).toISOString().substring(0, 10);
+    var burn = Job.evaluate({
+      projection: 'sum(costUnits)',
+      filter: Filter.eq('lab.id', labId).and().eq('cluster.id', job.cluster.id).and("submitTime >= dateTime('" + since + "')"),
+    }).tuples;
+    var c0 = burn && burn.length ? burn[0].cells[0] : null;
+    burnPerDay = c0 == null ? 0 : num(c0.value(), 0) / 30;
+  }
+  var found = detect(job, samples, autopilotFor(labId), alloc, burnPerDay);
   var foundTypes = {};
   found.forEach(function (f) {
     foundTypes[f.alertType] = f;
@@ -412,9 +435,7 @@ function applyAction(actionType, actor) {
     if (resolved.length) JobAlert.mergeBatch(resolved);
   }
 
-  var entryId = job.id + '-' + type + '-' + now;
-  ActionLogEntry.make({
-    id: entryId,
+  var created = ActionLogEntry.make({
     lab: job.lab ? { id: job.lab.id } : null,
     job: { id: job.id },
     actionType: type,
@@ -424,5 +445,5 @@ function applyAction(actionType, actor) {
     outcome: outcome,
   }).create();
   log.info('applyAction {} {} by {} -> {}', job.id, type, who, outcome);
-  return ActionLogEntry.make({ id: entryId }).get('this');
+  return ActionLogEntry.make({ id: created.id }).get('this');
 }

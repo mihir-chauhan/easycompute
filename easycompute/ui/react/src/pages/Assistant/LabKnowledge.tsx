@@ -13,7 +13,7 @@ import type { LabConstraints } from './types';
 
 const fmtAmount = (kind: string, amount: number) => {
   if (kind === 'USD') return `$${Math.round(amount).toLocaleString()}`;
-  const unit = { SU: 'SUs', GPU_HOURS: 'GPU-hours', GPU_YEARS: 'GPU-years', NODE_HOURS: 'node-hours' }[kind] ?? kind;
+  const unit = { SU: 'SUs', GPU_HOURS: 'GPU-hours', GPU_YEARS: 'GPU-years', NODE_HOURS: 'node-hours', GPUS: 'GPUs' }[kind] ?? kind;
   return `${amount >= 1e6 ? `${amount / 1e6}M` : amount.toLocaleString()} ${unit}`;
 };
 

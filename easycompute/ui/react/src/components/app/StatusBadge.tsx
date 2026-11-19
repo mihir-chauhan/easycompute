@@ -1,18 +1,17 @@
 /*
- * EasyCompute design system — status and severity badges. One soft badge style for every enum.
+ * EasyCompute design system — status and severity pills (the mockups' ".st" badge). One style for every enum.
  */
 
 import React from 'react';
 
-import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
-import { TONE_APPEARANCE, TONE_BG, type Tone } from './tone';
+import { TONE_BG, TONE_PILL, type Tone } from './tone';
 
 /** Enum value -> [tone, label] per SPEC enum. Unknown values render neutral with a humanised label. */
 export const STATUS_MAPS = {
   jobState: {
-    PENDING: ['info', 'Pending'],
+    PENDING: ['info', 'Queued'],
     RUNNING: ['accent', 'Running'],
     COMPLETED: ['good', 'Completed'],
     FAILED: ['bad', 'Failed'],
@@ -33,9 +32,9 @@ export const STATUS_MAPS = {
     AUTO_RESOLVED: ['good', 'Auto-resolved'],
   },
   ruleSeverity: {
-    BLOCK: ['bad', 'Block'],
+    BLOCK: ['bad', 'Hard block'],
     WARN: ['warn', 'Warn'],
-    INFO: ['info', 'Info'],
+    INFO: ['neutral', 'Advisory'],
   },
   ruleScope: {
     UNIVERSITY: ['accent', 'University'],
@@ -68,7 +67,7 @@ export const STATUS_MAPS = {
   actor: {
     USER: ['neutral', 'User'],
     AUTOPILOT: ['accent', 'Autopilot'],
-    ADMIN: ['info', 'Admin'],
+    ADMIN: ['pink', 'Admin'],
   },
 } as const satisfies Record<string, Record<string, readonly [Tone, string]>>;
 
@@ -88,53 +87,69 @@ export function statusOf(kind: StatusKind, value?: string | null): { tone: Tone;
   return hit ? { tone: hit[0], label: hit[1] } : { tone: 'neutral', label: humanize(value) };
 }
 
+interface PillProps {
+  tone: Tone;
+  children: React.ReactNode;
+  /** Leading dot (pulsing for live/running states when `pulse`). */
+  dot?: boolean;
+  pulse?: boolean;
+  className?: string;
+  title?: string;
+}
+
+/** The mockups' pill badge (".st"): 12px/500, 20px tall, fully rounded, tinted background. */
+export function Pill({ tone, children, dot, pulse, className, title }: PillProps) {
+  return (
+    <span
+      title={title}
+      className={cn('inline-flex h-5 items-center gap-1.5 rounded-full px-2 text-xs leading-5 font-medium whitespace-nowrap', TONE_PILL[tone], className)}
+    >
+      {dot ? <span aria-hidden className={cn('inline-block size-1.5 shrink-0 rounded-full', TONE_BG[tone], pulse && 'ec-pulse')} /> : null}
+      {children}
+    </span>
+  );
+}
+
 interface StatusBadgeProps {
   kind: StatusKind;
   value?: string | null;
-  /** Show a leading dot (default true for job/cluster states, false otherwise). */
+  /** Show a leading dot (default: only for running jobs). */
   dot?: boolean;
   className?: string;
 }
 
-/** Soft badge for any SPEC enum value: `<StatusBadge kind="jobState" value={job.state} />`. */
+/** Pill for any SPEC enum value: `<StatusBadge kind="jobState" value={job.state} />`. */
 export function StatusBadge({ kind, value, dot, className }: StatusBadgeProps) {
-  if (!value) return <span className="text-[var(--c3-style-basic-fg-secondary)]">—</span>;
+  if (!value) return <span className="text-[var(--ec-fg-3)]">—</span>;
   const { tone, label } = statusOf(kind, value);
-  const showDot = dot ?? (kind === 'jobState' || kind === 'clusterStatus');
+  const running = kind === 'jobState' && value === 'RUNNING';
   return (
-    <Badge
-      variant="soft"
-      appearance={TONE_APPEARANCE[tone]}
-      size="sm"
-      shape="rounded"
-      className={cn('whitespace-nowrap', className)}
-      leadingIcon={showDot ? <span className={cn('inline-block size-1.5 rounded-full', TONE_BG[tone])} /> : undefined}
-    >
+    <Pill tone={tone} dot={dot ?? (running || kind === 'clusterStatus')} pulse={running} className={className}>
       {label}
-    </Badge>
+    </Pill>
   );
 }
 
-/** Severity badge for alerts (CRITICAL/WARNING/INFO) and rules (BLOCK/WARN/INFO). */
+/** Severity pill for alerts (CRITICAL/WARNING/INFO) and rules (BLOCK/WARN/INFO -> Hard block/Warn/Advisory). */
 export function SeverityBadge({ value, className }: { value?: string | null; className?: string }) {
   const kind: StatusKind = value === 'BLOCK' || value === 'WARN' ? 'ruleSeverity' : 'alertSeverity';
   return <StatusBadge kind={kind} value={value} className={className} />;
 }
 
-/** A plain tone badge with arbitrary text (e.g. "3 alerts", "Over budget"). */
+/** A tone pill with arbitrary text ("Auto-fixed", "Recommended", "3 open", "Budget risk"). */
 export function ToneBadge({ tone, children, className }: { tone: Tone; children: React.ReactNode; className?: string }) {
   return (
-    <Badge variant="soft" appearance={TONE_APPEARANCE[tone]} size="sm" shape="rounded" className={cn('whitespace-nowrap', className)}>
+    <Pill tone={tone} className={className}>
       {children}
-    </Badge>
+    </Pill>
   );
 }
 
 /** Small coloured dot + label, for legends and inline status text. */
-export function ToneDot({ tone, label, className }: { tone: Tone; label?: React.ReactNode; className?: string }) {
+export function ToneDot({ tone, label, className, pulse }: { tone: Tone; label?: React.ReactNode; className?: string; pulse?: boolean }) {
   return (
     <span className={cn('inline-flex items-center gap-1.5', className)}>
-      <span aria-hidden className={cn('inline-block size-2 shrink-0 rounded-full', TONE_BG[tone])} />
+      <span aria-hidden className={cn('inline-block size-[7px] shrink-0 rounded-full', TONE_BG[tone], pulse && 'ec-pulse')} />
       {label}
     </span>
   );

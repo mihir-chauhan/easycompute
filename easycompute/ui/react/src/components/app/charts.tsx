@@ -43,7 +43,7 @@ function markLines(thresholds?: ChartThreshold[], horizontal = false) {
   return {
     silent: true,
     symbol: 'none',
-    label: { show: true, position: horizontal ? 'end' : 'insideEndTop', formatter: '{b}', fontSize: 11, color: ecColor('--c3-style-basic-fg-secondary') },
+    label: { show: true, position: horizontal ? 'start' : 'insideEndTop', formatter: '{b}', fontSize: 11, color: ecColor('--c3-style-basic-fg-secondary') },
     data: thresholds.map((t) => ({
       name: t.label,
       ...(horizontal ? { xAxis: t.value } : { yAxis: t.value }),
@@ -126,9 +126,9 @@ export function lineOption({ x, series, valueFormat, min, max, thresholds, forec
         smooth: false,
         showSymbol: false,
         connectNulls: false,
-        lineStyle: { color, width: 1.5, type: s.dashed ? 'dashed' : 'solid' },
+        lineStyle: { color, width: 2, type: s.dashed ? 'dashed' : 'solid' },
         itemStyle: { color },
-        areaStyle: s.area ? { color, opacity: 0.12 } : undefined,
+        areaStyle: s.area ? { color, opacity: 0.16 } : undefined,
         markLine: i === 0 ? markLines(thresholds) : undefined,
         markArea:
           i === 0 && forecastFrom != null && forecastFrom < x.length

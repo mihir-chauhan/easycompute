@@ -5,13 +5,13 @@ enum type RunPlan.Label {
   /**
    * Earliest expected finish (queue wait plus runtime).
    */
-  Fastest = 'Fastest'
+  FASTEST = 'Fastest'
   /**
    * Lowest estimated cost in USD.
    */
-  Cheapest = 'Cheapest'
+  CHEAPEST = 'Cheapest'
   /**
    * Best weighted score across finish time, cost, deadline slack and risk.
    */
-  Balanced = 'Balanced'
+  BALANCED = 'Balanced'
 }

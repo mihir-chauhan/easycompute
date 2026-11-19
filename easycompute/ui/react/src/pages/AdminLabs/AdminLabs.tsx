@@ -61,7 +61,7 @@ const elapsedOf = (start?: string, end?: string): number | null => {
   return Math.max(0, Math.min(1, (Date.now() - s) / (e - s)));
 };
 
-const FAIR_TONE: Record<string, Tone> = { OVER: 'warn', UNDER: 'neutral', BALANCED: 'good' };
+const FAIR_TONE: Record<string, Tone> = { OVER: 'warn', UNDER: 'info', BALANCED: 'good' };
 const FAIR_LABEL: Record<string, string> = { OVER: 'Over share', UNDER: 'Under share', BALANCED: 'Balanced' };
 
 function toRow(s: LabSummaryLite, fairness: FairnessRow[]): LabRow {
@@ -169,7 +169,7 @@ export default function AdminLabs() {
       sortValue: (r) => r.wastePct,
       hideBelow: 'md',
     },
-    { key: 'gpuh', header: 'GPU-h (30 d)', align: 'right', render: (r) => compact(r.gpuHours30d), sortValue: (r) => r.gpuHours30d, hideBelow: 'md' },
+    { key: 'gpuh', header: 'GPU-h (30 d)', align: 'right', render: (r) => compact(r.gpuHours30d), sortValue: (r) => r.gpuHours30d, hideBelow: 'lg' },
     { key: 'cost', header: 'Spend (30 d)', align: 'right', render: (r) => usd(r.costUsd30d), sortValue: (r) => r.costUsd30d, hideBelow: 'lg' },
     {
       key: 'fair',
@@ -211,12 +211,13 @@ export default function AdminLabs() {
           appearance="secondary"
           size="sm"
           trailingIcon={<ArrowUpRight />}
+          aria-label={`Open ${r.name} in the lab view`}
           onClick={(e) => {
             e.stopPropagation();
             openLab(r.id);
           }}
         >
-          Lab view
+          Open
         </Button>
       ),
     },

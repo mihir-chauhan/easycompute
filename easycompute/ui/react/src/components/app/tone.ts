@@ -8,7 +8,7 @@
 import type { BadgeAppearance } from '@/components/ui/badge';
 import { readColor } from '@/lib/echarts-theme';
 
-export type Tone = 'good' | 'warn' | 'bad' | 'neutral' | 'info' | 'accent';
+export type Tone = 'good' | 'warn' | 'bad' | 'neutral' | 'info' | 'accent' | 'pink';
 
 /** CSS custom property per tone (defined light + dark in styles/manual-tokens.css). */
 export const TONE_VAR: Record<Tone, string> = {
@@ -16,8 +16,9 @@ export const TONE_VAR: Record<Tone, string> = {
   warn: '--ec-warn',
   bad: '--ec-bad',
   neutral: '--ec-neutral',
-  info: '--ec-cluster-anvil',
+  info: '--ec-info',
   accent: '--ec-accent',
+  pink: '--ec-pink',
 };
 
 /** Soft badge appearance per tone (one badge style everywhere). */
@@ -28,6 +29,7 @@ export const TONE_APPEARANCE: Record<Tone, BadgeAppearance> = {
   neutral: 'secondary',
   info: 'info',
   accent: 'accent',
+  pink: 'secondary',
 };
 
 /** Text colour class per tone, for inline numbers (e.g. a red "Overdue" or a green "+12%"). */
@@ -37,7 +39,8 @@ export const TONE_TEXT: Record<Tone, string> = {
   bad: 'text-[var(--c3-style-basic-fg-danger)]',
   neutral: 'text-[var(--c3-style-basic-fg-secondary)]',
   info: 'text-[var(--c3-style-basic-fg-info)]',
-  accent: 'text-[var(--c3-style-basic-fg-accent)]',
+  accent: 'text-[var(--ec-accent-hi)]',
+  pink: 'text-[var(--ec-pink)]',
 };
 
 /** Fill/background classes per tone (dots, bars). Literal strings so Tailwind generates them. */
@@ -46,24 +49,38 @@ export const TONE_BG: Record<Tone, string> = {
   warn: 'bg-[var(--ec-warn)]',
   bad: 'bg-[var(--ec-bad)]',
   neutral: 'bg-[var(--ec-neutral)]',
-  info: 'bg-[var(--ec-cluster-anvil)]',
+  info: 'bg-[var(--ec-info)]',
   accent: 'bg-[var(--ec-accent)]',
+  pink: 'bg-[var(--ec-pink)]',
 };
 export const TONE_FILL: Record<Tone, string> = {
   good: 'fill-[var(--ec-good)]',
   warn: 'fill-[var(--ec-warn)]',
   bad: 'fill-[var(--ec-bad)]',
   neutral: 'fill-[var(--ec-neutral)]',
-  info: 'fill-[var(--ec-cluster-anvil)]',
+  info: 'fill-[var(--ec-info)]',
   accent: 'fill-[var(--ec-accent)]',
+  pink: 'fill-[var(--ec-pink)]',
 };
 export const TONE_STROKE: Record<Tone, string> = {
   good: 'stroke-[var(--ec-good)]',
   warn: 'stroke-[var(--ec-warn)]',
   bad: 'stroke-[var(--ec-bad)]',
   neutral: 'stroke-[var(--ec-neutral)]',
-  info: 'stroke-[var(--ec-cluster-anvil)]',
+  info: 'stroke-[var(--ec-info)]',
   accent: 'stroke-[var(--ec-accent)]',
+  pink: 'stroke-[var(--ec-pink)]',
+};
+
+/** Pill (".st" in the mockups) background + text classes per tone. */
+export const TONE_PILL: Record<Tone, string> = {
+  good: 'bg-[var(--ec-accent-bg)] text-[var(--ec-accent-text)]',
+  accent: 'bg-[var(--ec-accent-bg)] text-[var(--ec-accent-hi)]',
+  info: 'bg-[var(--ec-blue-bg)] text-[var(--ec-blue)]',
+  warn: 'bg-[var(--ec-warn-bg)] text-[var(--ec-warn-fg)]',
+  bad: 'bg-[var(--ec-crit-bg)] text-[var(--ec-crit-fg)]',
+  neutral: 'bg-[var(--ec-card-2)] text-[var(--ec-fg-2)]',
+  pink: 'bg-[var(--ec-pink-bg)] text-[var(--ec-pink)]',
 };
 
 /** Resolved colour for a tone (eCharts). Call inside render/useMemo so it follows the theme. */

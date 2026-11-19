@@ -31,122 +31,141 @@
 
 /* ============================================================================================================
  * EasyCompute design system (owner: ui-admin). Docs: src/components/app/README.md
- * Identity: calm neutral UI, Purdue black + old gold used sparingly (primary button, links, active nav, focus,
- * selection, highlight series). Never edit tokens.css; every colour here has a .dark twin.
+ * Visual language = the owner's "Gantry" mockups (input/gantry-mockups): DARK ONLY by design. Near-black page
+ * (#181818), slightly lighter tiles (#232323), thin #2f2f2f borders, bright green accent (#7fee64), amber warn, red
+ * crit, blue/violet/pink info; Inter for UI + Fira Mono for code/ids/times; compact density; pill badges.
+ * The same values are set on :root and .dark, so the app looks identical whatever useTheme decides.
+ * Never edit tokens.css; Layer-3 --c3-style-* roles are overridden directly (this file loads after tokens.css).
  * ========================================================================================================== */
 
-/* Type scale: headings must not render at weight 400. */
 @theme {
-  --text-c3-regular-heading-h1--font-weight: 600;
-  --text-c3-regular-heading-h2--font-weight: 600;
-  --text-c3-regular-heading-h3--font-weight: 600;
-  --text-c3-regular-heading-h4--font-weight: 600;
-  --text-c3-bold-heading-h1--font-weight: 600;
-  --text-c3-bold-heading-h2--font-weight: 600;
-  --text-c3-bold-heading-h3--font-weight: 600;
+  --text-c3-regular-heading-h1--font-weight: 500;
+  --text-c3-regular-heading-h2--font-weight: 500;
+  --text-c3-regular-heading-h3--font-weight: 500;
+  --text-c3-bold-heading-h1--font-weight: 500;
+  --text-c3-bold-heading-h2--font-weight: 500;
+  --text-c3-bold-heading-h3--font-weight: 500;
+  --font-mono: 'Fira Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* Brand accent: Layer-2 --theme-*accent* overrides re-brand buttons, links, active nav, focus ring, selection
-   in light and dark (14-lab4-clean-ui.md section 6, Edit A). Never touch --color-blue-*. */
-:root {
-  --theme-basic-fg-accent: #8e6f3e; /* Purdue "Aged" gold: links, active nav text (4.7:1 on white) */
-  --theme-basic-fg-accent-dark: #cfb991; /* Boilermaker gold */
-  --theme-basic-fg-accent-inverse: #faf6ec;
-  --theme-basic-fg-accent-inverse-dark: #17150f;
-  --theme-basic-bg-accent: #f7f1e3; /* gold tint */
-  --theme-basic-bg-accent-dark: #2b2519;
-  --theme-basic-bg-accent-inverse: #1c1c1c; /* primary buttons: Purdue black */
-  --theme-basic-bg-accent-inverse-dark: #cfb991; /* dark mode primary: gold with dark text */
-  --theme-chart-accent: #b08a3e;
-  --theme-chart-accent-dark: #cfb991;
-  --theme-opacity-accent-0: rgb(176 138 62 / 0);
-  --theme-opacity-accent-10: rgb(176 138 62 / 0.1);
-  --theme-opacity-accent-20: rgb(176 138 62 / 0.2);
-  --theme-opacity-accent-30: rgb(176 138 62 / 0.3);
-  --theme-opacity-accent-40: rgb(176 138 62 / 0.4);
-  --theme-opacity-accent-50: rgb(176 138 62 / 0.5);
-  --theme-opacity-accent-60: rgb(176 138 62 / 0.6);
-  --theme-opacity-accent-dark-0: rgb(207 185 145 / 0);
-  --theme-opacity-accent-dark-10: rgb(207 185 145 / 0.1);
-  --theme-opacity-accent-dark-20: rgb(207 185 145 / 0.2);
-  --theme-opacity-accent-dark-30: rgb(207 185 145 / 0.3);
-  --theme-opacity-accent-dark-40: rgb(207 185 145 / 0.4);
-  --theme-opacity-accent-dark-50: rgb(207 185 145 / 0.5);
-  --theme-opacity-accent-dark-60: rgb(207 185 145 / 0.6);
-
-  /* App palette by MEANING (use these, never raw hex, in pages and chart options). */
-  --ec-ink: #5b6270; /* default single-series colour (Purdue Steel) */
-  --ec-ink-soft: #c7cbd3; /* secondary series / comparison bars */
-  --ec-accent: #b08a3e; /* highlight: Purdue, target, selected */
-  --ec-good: #2f855a;
-  --ec-warn: #d97706;
-  --ec-bad: #d64545;
-  --ec-neutral: #a1a6b0; /* idle, unused, other, unknown */
-  --ec-track: #eceef1; /* progress / bar-list track */
-  --ec-target: #1c1c1c; /* target / limit markers */
-
-  /* Per-cluster identity (charts, dots, chips). Billing reuses the same hues. */
-  --ec-cluster-anvil: #4f6d8f; /* NSF ACCESS: steel blue */
-  --ec-cluster-gilbreth: #b08a3e; /* RCAC flagship GPU: gold */
-  --ec-cluster-gautschi: #2f7f73; /* teal */
-  --ec-cluster-negishi: #7c5e8c; /* plum */
-  --ec-cluster-bell: #8a8478; /* warm grey */
-  --ec-cluster-aws-p4d: #c0663f; /* third-party cloud: clay */
-  --ec-billing-in-house: #b08a3e;
-  --ec-billing-access: #4f6d8f;
-  --ec-billing-third-party: #c0663f;
-
-  /* Restrained categorical palette for the eCharts theme (series without a meaning). */
-  --c3-style-chart-chart-1: #5b6270;
-  --c3-style-chart-chart-2: #b08a3e;
-  --c3-style-chart-chart-3: #4f6d8f;
-  --c3-style-chart-chart-4: #2f7f73;
-  --c3-style-chart-chart-5: #7c5e8c;
-  --c3-style-chart-chart-6: #c0663f;
-  --c3-style-chart-chart-7: #8a8478;
-  --c3-style-chart-chart-8: #a1a6b0;
-
-  /* Surfaces */
-  --ec-card-radius: 8px;
-  --ec-card-shadow: 0 1px 2px rgb(16 17 19 / 5%);
-  --ec-shell-bar: #111111; /* top bar: Purdue black in both themes */
-  --ec-shell-bar-fg: #f4f1ea;
-  --ec-shell-bar-muted: #a8a49b;
-  --ec-shell-bar-hover: rgb(255 255 255 / 8%);
-  --ec-shell-gold: #cfb991;
-}
-
+:root,
 .dark {
-  --ec-ink: #b6bcc8;
-  --ec-ink-soft: #4a4f59;
-  --ec-accent: #cfb991;
-  --ec-good: #4cbb7f;
-  --ec-warn: #f0a33a;
-  --ec-bad: #f07272;
-  --ec-neutral: #6e7480;
-  --ec-track: #2a2c31;
-  --ec-target: #f4f1ea;
+  color-scheme: dark;
 
-  --ec-cluster-anvil: #8fa9c8;
-  --ec-cluster-gilbreth: #d8c08f;
-  --ec-cluster-gautschi: #6fbfb2;
-  --ec-cluster-negishi: #b79cc6;
-  --ec-cluster-bell: #b5afa3;
-  --ec-cluster-aws-p4d: #e39a78;
-  --ec-billing-in-house: #d8c08f;
-  --ec-billing-access: #8fa9c8;
-  --ec-billing-third-party: #e39a78;
+  /* Gantry palette (names mirror the mockup CSS variables). */
+  --ec-bg: #181818;
+  --ec-bar: #1c1c1c;
+  --ec-card: #232323;
+  --ec-card-2: #2a2a2a;
+  --ec-line: #2f2f2f;
+  --ec-line-2: #464646;
+  --ec-fg: #d1d1d1;
+  --ec-fg-hi: #ffffff;
+  --ec-fg-2: #a3a3a3;
+  --ec-fg-3: #747474;
+  --ec-accent-hi: #7fee64; /* buttons, active nav icon, chart line */
+  --ec-accent-text: #6ac345; /* green text */
+  --ec-accent-bg: #222d20; /* active nav, ok pill */
+  --ec-accent-line: #2e4a28;
+  --ec-strip: #1d231c;
+  --ec-pink: #d176bd;
+  --ec-pink-bg: #3b2a37;
+  --ec-blue: #79a4c4;
+  --ec-blue-bg: #2a3238;
+  --ec-warn-fg: #e8b54d;
+  --ec-warn-bg: #352d1c;
+  --ec-crit-fg: #f2766b;
+  --ec-crit-bg: #3a2321;
+  --ec-violet: #a78bfa;
+  --ec-teal: #5cc8c0;
+  --ec-mono: 'Fira Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --c3-style-chart-chart-1: #b6bcc8;
-  --c3-style-chart-chart-2: #d8c08f;
-  --c3-style-chart-chart-3: #8fa9c8;
-  --c3-style-chart-chart-4: #6fbfb2;
-  --c3-style-chart-chart-5: #b79cc6;
-  --c3-style-chart-chart-6: #e39a78;
-  --c3-style-chart-chart-7: #b5afa3;
-  --c3-style-chart-chart-8: #6e7480;
+  /* App palette by MEANING (tone helpers in components/app/tone.ts). */
+  --ec-ink: #7fee64; /* default single series: the green area line */
+  --ec-ink-soft: #464646; /* comparison / target bars */
+  --ec-accent: #7fee64;
+  --ec-good: #6ac345;
+  --ec-warn: #e8b54d;
+  --ec-bad: #f2766b;
+  --ec-neutral: #747474;
+  --ec-info: #79a4c4;
+  --ec-track: #2a2a2a;
+  --ec-target: #a3a3a3;
 
+  --ec-cluster-gautschi: #7fee64;
+  --ec-cluster-gilbreth: #79a4c4;
+  --ec-cluster-anvil: #a78bfa;
+  --ec-cluster-negishi: #5cc8c0;
+  --ec-cluster-bell: #747474;
+  --ec-cluster-aws-p4d: #d176bd;
+  --ec-billing-in-house: #7fee64;
+  --ec-billing-access: #a78bfa;
+  --ec-billing-third-party: #d176bd;
+
+  --c3-style-chart-chart-1: #7fee64;
+  --c3-style-chart-chart-2: #79a4c4;
+  --c3-style-chart-chart-3: #a78bfa;
+  --c3-style-chart-chart-4: #e8b54d;
+  --c3-style-chart-chart-5: #5cc8c0;
+  --c3-style-chart-chart-6: #d176bd;
+  --c3-style-chart-chart-7: #a3a3a3;
+  --c3-style-chart-chart-8: #747474;
+  --c3-style-chart-accent: #7fee64;
+  --c3-style-chart-success: #6ac345;
+  --c3-style-chart-warning: #e8b54d;
+  --c3-style-chart-danger: #f2766b;
+  --c3-style-chart-info: #79a4c4;
+  --c3-style-chart-neutral: #747474;
+
+  --ec-card-radius: 8px;
   --ec-card-shadow: none;
-  --ec-shell-bar: #0b0b0c;
-  --ec-shell-bar-hover: rgb(255 255 255 / 7%);
+
+  /* Layer-3 roles used by every vendored component. */
+  --c3-style-basic-fg-primary: #d1d1d1;
+  --c3-style-basic-fg-secondary: #a3a3a3;
+  --c3-style-basic-fg-neutral: #a3a3a3;
+  --c3-style-basic-fg-inverse: #132010;
+  --c3-style-basic-fg-accent: #6ac345;
+  --c3-style-basic-fg-accent-inverse: #132010;
+  --c3-style-basic-fg-success: #6ac345;
+  --c3-style-basic-fg-warning: #e8b54d;
+  --c3-style-basic-fg-danger: #f2766b;
+  --c3-style-basic-fg-info: #79a4c4;
+  --c3-style-basic-bg-page: #181818;
+  --c3-style-basic-bg-primary: #232323;
+  --c3-style-basic-bg-secondary: #2a2a2a;
+  --c3-style-basic-bg-input: #181818;
+  --c3-style-basic-bg-tooltip: #e4e4e4;
+  --c3-style-basic-bg-accent: #222d20;
+  --c3-style-basic-bg-accent-inverse: #7fee64;
+  --c3-style-basic-bg-success: #222d20;
+  --c3-style-basic-bg-success-inverse: #6ac345;
+  --c3-style-basic-bg-warning: #352d1c;
+  --c3-style-basic-bg-warning-inverse: #e8b54d;
+  --c3-style-basic-bg-danger: #3a2321;
+  --c3-style-basic-bg-danger-inverse: #f2766b;
+  --c3-style-basic-bg-info: #2a3238;
+  --c3-style-basic-bg-info-inverse: #79a4c4;
+  --c3-style-basic-bg-neutral: #2a2a2a;
+  --c3-style-basic-bg-neutral-inverse: #a3a3a3;
+  --c3-style-basic-bg-hover: rgb(255 255 255 / 4%);
+  --c3-style-basic-bg-pressed: rgb(255 255 255 / 7%);
+  --c3-style-basic-bg-selected: #222d20;
+  --c3-style-basic-border-border: #2f2f2f;
+  --c3-style-basic-border-input: #464646;
+  --c3-style-basic-border-accent: #7fee64;
+  --c3-style-opacity-accent-10: rgb(127 238 100 / 0.1);
+  --c3-style-opacity-accent-20: rgb(127 238 100 / 0.2);
+  --c3-style-opacity-accent-30: rgb(127 238 100 / 0.3);
+  --c3-style-opacity-accent-60: rgb(127 238 100 / 0.6);
+  --c3-style-shadow-ring-accent: rgb(127 238 100 / 0.6);
+  --theme-font-family-font-sans: 'Inter Variable', Inter, ui-sans-serif, system-ui, sans-serif;
+  --theme-font-family-font-mono: 'Fira Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* shadcn slots */
+  --background: #181818;
+  --foreground: #d1d1d1;
+  --card: #232323;
+  --popover: #232323;
+  --ring: #7fee64;
 }

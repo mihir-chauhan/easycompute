@@ -73,6 +73,7 @@ export default function App() {
                 <Route path="/runs" element={<RunList />} />
                 <Route path="/runs/:id" element={<RunDetail />} />
                 <Route path="/history" element={<History />} />
+                <Route path="/guardrails" element={<p className="p-8 text-center">Guardrails: this page is being built.</p>} />
                 <Route path="/assistant" element={<AssistantPage />} />
                 <Route path="/admin" element={<AdminOverview />} />
                 <Route path="/admin/clusters" element={<AdminClusters />} />

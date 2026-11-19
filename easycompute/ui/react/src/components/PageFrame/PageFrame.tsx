@@ -7,16 +7,18 @@ import React, { type ReactNode } from 'react';
 import { AlertTriangle, Inbox, RotateCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { PageHeader } from '@/components/ui/page-header';
 import type { BreadcrumbItemData } from '@/components/ui/breadcrumbs';
 import { Spinner } from '@/components/ui/spinner';
 
 interface PageFrameProps {
   title: ReactNode;
   description?: ReactNode;
+  /** All but the last crumb render as a muted "Parent /" prefix inside the title (mockup style). */
   breadcrumbs?: BreadcrumbItemData[];
+  /** Pills next to the title. */
   badges?: ReactNode;
   actions?: ReactNode;
+  /** Tab strip under the header (use `PageTabs` from components/app). */
   tabs?: ReactNode;
   /** One-row filter toolbar rendered between the header and the content (search, filters, result count). */
   toolbar?: ReactNode;
@@ -24,23 +26,37 @@ interface PageFrameProps {
 }
 
 /**
- * Standard page frame (EasyCompute design system): the PageHeader (breadcrumb, 24px semibold title, muted one-line
- * description, actions right) over a content stack; everything is centred at max-width 1440px with 24px padding and
- * 16px gaps (16px gutters on phones). Every page uses it.
+ * Standard page frame (EasyCompute / "Gantry" design): 24px/500 title with optional muted crumb prefix and pills,
+ * 16px description, actions right; content column max-width 1180px with 24px gaps; 28/32px page padding
+ * (16px on phones). Every page uses it.
  */
 export default function PageFrame({ title, description, breadcrumbs, badges, actions, tabs, toolbar, children }: PageFrameProps) {
+  const parents = (breadcrumbs ?? []).slice(0, -1);
   return (
-    <div className="mx-auto flex min-h-full w-full max-w-[1440px] flex-col c3-page-content-enter">
-      <PageHeader
-        title={title}
-        description={description}
-        breadcrumbs={breadcrumbs}
-        badges={badges}
-        actions={actions}
-        tabs={tabs}
-      />
-      <div className="flex min-w-0 flex-1 flex-col gap-4 px-4 pb-8 pt-2 md:px-6">
-        {toolbar ? <div className="flex flex-wrap items-center gap-2">{toolbar}</div> : null}
+    <div className="px-4 pt-7 pb-12 md:px-8">
+      <div className="flex w-full max-w-[1180px] flex-col gap-6">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="m-0 flex flex-wrap items-center gap-2.5 text-2xl leading-8 font-medium tracking-[-0.01em] text-[var(--ec-fg)]">
+                {parents.map((c, i) =>
+                  c.href ? (
+                    <a key={i} href={c.href} className="text-[var(--ec-fg-2)] hover:text-[var(--ec-fg-hi)]">
+                      {c.label}
+                      <span className="ml-2.5 text-[var(--ec-fg-3)]">/</span>
+                    </a>
+                  ) : null,
+                )}
+                <span className="min-w-0 text-[var(--ec-fg-hi)]">{title}</span>
+                {badges}
+              </h1>
+              {description ? <p className="mt-1.5 mb-0 text-base leading-6 text-[var(--ec-fg)]">{description}</p> : null}
+            </div>
+            {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+          </div>
+          {tabs}
+        </div>
+        {toolbar ? <div className="flex flex-wrap items-center gap-2.5">{toolbar}</div> : null}
         {children}
       </div>
     </div>
@@ -49,7 +65,7 @@ export default function PageFrame({ title, description, breadcrumbs, badges, act
 
 export function LoadingState({ label = 'Loading…' }: { label?: string }) {
   return (
-    <div className="flex items-center justify-center gap-2 p-12 text-c3-regular-body-p2 text-[var(--c3-style-basic-fg-secondary)]">
+    <div className="flex items-center justify-center gap-2 p-12 text-sm text-[var(--ec-fg-2)]">
       <Spinner size="lg" />
       <span>{label}</span>
     </div>
@@ -58,11 +74,8 @@ export function LoadingState({ label = 'Loading…' }: { label?: string }) {
 
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div
-      role="alert"
-      className="flex items-start gap-2 rounded-sm border border-[var(--c3-style-basic-border-danger)] bg-[var(--c3-style-basic-bg-danger)] p-4 text-c3-regular-body-p2 text-[var(--c3-style-basic-fg-danger)]"
-    >
-      <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+    <div role="alert" className="flex items-start gap-3 rounded-lg border border-[#5a302c] bg-[var(--ec-crit-bg)] px-3.5 py-3 text-sm text-[var(--ec-fg)]">
+      <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--ec-crit-fg)]" aria-hidden />
       <span className="flex-1">{message}</span>
       {onRetry && (
         <Button variant="outline" appearance="danger" size="sm" leadingIcon={<RotateCw />} onClick={onRetry}>
@@ -78,7 +91,7 @@ export function EmptyRows({ colSpan, label, action }: { colSpan: number; label: 
   return (
     <tr>
       <td colSpan={colSpan} className="px-4 py-10 text-center">
-        <div className="flex flex-col items-center gap-2 text-c3-regular-body-p2 text-[var(--c3-style-basic-fg-secondary)]">
+        <div className="flex flex-col items-center gap-2 text-sm text-[var(--ec-fg-2)]">
           <Inbox className="size-6" aria-hidden />
           <span>{label}</span>
           {action}

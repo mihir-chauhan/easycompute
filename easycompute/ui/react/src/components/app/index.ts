@@ -1,7 +1,8 @@
 /*
  * EasyCompute shared app components. Import from '@/components/app'. Docs: ./README.md
  */
-export { default as AppShell, AppShellProvider, useAppShell } from './AppShell';
+export { default as AppShell, AppShellProvider, BrandMark, useAppShell } from './AppShell';
+export { AttentionItem, CheckRow, Chips, CodeBlock, EventRow, KeyValue, Note, SectionHeading, Toggle, highlightShell } from './Blocks';
 export type { ShellLab, ShellNavItem, ShellView } from './AppShell';
 export { BillingTag, ClusterTag } from './ClusterTag';
 export { default as Countdown, formatDuration } from './Countdown';
@@ -13,10 +14,10 @@ export { ChartSkeleton, EmptyState, ErrorState, KpiRowSkeleton, LoadingState, Sk
 export { BudgetBurn, ProgressBar } from './ProgressBar';
 export { CardGrid, SectionCard } from './SectionCard';
 export { default as Sparkline } from './Sparkline';
-export { SeverityBadge, StatusBadge, ToneBadge, ToneDot, humanize, statusOf } from './StatusBadge';
+export { Pill, SeverityBadge, StatusBadge, ToneBadge, ToneDot, humanize, statusOf } from './StatusBadge';
 export type { StatusKind } from './StatusBadge';
-export { ClearFilters, ResultCount, SearchBox, Segmented } from './Toolbar';
-export type { SegmentOption } from './Toolbar';
+export { ClearFilters, PageTabs, ResultCount, SearchBox, Segmented, SelectPill } from './Toolbar';
+export type { PageTab, SegmentOption } from './Toolbar';
 export { ChartLegend, MetricChart, barOption, lineOption } from './charts';
 export type { ChartSeries, ChartThreshold, LegendItem } from './charts';
 export * from './tone';

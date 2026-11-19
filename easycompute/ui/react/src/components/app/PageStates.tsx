@@ -20,7 +20,7 @@ export function KpiRowSkeleton({ count = 4 }: { count?: number }) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-busy="true" aria-label="Loading">
       {Array.from({ length: count }, (_, i) => (
-        <div key={i} className="flex flex-col gap-3 rounded-[var(--ec-card-radius)] border border-[var(--c3-style-basic-border-border)] bg-[var(--c3-style-basic-bg-primary)] px-5 py-4">
+        <div key={i} className="flex flex-col gap-3 rounded-lg bg-[var(--ec-card)] px-4 py-3.5">
           <Skeleton className="h-3 w-24" />
           <Skeleton className="h-7 w-28" />
           <Skeleton className="h-3 w-36" />
@@ -46,7 +46,7 @@ export function TableSkeleton({ rows = 6, className }: { rows?: number; classNam
   return (
     <div className={cn('flex flex-col', className)} aria-busy="true" aria-label="Loading rows">
       {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className="flex h-10 items-center gap-4 border-b border-[var(--c3-style-basic-border-border)] px-5 last:border-b-0">
+        <div key={i} className="flex h-10 items-center gap-4 border-b border-[var(--ec-line)] px-4 last:border-b-0">
           <Skeleton className="h-3 w-1/4" />
           <Skeleton className="h-3 w-1/6" />
           <Skeleton className="ml-auto h-3 w-16" />
@@ -68,10 +68,10 @@ interface EmptyStateProps {
 export function EmptyState({ icon, title, hint, action, className }: EmptyStateProps) {
   return (
     <div className={cn('flex flex-col items-center justify-center gap-2 px-6 py-12 text-center', className)}>
-      <span className="mb-1 inline-flex size-10 items-center justify-center rounded-full bg-[var(--c3-style-basic-bg-secondary)] text-[var(--c3-style-basic-fg-secondary)] [&_svg]:size-5">
+      <span className="mb-1 inline-flex size-10 items-center justify-center rounded-full bg-[var(--ec-card-2)] text-[var(--ec-fg-2)] [&_svg]:size-5">
         {icon ?? <Inbox aria-hidden />}
       </span>
-      <p className="text-sm font-semibold text-[var(--c3-style-basic-fg-primary)]">{title}</p>
+      <p className="text-sm font-medium text-[var(--ec-fg-hi)]">{title}</p>
       {hint ? <p className="max-w-sm text-[13px] text-[var(--c3-style-basic-fg-secondary)]">{hint}</p> : null}
       {action ? <div className="mt-2">{action}</div> : null}
     </div>

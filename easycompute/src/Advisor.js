@@ -78,11 +78,41 @@ function plain(v) {
   }
 }
 
-/** JSON text of a tool result, cut to MAX_RESULT characters so the agent context stays small. */
+/** Largest array inside a value (depth <= 3), as { arr }, or null. */
+function largestArray(v, depth) {
+  var best = null;
+  var visit = function (x, d) {
+    if (!x || typeof x !== 'object' || d > 3) return;
+    if (Array.isArray(x)) {
+      if (x.length > 1 && (!best || JSON.stringify(x).length > JSON.stringify(best).length)) best = x;
+      x.forEach(function (y) {
+        visit(y, d + 1);
+      });
+      return;
+    }
+    Object.keys(x).forEach(function (k) {
+      visit(x[k], d + 1);
+    });
+  };
+  visit(v, depth || 0);
+  return best;
+}
+
+/**
+ * JSON text of a tool result, kept under MAX_RESULT characters so the agent context stays small: the largest array is
+ * halved until it fits (the text stays valid JSON and says it was shortened).
+ */
 function out(data) {
   var s = JSON.stringify(data);
-  if (s.length > MAX_RESULT) s = s.substring(0, MAX_RESULT) + '... (truncated)';
-  return s;
+  var guard = 0;
+  while (s.length > MAX_RESULT && data && typeof data === 'object' && guard++ < 20) {
+    var a = largestArray(data, 0);
+    if (!a) break;
+    a.splice(Math.ceil(a.length / 2));
+    data.truncated = 'Result shortened; ask a narrower question for the full list.';
+    s = JSON.stringify(data);
+  }
+  return s.length > MAX_RESULT ? JSON.stringify({ error: 'Result too large; narrow the question.' }) : s;
 }
 
 function canonicalOf(value, allowed, param) {
@@ -267,33 +297,46 @@ function nextWeekday(dow, ref) {
   return d;
 }
 
-/** Parses one date mention ("May 15", "2027-06-30", "15 May 2027", "Friday", "end of June") relative to `refMs`. */
-function parseDateText(text, refMs) {
+/** Finds the first date mention in a text: { date, index, length } or null. See parseDateText. */
+function findDate(text, refMs) {
   var s = str(text).toLowerCase();
   if (!s) return null;
   var ref0 = refMs || Date.now();
+  var hit = function (m, d) {
+    return m && d ? { date: d, index: m.index, length: m[0].length } : null;
+  };
   var m = s.match(/\b(20\d\d)-(\d\d)-(\d\d)/);
-  if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 23, 59));
+  if (m) return hit(m, new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 23, 59)));
   m = s.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(20\d\d|\d\d))?\b/);
-  if (m) return fixYear(+m[1] - 1, +m[2], m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : null, ref0);
+  if (m) return hit(m, fixYear(+m[1] - 1, +m[2], m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : null, ref0));
   var monRe = '(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\\.?';
-  m = s.match(new RegExp('\\b' + monRe + '\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(20\\d\\d))?'));
-  if (m) return fixYear(MONTHS.indexOf(m[1].substring(0, 3)), +m[2], m[3] ? +m[3] : null, ref0);
-  m = s.match(new RegExp('\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?' + monRe + '(?:,?\\s+(20\\d\\d))?'));
-  if (m) return fixYear(MONTHS.indexOf(m[2].substring(0, 3)), +m[1], m[3] ? +m[3] : null, ref0);
-  m = s.match(new RegExp('\\b(?:end of|through|thru|until|by)\\s+' + monRe + '(?:\\s+(20\\d\\d))?'));
-  if (m) {
+  m = s.match(new RegExp('\\b(?:end of|through|thru|until|by|early|mid|late)[- ]+' + monRe + '(?:\\s+(20\\d\\d))?'));
+  if (m && !/^\s*\d/.test(s.substring(m.index + m[0].length))) {
     var mon = MONTHS.indexOf(m[1].substring(0, 3));
-    var d0 = fixYear(mon, 1, m[2] ? +m[2] : null, ref0);
-    return new Date(Date.UTC(d0.getUTCFullYear(), mon + 1, 0, 23, 59));
+    var day = /^early/.test(m[0]) ? 5 : /^mid/.test(m[0]) ? 15 : /^late/.test(m[0]) ? 25 : 1;
+    var d0 = fixYear(mon, day, m[2] ? +m[2] : null, ref0);
+    if (day === 1 && d0) d0 = new Date(Date.UTC(d0.getUTCFullYear(), mon + 1, 0, 23, 59));
+    return hit(m, d0);
   }
+  m = s.match(new RegExp('\\b' + monRe + '\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?:,?\\s+(20\\d\\d))?'));
+  if (m) return hit(m, fixYear(MONTHS.indexOf(m[1].substring(0, 3)), +m[2], m[3] ? +m[3] : null, ref0));
+  m = s.match(new RegExp('\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?' + monRe + '(?:,?\\s+(20\\d\\d))?'));
+  if (m) return hit(m, fixYear(MONTHS.indexOf(m[2].substring(0, 3)), +m[1], m[3] ? +m[3] : null, ref0));
   for (var i = 0; i < WEEKDAYS.length; i++) {
-    if (new RegExp('\\b' + WEEKDAYS[i].substring(0, 3) + '(' + WEEKDAYS[i].substring(3) + ')?\\b').test(s)) return nextWeekday(i, ref0);
+    m = s.match(new RegExp('\\b' + WEEKDAYS[i].substring(0, 3) + '(' + WEEKDAYS[i].substring(3) + ')?\\b'));
+    if (m) return hit(m, nextWeekday(i, ref0));
   }
-  if (/\btomorrow\b/.test(s)) return new Date(ref0 + DAY_MS);
+  m = s.match(/\btomorrow\b/);
+  if (m) return hit(m, new Date(ref0 + DAY_MS));
   m = s.match(/\bin (\d+) (day|week)s?\b/);
-  if (m) return new Date(ref0 + +m[1] * (m[2] === 'week' ? 7 : 1) * DAY_MS);
+  if (m) return hit(m, new Date(ref0 + +m[1] * (m[2] === 'week' ? 7 : 1) * DAY_MS));
   return null;
+}
+
+/** Parses one date mention ("May 15", "2027-06-30", "15 May 2027", "Friday", "end of June", "mid-February"). */
+function parseDateText(text, refMs) {
+  var f = findDate(text, refMs);
+  return f ? f.date : null;
 }
 
 /** A month/day without a year means the next occurrence on or after today. */
@@ -347,26 +390,29 @@ function parseConstraintsText(text, refMs) {
   var seenRestriction = {};
   sentencesOf(text).forEach(function (s) {
     var low = s.toLowerCase();
-    var negative = /\b(no|never|not|avoid|don't|do not|without|can't|cannot|must not|hate|stay off)\b/.test(low);
-
-    // budgets: dollars, SUs, GPU-hours, GPU-years
     var m;
-    var reUsd = /\$\s?([\d,.]+)\s?(k|m|million)?\b/gi;
-    while ((m = reUsd.exec(s)) !== null) {
-      var perUnit = /^\s*(\/|per)\s*(gpu|hour|hr|su|node)/i.test(s.substring(m.index + m[0].length));
-      if (perUnit) continue;
-      res.budgets.push({ kind: 'USD', amount: round(amountOf(m[1], m[2]), 0), period: periodOf(low), scope: scopeOf(s), evidence: s });
-    }
-    var reUnits = /([\d][\d,.]*)\s?(k|m|million)?\s*(sus?|service units|gpu[- ]?hours?|gpu[- ]?hrs?|node[- ]?hours?|gpu[- ]?years?)\b/gi;
-    while ((m = reUnits.exec(s)) !== null) {
-      var unit = m[3].toLowerCase();
-      var kind = /^su|service/.test(unit) ? 'SU' : /node/.test(unit) ? 'NODE_HOURS' : /year/.test(unit) ? 'GPU_YEARS' : 'GPU_HOURS';
-      var amt = amountOf(m[1], m[2]);
-      var b = { kind: kind, amount: round(amt, 1), period: periodOf(low), scope: scopeOf(s), evidence: s };
+
+    // budgets: dollars and units (SUs / ACCESS credits, GPU-hours, H100-hours, GPU-years, node/core-hours)
+    var reAmt = /(^|[^A-Za-z0-9.,$])(\$)?\s?~?(\d[\d,]*(?:\.\d+)?)\s?(k|m|million)?\b\s*(?:x\s*)?((?:(?:h100|a100(?:-80gb)?|a30)\s)?gpu[- ]?years?|(?:h100|a100|gpu)[- ]?hours?|gpu[- ]?hrs?|hours (?:left|remaining)|sus?\b|service units|credits|node[- ]?hours?|core[- ]?hours?)?/gi;
+    while ((m = reAmt.exec(s)) !== null) {
+      var isUsd = m[2] === '$';
+      var unit = str(m[5]).toLowerCase();
+      if (!isUsd && !unit) continue;
+      var at = m.index + m[1].length;
+      var before = low.substring(Math.max(0, at - 28), at);
+      var after = low.substring(at + m[0].length - m[1].length, at + m[0].length - m[1].length + 45);
+      if (isUsd && /^\s*(\/|per)\s*(gpu|hour|hr|su|node)/.test(after)) continue;
+      if (/\b(under|below|drop|over|above|more than|exceed\w*|at most|no more than|limit|cap)\s*~?\$?$|>\s*$/.test(before)) continue; // thresholds, handled below
+      var kind = isUsd ? 'USD' : /^su|service|credit/.test(unit) ? 'SU' : /node|core/.test(unit) ? 'NODE_HOURS' : /year/.test(unit) ? 'GPU_YEARS' : 'GPU_HOURS';
+      var amt = amountOf(m[3], m[4]);
+      var b = {
+        kind: kind,
+        amount: round(amt, kind === 'USD' ? 0 : 1),
+        period: /^[^.;]{0,25}\b(left|remaining|remain)\b/.test(after) || /hours (left|remaining)/.test(unit) ? 'REMAINING' : periodOf(after + ' ' + before),
+        scope: scopeNear(s, at, at + m[0].length - m[1].length),
+        evidence: s,
+      };
       if (kind === 'GPU_YEARS') b.gpuHoursEquivalent = round(amt * 8760, 0);
-      if (/\b(approv\w*|threshold|sign[- ]off)\b/.test(low) || (/\b(limit|cap|max|maximum|at most|no more than)\b/.test(low) && /\b(job|run)\b/.test(low))) {
-        continue; // per-job limits / approval thresholds are handled below
-      }
       res.budgets.push(b);
     }
 
@@ -374,53 +420,61 @@ function parseConstraintsText(text, refMs) {
     var reCap = /([A-Z][a-z]+|students?|postdocs?|undergrads?|each member|members?)(?:'s)?\s+(?:is\s+)?(?:cap(?:ped)?|limit(?:ed)?|max(?:imum)?)\s*(?:at|of|to|is)?\s*(\d{1,3})\s?%/g;
     while ((m = reCap.exec(s)) !== null) res.memberCaps.push({ who: m[1], pct: +m[2], evidence: s });
 
-    // PI approval thresholds
-    m = low.match(/(?:pi|advisor|professor)\s+(?:must\s+)?(?:approv\w*|sign[- ]off)[^.]*?(?:above|over|more than|>)\s*\$?\s?([\d,.]+)\s?(k)?\s*(gpu[- ]?hours?|gpu[- ]?hrs?|sus?|dollars|usd)?/);
-    if (!m) m = low.match(/(?:above|over|more than|>)\s*\$?\s?([\d,.]+)\s?(k)?\s*(gpu[- ]?hours?|gpu[- ]?hrs?|sus?|dollars|usd)?[^.]*?(?:need|require)s?\s+(?:pi\s+)?approv/);
-    if (m) {
-      res.approvals.push({
-        threshold: round(amountOf(m[1], m[2]), 0),
-        unit: m[3] ? (/su/.test(m[3]) ? 'SU' : /gpu/.test(m[3]) ? 'GPU_HOURS' : 'USD') : /\$/.test(s) ? 'USD' : 'GPU_HOURS',
-        evidence: s,
-      });
-    }
-
-    // deadlines: a date mention in a sentence that talks about a deadline / venue / defense / report
-    if (/\b(deadline|due|submission|submit|camera[- ]ready|rebuttal|defen[cs]e|report|neurips|icml|iclr|cvpr|aaai|kdd|acl|emnlp|sc\d\d|review|demo|by)\b/.test(low)) {
-      var dt = parseDateText(s, ref0);
-      if (dt) {
-        var label = deadlineLabel(s);
-        var key = label + '|' + dt.toISOString().substring(0, 10);
-        if (!seenDeadline[key]) {
-          seenDeadline[key] = true;
-          res.deadlines.push({ label: label, date: dt.toISOString(), daysAway: round((dt.getTime() - ref0) / DAY_MS, 1), evidence: s });
-        }
+    // PI approval thresholds ("over 500 GPU-hours needs my OK", ">8 GPUs without asking me", "PI approval above $2k")
+    if (/\b(approv\w*|my ok|ok from|ask(?:ing)? me|permission|sign[- ]?off|check with me)\b/.test(low)) {
+      m = low.match(/(?:over|above|more than|exceed\w*|>)\s*(\$)?\s?~?(\d[\d,]*(?:\.\d+)?)\s?(k)?\s*(gpu[- ]?hours?|gpu[- ]?hrs?|gpus?|sus?|credits|usd|dollars)?/);
+      if (m) {
+        var u = str(m[4]);
+        res.approvals.push({
+          threshold: round(amountOf(m[2], m[3]), 0),
+          unit: m[1] || /usd|dollar/.test(u) ? 'USD' : /^gpus?$/.test(u) ? 'GPUS' : /su|credit/.test(u) ? 'SU' : 'GPU_HOURS',
+          evidence: s,
+        });
       }
     }
 
-    // preferences
+    // deadlines: every date mention in a sentence that talks about a deadline / venue / deliverable
+    if (/\b(deadlines?|due|submission|submit|camera[- ]ready|rebuttal|revision|defen[cs]e|report|deliverable|milestone|posters?|demo|release|paper|finish by|neurips|icml|iclr|cvpr|eccv|iccv|aaai|kdd|acl|emnlp|recomb|rss|corl|icra|agu|sc\d\d)\b/.test(low)) {
+      s.split(/[,;(]|\s[-–]\s/).forEach(function (clause) {
+        var f = findDate(clause, ref0);
+        if (!f || !f.date) return;
+        var label = deadlineLabel(clause, f, s);
+        var key = f.date.toISOString().substring(0, 10) + '|' + label;
+        if (seenDeadline[key]) return;
+        seenDeadline[key] = true;
+        res.deadlines.push({ label: label, date: f.date.toISOString(), daysAway: round((f.date.getTime() - ref0) / DAY_MS, 1), evidence: s });
+      });
+    }
+
+    // preferences: a negation within 4 words before the mention means "avoid"
+    var preferVerb = new RegExp(PREF).test(low);
     CLUSTER_WORDS.forEach(function (c) {
       if (!c.re.test(s)) return;
-      if (negative && clauseNegates(low, c.re)) pushUnique(res.preferences.avoid, c.id);
-      else if (/\b(prefer\w*|like|want|favou?r\w*|usually|mostly|default|best|first choice)\b/.test(low)) pushUnique(res.preferences.clusters, c.id);
+      if (negatedBefore(low, c.re)) pushUnique(res.preferences.avoid, c.id);
+      else if (preferredNear(low, c.re)) pushUnique(res.preferences.clusters, c.id);
     });
     GPU_WORDS.forEach(function (g) {
       if (!g.re.test(s)) return;
-      if (negative && clauseNegates(low, g.re)) pushUnique(res.preferences.avoid, g.id);
-      else if (/\b(prefer|like|want|use|favor|favour|best|fastest|our|own|bought|purchased)\b/.test(low)) pushUnique(res.preferences.gpuTypes, g.id);
+      if (negatedBefore(low, g.re)) pushUnique(res.preferences.avoid, g.id);
+      else if (preferVerb || /\b(use|fastest|our|own|bought|purchased)\b/.test(low)) pushUnique(res.preferences.gpuTypes, g.id);
     });
-    if (/\b(preempt\w*|standby|spot)\b/.test(low)) {
-      if (negative) {
+    var preRe = /\b(preempt\w*|standby|spot)\b/;
+    if (preRe.test(low)) {
+      if (negatedBefore(low, preRe)) {
         res.preferences.preemptibleOk = false;
         pushUnique(res.preferences.avoid, 'preemptible/standby');
-      } else if (/\b(ok|fine|happy|prefer|use|cheap|accept)\b/.test(low)) res.preferences.preemptibleOk = true;
+      } else if (res.preferences.preemptibleOk !== false && /\b(ok|fine|happy|prefer|use|cheap|accept|go|run|stretch\w*)\b/.test(low)) {
+        res.preferences.preemptibleOk = true;
+      }
     }
     m = low.match(/(?:max(?:imum)?|no more than|at most|cap|limit)\s*(?:walltime|wall time|runtime|jobs?)?\s*(?:of|at|to)?\s*(\d+(?:\.\d+)?)\s*(h|hours?|hrs?|days?)\b/);
     if (m && /wall|runtime|job|run/.test(low)) res.preferences.maxWalltimeHours = round(+m[1] * (/^d/.test(m[2]) ? 24 : 1), 1);
-    m = low.match(/quiet hours?[^0-9]*(\d{1,2}(?::\d\d)?\s*(?:am|pm)?)\s*(?:-|to|–)\s*(\d{1,2}(?::\d\d)?\s*(?:am|pm)?)/);
-    if (m) res.preferences.quietHours = m[1].trim() + '-' + m[2].trim();
-    if (/\b(checkpoint\w*)\b/.test(low)) pushUnique(res.preferences.notes, s);
-    else if (/\b(prefer|always|never|only|must|should)\b/.test(low) && res.preferences.notes.length < 8 && !/\$|\bsu\b|gpu[- ]?hours?/.test(low)) {
+    m = s.match(/quiet hours?:?\s*([^.;]{0,30}?\d{1,2}(?::\d\d)?\s*(?:am|pm)?\s*(?:-|to|–)\s*\d{1,2}(?::\d\d)?\s*(?:am|pm)?)/i);
+    if (m) res.preferences.quietHours = m[1].trim();
+    if (
+      res.preferences.notes.length < 8 &&
+      (/\b(checkpoint\w*|warn me|tell me|notify me|remind|kill|scale the job down|recommend|always|never|only|must|should|please)\b/.test(low))
+    ) {
       pushUnique(res.preferences.notes, s);
     }
 
@@ -451,37 +505,79 @@ function pushUnique(list, v) {
   if (list.indexOf(v) < 0) list.push(v);
 }
 
-/** True when a negation word appears in the same clause before the match. */
-function clauseNegates(low, re) {
-  var clauses = low.split(/[,;:]|\bbut\b|\bwhile\b|\bhowever\b/);
-  for (var i = 0; i < clauses.length; i++) {
-    if (re.test(clauses[i]) && /\b(no|never|not|avoid|don't|do not|without|can't|cannot|must not|stay off)\b/.test(clauses[i])) return true;
-  }
-  return false;
+var NEG = "\\b(?:no|never|not|avoid|don't|do not|without|can't|cannot|must not|stay off|except)\\b";
+
+/** True when a negation word appears at most 4 words before a match of `re` ("never on Anvil", "don't put us on A30s"). */
+function negatedBefore(low, re) {
+  return new RegExp(NEG + "(?:[ \\t]+[\\w'/-]+){0,3}?[ \\t]+(?:" + re.source + ')', 'i').test(low);
+}
+
+var PREF = '\\b(?:prefer\\w*|like|want|favou?r\\w*|usually|mostly|default|best|only|workhorse is)\\b';
+
+/** True when a preference word precedes the mention within 8 words, or the mention is followed by "first". */
+function preferredNear(low, re) {
+  return (
+    new RegExp(PREF + "(?:[ \\t]+[\\w'/,.()-]+){0,8}?[ \\t]+(?:" + re.source + ')', 'i').test(low) ||
+    new RegExp('(?:' + re.source + ")[ \\t]+(?:[\\w'-]+[ \\t]+)?first\\b", 'i').test(low)
+  );
 }
 
 function periodOf(low) {
   if (/\b(per|a|each|every)\s+month|monthly\b/.test(low)) return 'MONTH';
   if (/\b(per|a|each|every)\s+week|weekly\b/.test(low)) return 'WEEK';
-  if (/\b(per|a|each|every)\s+(year|fy)|annual|yearly|fiscal year\b/.test(low)) return 'YEAR';
+  if (/\b(per|a|each|every)\s+(year|fy)|annual|yearly|fiscal year|this fiscal\b/.test(low)) return 'YEAR';
   if (/\bsemester\b/.test(low)) return 'SEMESTER';
-  if (/\b(left|remaining|remain)\b/.test(low)) return 'REMAINING';
   return 'TOTAL';
 }
 
+/** Funding source or cluster named near an amount. */
 function scopeOf(s) {
-  var m = s.match(/\b(NSF|NIH|DOE|DARPA|ONR|AFOSR|ARL|USDA|NASA|ACCESS|startup|department|industry)\b(?:\s+(?!through|thru|on|for|until|gives|is|of|ends|expires)[A-Za-z][\w-]*){0,3}/i);
+  var m = s.match(/\b(NSF|NIH|DOE|DARPA|DTRA|ONR|AFOSR|ARL|USDA|NASA|ACCESS|AWS|startup|department|dept|industry)\b(?:\s+(?!through|thru|on|for|until|gives|is|of|ends|expires|and|bought|share|award\b)[A-Za-z][\w-]*){0,2}(?:\s+award)?/i);
   if (m) return m[0].trim();
   for (var i = 0; i < CLUSTER_WORDS.length; i++) if (CLUSTER_WORDS[i].re.test(s)) return CLUSTER_WORDS[i].id;
   return null;
 }
 
-function deadlineLabel(s) {
-  var m = s.match(/\b(NeurIPS|ICML|ICLR|CVPR|ECCV|ICCV|AAAI|IJCAI|KDD|ACL|EMNLP|NAACL|SC\d\d|SIGGRAPH|MICCAI|ISMB|RECOMB)\b[^,.;]{0,30}/i);
-  if (m) return m[0].replace(/\s+(is|on|by|due|deadline)\b.*$/i, '').trim();
-  m = s.match(/\b(thesis defen[cs]e|defen[cs]e|grant report|annual report|progress report|camera[- ]ready|rebuttal|renewal|proposal|demo)\b/i);
-  if (m) return m[0];
-  return s.length > 60 ? s.substring(0, 57) + '...' : s;
+var FUNDER_RE = /\b(NSF|NIH|DOE|DARPA|DTRA|ONR|AFOSR|ARL|USDA|NASA|ACCESS|AWS|startup|department|dept|industry)\b/i;
+
+/** Scope of the amount at [at, end) in sentence s: funder right after ("of AWS credits"), else nearest funder before, else after, else a cluster. */
+function scopeNear(s, at, end) {
+  var after = s.substring(end, end + 60);
+  var before = s.substring(Math.max(0, at - 90), at);
+  if (/^\s*(of|in|from)\s/i.test(after) && FUNDER_RE.test(after)) return scopeOf(after.substring(after.search(FUNDER_RE)));
+  var idx = -1;
+  var re = new RegExp(FUNDER_RE.source, 'gi');
+  var mm;
+  while ((mm = re.exec(before)) !== null) idx = mm.index;
+  if (idx >= 0) return scopeOf(before.substring(idx));
+  if (FUNDER_RE.test(after.substring(0, 40))) return scopeOf(after.substring(after.search(FUNDER_RE)));
+  return scopeOf(before + ' ' + after);
+}
+
+var VENUE_RE = /\b(NeurIPS|ICML|ICLR|CVPR|ECCV|ICCV|AAAI|IJCAI|KDD|ACL|EMNLP|NAACL|RECOMB|ISMB|RSS|CoRL|ICRA|IROS|SIGGRAPH|MICCAI|AGU|SC\d\d)\b(?:\s+20\d\d)?/i;
+
+/** Label of a deadline: the words before the date in its clause, else a venue / keyword phrase of the sentence. */
+function deadlineLabel(clause, f, sentence) {
+  var tidy = function (t) {
+    var out = t.replace(/^.*:\s*/, '');
+    var prev;
+    do {
+      prev = out;
+      out = out
+        .replace(/[\s:,(\-–]+$/, '')
+        .replace(/\b(are|is|was|were|due|on|by|in|at|for|must finish|must|finish|needs?|the|our|next|immediate|(mon|tues|wednes|thurs|fri|satur|sun)day)$/i, '')
+        .trim();
+    } while (out !== prev);
+    return out;
+  };
+  var pre = tidy(clause.substring(0, f.index));
+  if (pre.length >= 3) return pre.length > 60 ? pre.substring(0, 57) + '...' : pre;
+  var v = sentence.match(VENUE_RE);
+  if (v) return v[0];
+  var k = sentence.match(/(?:\b[\w-]+\s+)?\b(thesis defen[cs]e|defen[cs]e|grant report|annual report|progress report|milestone report|camera[- ]ready|rebuttal|revision|renewal|proposal|deliverable|demo)\b/i);
+  if (k) return k[0];
+  var t = tidy(clause);
+  return t.length > 60 ? t.substring(0, 57) + '...' : t || 'Deadline';
 }
 
 function summarize(r) {
@@ -1279,10 +1375,10 @@ function offlineAnswer(question, labId) {
     lab = null;
   }
   var wantsUniversity = /\b(university|purdue|campus|all labs|fairness|short on|where .*need|demand|clusters?)\b/.test(q) && !/\bour\b/.test(q);
-  var wantsJobs = /\b(running|live|jobs?|idle|wast|util|alert|oom|walltime|checkpoint|cancel|extend)\b/.test(q);
-  var wantsPlan = /\b(finish|deadline|plan|launch|submit|fine-?tune|train|run .* by|within budget|feasible|neurips|icml|iclr|cvpr)\b/.test(q);
-  var wantsRules = /\b(rule|polic|allowed|limit|max)\b/.test(q);
-  var wantsBudget = /\b(budget|allocation|left|remaining|spend|cost|expire)\b/.test(q);
+  var wantsJobs = /\b(running|live|jobs?|idle\w*|wast\w*|util\w*|alerts?|oom|walltime|checkpoint\w*|cancel\w*|extend\w*)\b/.test(q);
+  var wantsPlan = /\b(finish|deadlines?|plans?|launch|submit|fine-?tun\w*|train\w*|run .* by|within budget|feasible|neurips|icml|iclr|cvpr|iccv|recomb|rss)\b/.test(q);
+  var wantsRules = /\b(rules?|polic\w*|allowed|limits?|max\w*)\b/.test(q);
+  var wantsBudget = /\b(budgets?|allocations?|left|remaining|spend\w*|costs?|expir\w*|credits?)\b/.test(q);
 
   if (wantsUniversity) {
     var u = JSON.parse(universityOverview());

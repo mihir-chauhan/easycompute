@@ -84,14 +84,6 @@ function easternHour(millis) {
   return (d.getUTCHours() + (dst ? -4 : -5) + 24) % 24;
 }
 
-function inHourRange(hour, text) {
-  var m = String(text || '').match(/(\d{1,2})\s*-\s*(\d{1,2})/);
-  if (!m) return false;
-  var a = Number(m[1]);
-  var b = Number(m[2]);
-  return a <= b ? hour >= a && hour < b : hour >= a || hour < b;
-}
-
 function csv(text) {
   return String(text || '')
     .split(',')
@@ -143,12 +135,14 @@ function loadContext(id) {
 
   // the lab's running + pending jobs per partition (MAX_JOBS_PER_USER)
   var liveByPartition = {};
+  var runningGpusByPartition = {};
   Job.fetchObjStream({
     filter: Filter.eq('lab.id', labId).and().intersects('state', ['RUNNING', 'PENDING']),
-    include: 'partition',
+    include: 'partition, state, allocGpus',
   }).each(function (j) {
     if (j.partition == null) return;
     liveByPartition[j.partition.id] = (liveByPartition[j.partition.id] || 0) + 1;
+    if (j.state == 'RUNNING') runningGpusByPartition[j.partition.id] = (runningGpusByPartition[j.partition.id] || 0) + num(j.allocGpus, 0);
   });
 
   var deadlineMs = ms(req.deadline);
@@ -204,6 +198,7 @@ function loadContext(id) {
     allocations: allocations,
     policies: policies,
     liveByPartition: liveByPartition,
+    runningGpusByPartition: runningGpusByPartition,
     deadlineMs: deadlineMs,
     deadlineLabel: deadlineLabel,
     labUtil: labUtil,
@@ -224,7 +219,7 @@ function labShareOnCluster(ctx, clusterId) {
     projection: 'lab.id, sum(gpuHours)',
     group: 'lab.id',
     filter: Filter.eq('cluster.id', clusterId),
-    limit: -1,
+    limit: 500,
   });
   var total = 0;
   var mine = 0;
@@ -407,14 +402,68 @@ function policyApplies(pol, cand) {
   return false;
 }
 
+var EXPORT_RE = /\b(ITAR|EAR|CUI|export[- ]control)/i;
+var REGULATED_RE = /(human[- ]subjects|HIPAA|PHI\b|clinical|patient|data[- ]use agreement|\bDUA\b|\bIRB\b|regulated|sensitive)/i;
+
+/**
+ * True when the run's own text matches `re`, or the lab context mentions the run's project in a sentence that
+ * matches it (for example "the sequence set for Project HELIX is export-controlled").
+ */
+function dataFlagged(ctx, re) {
+  var req = ctx.req;
+  var own = [req.name, req.description, req.project ? req.project.name : '', req.project ? req.project.description : ''].join(' ');
+  if (re.test(own)) return true;
+  if (req.project == null || !req.project.name) return false;
+  var words = String(req.project.name).split(/[\s:,-]+/).filter(function (w) {
+    return w.length >= 4;
+  });
+  return String(ctx.lab.contextDump || '')
+    .split(/[.!?\n]+/)
+    .some(function (sentence) {
+      return re.test(sentence) && words.some(function (w) {
+        return sentence.toLowerCase().indexOf(w.toLowerCase()) >= 0;
+      });
+    });
+}
+
+/** Cluster ids named in a policy's limitText ("gilbreth,gautschi"), or [] when it is not a cluster list. */
+function clusterList(ctx, text) {
+  var ids = csv(text).map(function (s) {
+    return s.toLowerCase();
+  });
+  return ids.length && ids.every(function (i) {
+    return ctx.clusters[i] != null;
+  }) ? ids : [];
+}
+
+/** Quiet window from text such as "Mon-Fri 09:00-17:00 ET gilbreth-a30" or "22-06". */
+function quietWindow(text) {
+  var t = String(text || '');
+  var m = t.match(/(\d{1,2})(?::(\d{2}))?\s*-\s*(\d{1,2})(?::(\d{2}))?/);
+  if (!m) return null;
+  var targets = (t.match(/[a-z][a-z0-9]*-[a-z0-9-]+/g) || []).filter(function (x) {
+    return !/^(mon|tue|wed|thu|fri|sat|sun)/i.test(x);
+  });
+  return { from: Number(m[1]), to: Number(m[3]), weekdaysOnly: /mon\s*-\s*fri|weekday/i.test(t), targets: targets };
+}
+
+function inQuietWindow(w, millis) {
+  var hour = easternHour(millis);
+  var day = new Date(millis - (hour > new Date(millis).getUTCHours() ? 24 * HOUR_MS : 0)).getUTCDay();
+  if (w.weekdaysOnly && (day === 0 || day === 6)) return false;
+  return w.from <= w.to ? hour >= w.from && hour < w.to : hour >= w.from || hour < w.to;
+}
+
 /** Evaluates one policy for one candidate: { ok: boolean, msg: string } (ok=true means compliant). */
 function evalPolicy(ctx, pol, c) {
   var req = ctx.req;
   var kind = String(pol.kind);
   var lv = pol.limitValue == null ? null : Number(pol.limitValue);
+  var text = String(pol.limitText || '');
   var where = (c.cluster.name || c.cluster.id) + ' / ' + (c.p.name || c.p.id);
   var wt = String(req.workloadType || '');
   var lim;
+  if (String(pol.severity) == 'INFO') return { ok: true, msg: pol.description || pol.title || 'Guidance.' };
   switch (kind) {
     case 'MAX_WALLTIME':
       lim = lv != null ? lv : num(c.p.maxWalltimeHours, 1e9);
@@ -429,6 +478,7 @@ function evalPolicy(ctx, pol, c) {
         : { ok: false, msg: c.gpus + ' GPUs exceeds the ' + lim + '-GPU per-job limit on ' + where + '.' };
     case 'MAX_NODES_PER_JOB':
       lim = lv != null ? lv : num(c.p.maxNodesPerJob, 1e9);
+      if (lim <= 0) return { ok: false, msg: where + ' accepts no jobs (node limit 0).' };
       return c.nodes <= lim
         ? { ok: true, msg: c.nodes + ' node(s) is within the ' + lim + '-node limit on ' + where + '.' }
         : { ok: false, msg: c.nodes + ' nodes exceeds the ' + lim + '-node per-job limit on ' + where + '.' };
@@ -440,16 +490,26 @@ function evalPolicy(ctx, pol, c) {
         : { ok: false, msg: 'The lab already has ' + live + ' running/pending job(s) on ' + where + '; adding ' + c.chained + ' exceeds the limit of ' + lim + '.' };
     case 'ALLOWED_GPU_TYPES':
       if (!c.isGpu) return { ok: true, msg: 'CPU-only option.' };
-      var allowed = csv(pol.limitText);
+      var allowed = csv(text);
       return !allowed.length || allowed.indexOf(String(c.gpuType.id)) >= 0
         ? { ok: true, msg: c.gpuType.id + ' is an allowed GPU type.' }
-        : { ok: false, msg: c.gpuType.id + ' is not allowed (allowed: ' + allowed.join(', ') + ').' };
+        : { ok: false, msg: c.gpuType.id + ' is not on the allowed list (' + allowed.join(', ') + ').' };
     case 'BUDGET_REMAINING':
-      return budgetCheck(ctx, c, lv);
+      return budgetCheck(ctx, c, pol);
     case 'DEADLINE_FEASIBLE':
       return deadlineCheck(ctx, c);
     case 'FAIRSHARE_CAP':
-      if (!c.isGpu) return { ok: true, msg: 'Fair share is tracked on GPU usage only.' };
+      if (!c.isGpu) return { ok: true, msg: 'Tracked on GPU usage only.' };
+      if (/purchas/i.test(text + ' ' + pol.title)) {
+        // Gautschi ai normal QOS since 2026-11-02: concurrent GPUs <= max(2, 2 x purchased GPUs)
+        var alloc = ctx.allocations[c.cluster.id];
+        var purchased = alloc && /gpu/i.test(String(alloc.unitName)) ? Math.round(alloc.totalUnits / 8760) : 0;
+        var capGpus = Math.max(lv != null ? lv : 2, 2 * purchased);
+        var inUse = ctx.runningGpusByPartition[c.p.id] || 0;
+        return inUse + c.gpus <= capGpus
+          ? { ok: true, msg: inUse + ' running + ' + c.gpus + ' requested GPUs is within the concurrent cap of ' + capGpus + ' (max(2, 2 x ' + purchased + ' purchased)).' }
+          : { ok: false, msg: 'The lab already runs ' + inUse + ' GPUs on ' + where + '; ' + c.gpus + ' more exceeds the concurrent cap of ' + capGpus + ' = max(2, 2 x ' + purchased + ' purchased GPUs). Use preemptible (0.25x) or wait.' };
+      }
       var share = labShareOnCluster(ctx, c.cluster.id);
       var target = num(ctx.lab.fairShareTarget, 0);
       var cap = target * (lv != null ? lv : 1.5);
@@ -458,50 +518,97 @@ function evalPolicy(ctx, pol, c) {
         ? { ok: true, msg: 'Lab uses ' + round(share * 100, 1) + '% of ' + c.cluster.name + ' GPU-hours (cap ' + round(cap * 100, 1) + '% = ' + round(lv != null ? lv : 1.5, 2) + ' x ' + round(target * 100, 1) + '% target).' }
         : { ok: false, msg: 'Lab already uses ' + round(share * 100, 1) + '% of ' + c.cluster.name + ' GPU-hours, above its fair-share cap of ' + round(cap * 100, 1) + '%. Expect lower priority, or use another cluster.' };
     case 'PREEMPTIBLE_ONLY':
-      var kinds = csv(pol.limitText).map(function (s) {
+      if (pol.scope == 'PARTITION') {
+        // a rule on a preemptible partition: jobs there must checkpoint (10-minute grace signal)
+        return CHECKPOINTABLE.indexOf(wt) >= 0
+          ? { ok: true, msg: wt + ' runs checkpoint; the plan adds --signal=B:USR1@600 --requeue for the 10-minute preemption notice.' }
+          : { ok: false, msg: wt + ' work usually cannot resume from a checkpoint; on ' + where + ' a preemption loses all progress.' };
+      }
+      if (/normal|never/i.test(text + ' ' + pol.title)) {
+        var prio = req.project ? num(req.project.priority, 2) : 2;
+        if (prio != 1) return { ok: true, msg: 'Applies only to priority-1 project runs.' };
+        return !c.p.preemptible
+          ? { ok: true, msg: where + ' uses normal QOS, as priority-1 runs require.' }
+          : { ok: false, msg: 'Priority-1 (final/thesis) runs must use normal QOS; ' + where + ' is preemptible.' };
+      }
+      var kinds = csv(text).map(function (s) {
         return s.toUpperCase();
+      }).filter(function (s) {
+        return /^[A-Z_]+$/.test(s);
       });
       if (kinds.length && kinds.indexOf(wt) < 0) return { ok: true, msg: 'Applies only to ' + kinds.join(', ') + ' work.' };
       return c.p.preemptible
         ? { ok: true, msg: where + ' is preemptible.' }
         : { ok: false, msg: where + ' is not preemptible; this rule requires standby/preemptible capacity.' };
     case 'DATA_RESIDENCY':
-      var ok = csv(pol.limitText);
-      var resident = ok.length ? ok.indexOf(String(c.cluster.id)) >= 0 : c.cluster.billing != 'THIRD_PARTY_HOURLY';
-      return resident
-        ? { ok: true, msg: 'Data stays on ' + c.cluster.name + ', an approved location.' }
-        : { ok: false, msg: 'Data may not leave approved clusters' + (ok.length ? ' (' + ok.join(', ') + ')' : ' (no third-party cloud)') + '; ' + c.cluster.name + ' is not one of them.' };
-    case 'EXPORT_CONTROL':
-      var flagged = pol.scope == 'LAB' || /\b(ITAR|EAR|CUI|export[- ]control)/i.test(String(ctx.lab.contextDump || '') + ' ' + String(ctx.lab.notes || '') + ' ' + String(req.description || ''));
-      if (!flagged) return { ok: true, msg: 'No export-controlled data declared for this lab or run.' };
+      var okList = clusterList(ctx, text);
+      if (okList.length) {
+        return okList.indexOf(String(c.cluster.id)) >= 0
+          ? { ok: true, msg: 'Data stays on ' + c.cluster.name + ', an approved location.' }
+          : { ok: false, msg: 'Lab data may only be processed on ' + okList.join(', ') + '; ' + c.cluster.name + ' is not approved.' };
+      }
+      if (!dataFlagged(ctx, REGULATED_RE)) return { ok: true, msg: 'No regulated or sensitive data declared for this run.' };
+      if (/NON_SENSITIVE/i.test(text)) return { ok: false, msg: 'This run uses sensitive data, and ' + c.cluster.name + ' is allowed only for non-sensitive data.' };
       return c.cluster.billing == 'IN_HOUSE_NODE_SHARE'
-        ? { ok: true, msg: c.cluster.name + ' is Purdue-operated, as export-controlled work requires.' }
-        : { ok: false, msg: 'Export-controlled (ITAR/EAR/CUI) work must stay on Purdue-operated clusters; ' + c.cluster.name + ' is ' + (c.cluster.operator || 'external') + '.' };
+        ? { ok: true, msg: 'Regulated data stays on Purdue-owned ' + c.cluster.name + '.' }
+        : { ok: false, msg: 'Regulated data (human subjects / DUA) must stay on Purdue-owned clusters; ' + c.cluster.name + ' is ' + (c.cluster.operator || 'external') + '.' };
+    case 'EXPORT_CONTROL':
+      if (!dataFlagged(ctx, EXPORT_RE)) return { ok: true, msg: 'No export-controlled data declared for this run.' };
+      var tcp = clusterList(ctx, text);
+      var permitted = tcp.length ? tcp.indexOf(String(c.cluster.id)) >= 0 : c.cluster.billing == 'IN_HOUSE_NODE_SHARE';
+      return permitted
+        ? { ok: true, msg: c.cluster.name + ' is covered by the Technology Control Plan.' }
+        : { ok: false, msg: 'Export-controlled (EAR/ITAR) data may only run on ' + (tcp.length ? tcp.join(', ') : 'Purdue-owned clusters in the Technology Control Plan') + '; never on ' + c.cluster.name + '.' };
     case 'MIN_GPU_UTIL':
       lim = lv != null ? lv : 30;
+      if (!c.isGpu) return { ok: true, msg: 'CPU-only option.' };
       if (ctx.labUtil == null) return { ok: true, msg: 'Not enough GPU history to judge utilization.' };
       return ctx.labUtil >= lim
         ? { ok: true, msg: 'Recent lab GPU utilization ' + round(ctx.labUtil, 0) + '% meets the ' + lim + '% minimum.' }
         : { ok: false, msg: 'Recent lab GPU jobs averaged only ' + round(ctx.labUtil, 0) + '% GPU utilization (minimum ' + lim + '%). Consider fewer or smaller GPUs and profiling the data loader.' };
     case 'QUIET_HOURS':
-      var hour = easternHour(ctx.now);
-      return !inHourRange(hour, pol.limitText)
-        ? { ok: true, msg: 'Submission time is outside the quiet hours (' + pol.limitText + ' Eastern).' }
-        : { ok: false, msg: 'It is ' + hour + ':00 Eastern, inside the quiet hours (' + pol.limitText + '); submit later or hold the job until then.' };
+      var w = quietWindow(text);
+      if (w == null) return { ok: true, msg: 'No quiet window configured.' };
+      if (w.targets.length && !w.targets.some(function (t) {
+        return String(c.p.id).indexOf(t) === 0 || String(c.cluster.id) == t;
+      })) return { ok: true, msg: 'Quiet hours apply only to ' + w.targets.join(', ') + '.' };
+      return !inQuietWindow(w, ctx.now)
+        ? { ok: true, msg: 'Outside the quiet window (' + text + ').' }
+        : { ok: false, msg: 'Inside the quiet window (' + text + '): ' + (pol.description || 'hold the job until the window ends.') };
     default:
       return { ok: true, msg: 'Not checkable automatically.' };
   }
 }
 
-function budgetCheck(ctx, c, shareLimit) {
+/** Budget rules: balance, per-run approval threshold (limitValue > 1), cap as a share of the total (0-1), expiry ("days"). */
+function budgetCheck(ctx, c, pol) {
   var alloc = ctx.allocations[c.cluster.id];
   if (alloc == null) return { ok: false, msg: 'The lab has no active allocation on ' + c.cluster.name + '.' };
-  var remaining = alloc.totalUnits - alloc.usedUnits;
-  var allowed = shareLimit != null && shareLimit > 0 && shareLimit <= 1 ? remaining * shareLimit : remaining;
+  var lv = pol && pol.limitValue != null ? Number(pol.limitValue) : null;
+  var text = pol ? String(pol.limitText || '') : '';
   var unit = alloc.unitName || c.cluster.unitName || 'units';
-  return c.costUnits <= allowed
+  var remaining = alloc.totalUnits - alloc.usedUnits;
+  if (lv != null && /day/i.test(text)) {
+    var daysLeft = alloc.endMs == null ? null : (alloc.endMs - ctx.now) / (24 * HOUR_MS);
+    return daysLeft == null || daysLeft > lv
+      ? { ok: true, msg: 'The ' + c.cluster.name + ' allocation runs ' + (daysLeft == null ? 'without an end date' : 'for ' + Math.round(daysLeft) + ' more days') + '.' }
+      : { ok: false, msg: 'The ' + c.cluster.name + ' allocation ends in ' + Math.max(0, Math.round(daysLeft)) + ' days (within ' + lv + '); outputs on project storage are purged after expiry.' };
+  }
+  if (lv != null && lv > 1) {
+    var gh = c.isGpu ? c.gpus * c.duration : c.costUnits;
+    return gh <= lv
+      ? { ok: true, msg: 'Estimated ' + round(gh, 1) + ' GPU-hours is under the ' + lv + ' GPU-hour approval threshold.' }
+      : { ok: false, msg: 'Estimated ' + round(gh, 1) + ' GPU-hours exceeds ' + lv + ' GPU-hours: ' + (pol.description || 'needs PI approval.') };
+  }
+  if (lv != null && lv > 0 && lv <= 1) {
+    var capUnits = alloc.totalUnits * lv;
+    return alloc.usedUnits + c.costUnits <= capUnits
+      ? { ok: true, msg: 'Used ' + round(alloc.usedUnits, 0) + ' + estimated ' + round(c.costUnits, 1) + ' ' + unit + ' stays under ' + round(lv * 100, 0) + '% of ' + round(alloc.totalUnits, 0) + '.' }
+      : { ok: false, msg: 'Used ' + round(alloc.usedUnits, 0) + ' + estimated ' + round(c.costUnits, 1) + ' ' + unit + ' passes ' + round(lv * 100, 0) + '% of the ' + round(alloc.totalUnits, 0) + ' ' + unit + ' on ' + c.cluster.name + '.' };
+  }
+  return c.costUnits <= remaining
     ? { ok: true, msg: 'Estimated ' + round(c.costUnits, 1) + ' ' + unit + ' fits the ' + round(remaining, 0) + ' ' + unit + ' remaining on ' + c.cluster.name + ' (' + round((c.costUnits / Math.max(remaining, 1e-9)) * 100, 1) + '%).' }
-    : { ok: false, msg: 'Estimated ' + round(c.costUnits, 1) + ' ' + unit + ' exceeds ' + (allowed < remaining ? 'the ' + round(shareLimit * 100, 0) + '% per-run share of ' : '') + 'the ' + round(remaining, 0) + ' ' + unit + ' remaining on ' + c.cluster.name + '.' };
+    : { ok: false, msg: 'Estimated ' + round(c.costUnits, 1) + ' ' + unit + ' exceeds the ' + round(Math.max(0, remaining), 0) + ' ' + unit + ' remaining on ' + c.cluster.name + '.' };
 }
 
 function deadlineCheck(ctx, c) {
@@ -542,6 +649,19 @@ function builtinChecks(ctx, c) {
       msg: (c.memFit ? 'Needs ~' : 'Needs ~') + round(ctx.memNeedGb, 0) + ' GB of GPU memory; ' + c.gpus + ' x ' + c.gpuType.id + ' provide ' + c.gpus * num(c.gpuType.memoryGb, 0) + ' GB' + (c.memFit ? '.' : ' — use more GPUs (FSDP/ZeRO) or a larger GPU.'),
     });
   }
+  var limitIssues = [];
+  if (c.walltime > num(c.p.maxWalltimeHours, 1e9) + 1e-9) limitIssues.push('walltime ' + fmtHours(c.walltime) + ' > ' + fmtHours(num(c.p.maxWalltimeHours, 0)) + ' max');
+  if (c.isGpu && c.gpus > num(c.p.maxGpusPerJob, 1e9)) limitIssues.push(c.gpus + ' GPUs > ' + c.p.maxGpusPerJob + ' per job');
+  if (c.nodes > num(c.p.maxNodesPerJob, 1e9)) limitIssues.push(c.nodes + ' nodes > ' + c.p.maxNodesPerJob + ' per job');
+  out.push({
+    kind: 'PARTITION_LIMITS',
+    title: 'Within published partition limits',
+    severity: 'BLOCK',
+    ok: !limitIssues.length,
+    msg: limitIssues.length
+      ? (c.p.name || c.p.id) + ': ' + limitIssues.join('; ') + '.'
+      : (c.p.name || c.p.id) + ' allows ' + fmtHours(num(c.p.maxWalltimeHours, 0)) + (c.isGpu ? ', ' + c.p.maxGpusPerJob + ' GPUs' : '') + ' and ' + c.p.maxNodesPerJob + ' node(s) per job.',
+  });
   var hasBudget = false;
   var hasDeadline = false;
   ctx.policies.forEach(function (pol) {
@@ -792,14 +912,16 @@ function sbatchScript(ctx, c, label) {
   return L.join('\n');
 }
 
-function rationale(ctx, c, label) {
+function rationale(ctx, c, label, best) {
   var parts = [];
   var hw = c.isGpu ? c.gpus + ' x ' + c.gpuType.id : c.nodes + ' CPU node(s)';
-  var why = {
-    Fastest: 'Earliest expected finish of all compliant options.',
-    Cheapest: 'Lowest cost of all compliant options.',
-    Balanced: 'Best trade-off of finish time, cost, deadline slack and risk.',
-  }[label];
+  var fastest = c.finishHours <= best.finish + 1e-9;
+  var cheapest = c.costUsd <= best.cost + 1e-9;
+  var why;
+  if (fastest && cheapest) why = 'Both the earliest finish and the lowest cost of all ' + best.n + ' compliant options.';
+  else if (label == 'Fastest') why = fastest ? 'Earliest expected finish of all ' + best.n + ' compliant options.' : 'Fastest alternative to the plans above.';
+  else if (label == 'Cheapest') why = cheapest ? 'Lowest cost of all ' + best.n + ' compliant options.' : 'Cheapest alternative to the plans above.';
+  else why = 'Best trade-off of finish time, cost, deadline slack and risk.';
   parts.push(why + ' Runs ' + hw + ' on ' + c.cluster.name + ' ' + (c.p.name || c.p.id) + ' (' + partitionQos(c.p) + ' QOS): predicted runtime ' + fmtHours(c.duration) +
     (c.chained > 1 ? ' as ' + c.chained + ' chained ' + fmtHours(c.walltime) + ' jobs with checkpoints' : '') + ', queue wait about ' + fmtHours(c.wait) + ' (' + waitBucket(c.wait) + ').');
   parts.push(ctx.workBasis);
@@ -897,7 +1019,7 @@ function recommendPlans() {
       estCostUsd: round(c.costUsd, 2),
       meetsDeadline: c.meetsDeadline,
       score: round(c.score, 1),
-      rationale: rationale(ctx, c, pk.label),
+      rationale: rationale(ctx, c, pk.label, { finish: minF, cost: minC, n: options.length }),
       sbatchScript: sbatchScript(ctx, c, pk.label),
       qos: partitionQos(c.p),
       account: chooseAccount(ctx, c.cluster, c.isGpu),

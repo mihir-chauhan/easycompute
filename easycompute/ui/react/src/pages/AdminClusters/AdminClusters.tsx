@@ -132,7 +132,7 @@ export default function AdminClusters() {
                       <span aria-hidden className={cn('inline-block size-2.5 rounded-full', CLUSTER_BG[c.id] ?? 'bg-[var(--ec-ink)]')} />
                       {c.name}
                     </p>
-                    <p className="mt-0.5 line-clamp-2 text-[13px] text-[var(--c3-style-basic-fg-secondary)]">{c.description ?? c.operator}</p>
+                    <p className="mt-0.5 line-clamp-2 min-h-10 text-[13px] text-[var(--c3-style-basic-fg-secondary)]">{c.description ?? c.operator}</p>
                   </div>
                   <StatusBadge kind="clusterStatus" value={c.status} />
                 </div>

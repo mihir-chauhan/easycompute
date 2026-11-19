@@ -90,7 +90,7 @@ function gpuTypeMap() {
 
 /** Grouped evaluate as { key: [measures...] }; null group keys are skipped (the platform omits them anyway). */
 function grouped(type, group, measures, filter) {
-  var spec = { projection: group + ', ' + measures.join(', '), group: group, limit: -1 };
+  var spec = { projection: group + ', ' + measures.join(', '), group: group, limit: 500 };
   if (filter) spec.filter = filter;
   var out = {};
   list(type.evaluate(spec).tuples).forEach(function (t) {
@@ -126,7 +126,7 @@ function predictDuration(workloadType, gpuTypeId, gpus, modelParamsB, labId) {
   var all = [];
   var same = [];
   var mine = [];
-  var filter = Filter.eq('workloadType', wt).and().eq('state', 'COMPLETED').and(cpu ? 'allocGpus == 0 && elapsedHours > 0' : 'allocGpus > 0 && elapsedHours > 0');
+  var filter = Filter.eq('workloadType', wt).and().eq('state', 'COMPLETED').and(cpu ? 'allocGpus == 0 && elapsedHours >= 0.25' : 'allocGpus > 0 && elapsedHours >= 0.25');
   Job.fetchObjStream({ filter: filter, include: 'elapsedHours, allocGpus, allocCpus, gpuType, lab' }).each(function (j) {
     var w;
     if (cpu) {
@@ -153,10 +153,11 @@ function predictDuration(workloadType, gpuTypeId, gpus, modelParamsB, labId) {
   var unit = cpu ? 'core-hours' : 'A100-equivalent GPU-hours';
   if (all.length >= 5) {
     basis = 'history';
-    var src = same.length >= 5 ? same : all;
+    // all GPU types, normalized to A100-equivalent hours (a same-GPU subset skews toward whatever ran there)
+    var src = all;
     p50 = quantile(src, 0.5);
     p90 = quantile(src, 0.9);
-    explanation = 'Median of ' + src.length + ' completed ' + wt + ' jobs' + (src === same ? ' on ' + gpuTypeId : '') + ': ' + round(p50, 1) + ' ' + unit + ' per job (p90 ' + round(p90, 1) + ').';
+    explanation = 'Median of ' + src.length + ' completed ' + wt + ' jobs' + '' + ': ' + round(p50, 1) + ' ' + unit + ' per job (p90 ' + round(p90, 1) + ').';
     if (mine.length >= 5) {
       var m50 = quantile(mine, 0.5);
       var m90 = quantile(mine, 0.9);

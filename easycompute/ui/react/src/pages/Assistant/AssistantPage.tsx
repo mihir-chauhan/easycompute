@@ -15,7 +15,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 
 import LabKnowledge from './LabKnowledge';
-import ProposalCard from './ProposalCard';
+import ProposalCard, { SOFT } from './ProposalCard';
 import ToolChips from './ToolChips';
 import type { AdvisorReply, Proposal, ProposalDecision, ToolCall } from './types';
 
@@ -237,7 +237,7 @@ const AssistantPage: React.FC = () => {
             {messages.length === 0 && (
               <div className="flex flex-col items-start gap-3 py-2">
                 <div className="flex items-center gap-2">
-                  <span className="inline-flex size-9 items-center justify-center rounded-full bg-[var(--c3-style-basic-bg-secondary)] text-[var(--c3-style-basic-fg-accent)]">
+                  <span className={`grid size-8 place-items-center rounded-lg ${SOFT.accent}`}>
                     <Sparkles className="size-5" aria-hidden />
                   </span>
                   <div>
@@ -296,8 +296,8 @@ const AssistantPage: React.FC = () => {
               }
               return (
                 <div key={m.id} className="flex gap-3" data-testid="assistant-answer">
-                  <span className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--c3-style-basic-bg-secondary)] text-[var(--c3-style-basic-fg-accent)]">
-                    <Bot className="size-4" aria-hidden />
+                  <span className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-md ${SOFT.accent}`}>
+                    <Bot className="size-3.5" aria-hidden />
                   </span>
                   <div className="flex min-w-0 flex-1 flex-col gap-2">
                     <div className={MD_CLASS}>
@@ -358,16 +358,20 @@ const AssistantPage: React.FC = () => {
 
         <div className="flex min-w-0 flex-col gap-4">
           <LabKnowledge labId={labId} labName={lab?.name} />
-          <SectionCard title="Awaiting your confirmation" subtitle="Actions the advisor proposed for this lab">
+          <SectionCard
+            title="Needs your attention"
+            subtitle="Actions the advisor proposed. Nothing runs until you approve."
+            actions={pendingIds.length > 0 ? <ToneBadge tone="warn">{pendingIds.length} open</ToneBadge> : undefined}
+          >
             {pendingIds.length === 0 ? (
-              <p className="text-sm text-[var(--c3-style-basic-fg-secondary)]">Nothing pending. The advisor never acts without your confirmation.</p>
+              <p className="text-sm text-[var(--c3-style-basic-fg-secondary)]">All clear. Proposed actions show up here for your approval.</p>
             ) : (
-              <div className="flex flex-col gap-2">
+              <div className="-my-3 flex flex-col">
                 {pendingIds
                   .map((id) => proposals[id])
                   .filter((p): p is Proposal => Boolean(p))
                   .map((p) => (
-                    <ProposalCard key={p.id} proposal={p} compact busy={deciding === p.id} onDecide={(pp, a) => void decide(pp, a)} />
+                    <ProposalCard key={p.id} proposal={p} row busy={deciding === p.id} onDecide={(pp, a) => void decide(pp, a)} />
                   ))}
               </div>
             )}

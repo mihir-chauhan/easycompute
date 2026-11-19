@@ -51,7 +51,7 @@ const BILLING_FILL: Record<Billing, string> = {
 };
 
 const PRESSURE_TONE: Record<string, Tone> = { HIGH: 'bad', MEDIUM: 'warn', LOW: 'good' };
-const FAIR_TONE: Record<string, Tone> = { OVER: 'warn', UNDER: 'neutral', BALANCED: 'good' };
+const FAIR_TONE: Record<string, Tone> = { OVER: 'warn', UNDER: 'info', BALANCED: 'good' };
 
 const weekLabel = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 
@@ -250,7 +250,7 @@ export default function AdminOverview() {
             { label: 'Target', swatchClass: 'bg-[var(--ec-ink-soft)]' },
             { label: 'Balanced', swatchClass: 'bg-[var(--ec-good)]' },
             { label: 'Over target (>125%)', swatchClass: 'bg-[var(--ec-warn)]' },
-            { label: 'Under target (<75%)', swatchClass: 'bg-[var(--ec-neutral)]' },
+            { label: 'Under target (<75%)', swatchClass: 'bg-[var(--ec-cluster-anvil)]' },
           ]}
           onItemClick={() => navigate('/admin/labs')}
         />
@@ -320,7 +320,7 @@ export default function AdminOverview() {
             { label: 'Forecast', swatchClass: '', dashed: true },
           ]}
         />
-        <SectionCard title="Where more resources are needed" subtitle="Partitions under pressure, from queue depth, wait and forecast">
+        <SectionCard title="Where more resources are needed" subtitle="Partitions under the most pressure">
           {loading && !data ? (
             <TableSkeleton rows={4} />
           ) : (data?.demand.partitions ?? []).length === 0 ? (

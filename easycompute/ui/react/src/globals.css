@@ -274,108 +274,270 @@
 }
 
 /* ------------------------------------------------------------------------------------------------------------
- * EasyCompute design system (owner: ui-admin; docs src/components/app/README.md). Unlayered so it beats the
- * vendored SCSS. Card = white, 1px neutral border, 8px radius, hairline shadow, 20px padding.
+ * EasyCompute design system (owner: ui-admin; docs src/components/app/README.md). "Gantry" visual language, dark
+ * only. Unlayered on purpose so these rules beat the vendored components' SCSS.
  * ---------------------------------------------------------------------------------------------------------- */
 :root {
   font-feature-settings: 'cv11', 'ss01';
+  -webkit-font-smoothing: antialiased;
 }
+:root body {
+  background: var(--ec-bg);
+  color: var(--ec-fg);
+  font-size: 14px;
+  line-height: 20px;
+}
+:root :focus-visible {
+  outline: 2px solid var(--ec-accent-hi);
+  outline-offset: 2px;
+}
+.ec-mono {
+  font-family: var(--ec-mono);
+  font-size: 12.5px;
+}
+
+/* Cards: transparent with a thin border; header row 18x20 with divider; 16px/500 white title. */
 :root .c3-container {
-  border-radius: var(--ec-card-radius);
-  box-shadow: var(--ec-card-shadow);
+  background: transparent;
+  border: 1px solid var(--ec-line);
+  border-radius: 8px;
+  box-shadow: none;
 }
 :root .c3-container--size-md:not(.c3-container--full-width) {
+  padding: 0;
+  gap: 0;
+}
+:root .c3-container--size-md:not(.c3-container--full-width) > .c3-container__header {
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--ec-line);
+}
+:root .c3-container--size-md:not(.c3-container--full-width) > .c3-container__body {
   padding: 20px;
-  gap: 16px;
+}
+:root .c3-container--size-md:not(.c3-container--full-width) > .c3-container__footer {
+  padding: 14px 20px;
+  border-top: 1px solid var(--ec-line);
 }
 :root .c3-container--full-width.c3-container--size-md .c3-container__header {
-  padding: 14px 20px;
+  padding: 18px 20px;
+  border-bottom-color: var(--ec-line);
 }
 :root .c3-container--full-width.c3-container--size-md .c3-container__footer {
   padding: 10px 20px;
+  border-top-color: var(--ec-line);
 }
-
-/* KPI tiles (MetricCard): label 13px muted, value 28px semibold tabular, caption 12px muted. */
-:root [data-slot='metric-card'] {
-  border-radius: var(--ec-card-radius);
-  box-shadow: var(--ec-card-shadow);
-  padding: 16px 20px;
-  gap: 6px;
-  background: var(--c3-style-basic-bg-primary);
+:root .c3-container__header .header--size-md .header__title {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--ec-fg-hi);
 }
-:root [data-slot='metric-card-label'] {
+:root .c3-container__header .header--size-md .header__subtitle {
   font-size: 13px;
   line-height: 18px;
+  color: var(--ec-fg-2);
+  white-space: normal;
+}
+
+/* Tables: 12px muted header, 12x16 cells, row hover #1d1d1d, no sort clutter until hover. */
+:root .c3-data-grid {
+  background: transparent;
+  font-variant-numeric: tabular-nums;
+}
+:root .c3-data-grid__head {
+  padding: 10px 16px;
+  font-size: 12px;
   font-weight: 500;
-  color: var(--c3-style-basic-fg-secondary);
+  color: var(--ec-fg-2);
+  border-bottom-color: var(--ec-line);
+  white-space: nowrap;
+}
+:root .c3-data-grid__head-label {
+  font-size: 12px;
+  font-weight: 500;
+}
+:root .c3-data-grid__head-action {
+  padding: 2px;
+  opacity: 0.35;
+}
+:root .c3-data-grid__head:hover .c3-data-grid__head-action,
+:root .c3-data-grid__head-action[data-active] {
+  opacity: 1;
+}
+:root .c3-data-grid__head-action svg {
+  width: 12px;
+  height: 12px;
+}
+:root .c3-data-grid__cell {
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--ec-fg);
+}
+:root .c3-data-grid__head:first-child,
+:root .c3-data-grid__cell:first-child {
+  padding-left: 16px;
+}
+:root .c3-data-grid__body .c3-data-grid__row {
+  border-bottom-color: var(--ec-line);
+}
+:root .c3-data-grid__body .c3-data-grid__row:last-child {
+  border-bottom: 0;
+}
+:root .c3-data-grid__body .c3-data-grid__row:hover {
+  background: #1d1d1d;
+}
+:root .c3-data-grid__row[data-clickable='true'] {
+  cursor: pointer;
+}
+:root .c3-data-grid__cell[data-align='right'] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* KPI tiles (vendored MetricCard): #232323 tile, 12px label, 22px value. */
+:root [data-slot='metric-card'] {
+  background: var(--ec-card);
+  border: 0;
+  border-radius: 8px;
+  box-shadow: none;
+  padding: 14px 16px;
+  gap: 6px;
+}
+:root [data-slot='metric-card'][role='button']:hover {
+  background: var(--ec-card-2);
+}
+:root [data-slot='metric-card-label'] {
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 400;
+  color: var(--ec-fg);
 }
 :root [data-slot='metric-card-value'] {
-  font-size: 28px;
-  line-height: 34px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 400;
+  color: var(--ec-fg-hi);
   font-variant-numeric: tabular-nums;
 }
 :root [data-slot='metric-card-caption'] {
   font-size: 12px;
   line-height: 16px;
-  color: var(--c3-style-basic-fg-secondary);
+  color: var(--ec-fg-2);
 }
 
-/* Page header band blends into the page (no white band); title block aligned with the content column. */
-:root .page-header {
+/* Buttons: 34px, 6px radius; outline = #464646 border; primary = green with dark text. */
+:root [data-slot='button'] {
+  border-radius: 6px;
+  font-weight: 500;
+  font-size: 14px;
+}
+:root [data-slot='button'][data-size='md'] {
+  height: 34px;
+}
+:root [data-slot='button'][data-size='sm'] {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+:root [data-slot='button'][data-variant='outline'] {
   background: transparent;
-  border-bottom: 0;
 }
-:root .page-header .header--size-xl .header__title {
-  letter-spacing: -0.01em;
+:root [data-slot='button'][data-variant='outline'][data-appearance='secondary'] {
+  border-color: var(--ec-line-2);
+  color: var(--ec-fg);
+}
+:root [data-slot='button'][data-variant='outline']:hover,
+:root [data-slot='button'][data-variant='ghost']:hover {
+  background: var(--ec-card);
+}
+:root [data-slot='button'][data-variant='solid'][data-appearance='accent'] {
+  background: var(--ec-accent-hi);
+  color: #132010;
+}
+:root [data-slot='button'][data-variant='solid'][data-appearance='accent']:hover {
+  background: #95f37e;
+}
+:root [data-slot='button'][data-variant='outline'][data-appearance='danger'] {
+  border-color: #5a302c;
+  color: var(--ec-crit-fg);
 }
 
-/* Table rows: hover tint, clickable rows get a pointer. */
-:root .c3-data-grid__row[data-clickable='true'] {
-  cursor: pointer;
-}
-:root .c3-data-grid__body .c3-data-grid__row:hover {
-  background: var(--c3-style-basic-bg-hover);
-}
-
-/* Side nav active item: gold rule on the left edge, tinted background. */
-:root .side-nav-panel-v2-item[data-selected='true'] {
-  box-shadow: inset 2px 0 0 var(--ec-accent);
+/* Inputs */
+:root .c3-input-frame,
+:root [data-slot='input-frame'] {
+  background: transparent;
+  border-color: var(--ec-line-2);
+  border-radius: 8px;
 }
 
-/* App shell top bar: Purdue black with a gold wordmark in both themes. */
-:root .ec-shellbar[data-slot='top-nav-bar'] {
-  background: var(--ec-shell-bar);
-  border-bottom-color: var(--ec-shell-bar);
-  color: var(--ec-shell-bar-fg);
-}
-:root .ec-shellbar [data-slot='top-nav-bar-logo'] {
-  color: var(--ec-shell-gold);
-}
-:root .ec-shellbar .text-c3-bold-heading-h6 {
-  color: var(--ec-shell-bar-fg);
+/* Popovers / menus / modals on the dark surface. */
+:root [data-slot='popover-content'],
+:root [data-slot='dropdown-menu-content'] {
+  background: var(--ec-card);
+  border: 1px solid var(--ec-line-2);
+  color: var(--ec-fg);
 }
 
 /* Skeleton shimmer for loading states. */
 @keyframes ec-skeleton {
   0% {
-    opacity: 0.55;
+    opacity: 0.5;
   }
   50% {
     opacity: 1;
   }
   100% {
-    opacity: 0.55;
+    opacity: 0.5;
   }
 }
 .ec-skeleton {
-  background: var(--c3-style-basic-bg-secondary);
+  background: var(--ec-card-2);
   border-radius: 4px;
   animation: ec-skeleton 1.4s ease-in-out infinite;
 }
+.ec-pulse {
+  box-shadow: 0 0 0 0 rgb(127 238 100 / 60%);
+  animation: ec-pulse 1.8s infinite;
+}
+@keyframes ec-pulse {
+  70% {
+    box-shadow: 0 0 0 6px rgb(127 238 100 / 0%);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(127 238 100 / 0%);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
-  .ec-skeleton {
+  .ec-skeleton,
+  .ec-pulse {
     animation: none;
   }
+}
+
+/* Job-script / code blocks (see components/app/CodeBlock). */
+.ec-code {
+  background: var(--ec-bar);
+  border: 1px solid var(--ec-line);
+  border-radius: 8px;
+  padding: 14px 16px;
+  font: 12.5px/20px var(--ec-mono);
+  color: var(--ec-fg);
+  overflow-x: auto;
+  white-space: pre;
+  margin: 0;
+}
+.ec-code .tok-c {
+  color: var(--ec-fg-3);
+}
+.ec-code .tok-k {
+  color: var(--ec-pink);
+}
+.ec-code .tok-s {
+  color: var(--ec-accent-text);
+}
+.ec-code .tok-n {
+  color: var(--ec-blue);
+}
+.ec-code .tok-p {
+  color: var(--ec-accent-hi);
 }

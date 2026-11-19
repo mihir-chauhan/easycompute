@@ -1,0 +1,14 @@
+{
+  "id": "EasyComputeMonitorTick",
+  "name": "EasyComputeMonitorTick",
+  "description": "Every 5 minutes advances live runs by one simulated 15-minute step, evaluates job health and applies lab autopilot policies (RunMonitor.tick). Ships inactive; resume it with CronJob.forId('EasyComputeMonitorTick').resume().",
+  "action": {
+    "typeName": "RunMonitor",
+    "actionName": "tick"
+  },
+  "concurrent": false,
+  "inactive": true,
+  "scheduleDef": {
+    "cronExpression": "0 0/5 * * * ?"
+  }
+}

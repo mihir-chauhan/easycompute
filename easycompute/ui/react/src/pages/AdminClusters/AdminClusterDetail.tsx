@@ -98,9 +98,17 @@ export default function AdminClusterDetail() {
       hideBelow: 'md',
     },
     { key: 'wall', header: 'Max walltime', align: 'right', render: (p) => hours(p.maxWalltimeHours), sortValue: (p) => p.maxWalltimeHours },
-    { key: 'gpusJob', header: 'GPUs / job', align: 'right', render: (p) => num(p.maxGpusPerJob), sortValue: (p) => p.maxGpusPerJob, hideBelow: 'md' },
-    { key: 'nodesJob', header: 'Nodes / job', align: 'right', render: (p) => num(p.maxNodesPerJob), sortValue: (p) => p.maxNodesPerJob, hideBelow: 'lg' },
-    { key: 'jobsUser', header: 'Jobs / user', align: 'right', render: (p) => num(p.maxJobsPerUser), sortValue: (p) => p.maxJobsPerUser, hideBelow: 'lg' },
+    {
+      key: 'limits',
+      header: 'Per-job limits',
+      render: (p) => (
+        <span className="text-[13px] tabular-nums text-[var(--c3-style-basic-fg-secondary)]">
+          <span className="text-[var(--c3-style-basic-fg-primary)]">{num(p.maxGpusPerJob)}</span> GPUs · {num(p.maxNodesPerJob)} nodes · {num(p.maxJobsPerUser)} jobs/user
+        </span>
+      ),
+      sortValue: (p) => p.maxGpusPerJob,
+      hideBelow: 'lg',
+    },
     {
       key: 'charge',
       header: 'Charge',
@@ -126,7 +134,7 @@ export default function AdminClusterDetail() {
       key: 'util',
       header: 'Utilization',
       render: (p) => (
-        <span className="flex w-32 items-center gap-2">
+        <span className="flex w-28 items-center gap-2">
           <ProgressBar value={(p.utilizationPct ?? 0) / 100} tone={utilTone(p.utilizationPct)} className="flex-1" />
           <span className="w-9 text-right tabular-nums">{pct(p.utilizationPct)}</span>
         </span>
