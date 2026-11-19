@@ -1,0 +1,37 @@
+/**
+ * One call of an EasyCompute Advisor tool, recorded so the Assistant page can show which tools an answer used. The
+ * inherited `name` holds the tool name.
+ */
+@db(index=['calledAt'])
+entity type Advisor.ToolCall {
+
+  /**
+   * Lab the call was about, when known.
+   */
+  labId: string
+
+  /**
+   * Arguments as JSON text.
+   */
+  args: string
+
+  /**
+   * One-line result summary.
+   */
+  summary: string
+
+  /**
+   * False when the tool returned an error.
+   */
+  ok: boolean
+
+  /**
+   * Duration in milliseconds.
+   */
+  millis: int
+
+  /**
+   * When the tool was called.
+   */
+  calledAt: datetime
+}

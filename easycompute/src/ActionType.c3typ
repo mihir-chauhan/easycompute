@@ -1,0 +1,37 @@
+/**
+ * An action on a run, taken by a user, an admin or autopilot.
+ */
+enum type ActionType {
+  /**
+   * Submit a planned run (sbatch).
+   */
+  SUBMIT = 'SUBMIT'
+  /**
+   * Cancel the job (scancel).
+   */
+  CANCEL = 'CANCEL'
+  /**
+   * Extend the time limit (admin-only in Slurm; users can only request it).
+   */
+  EXTEND_WALLTIME = 'EXTEND_WALLTIME'
+  /**
+   * Requeue on a preemptible or standby partition, resuming from the last checkpoint.
+   */
+  REQUEUE_STANDBY = 'REQUEUE_STANDBY'
+  /**
+   * Signal the job to write a checkpoint (scancel --signal=USR1).
+   */
+  CHECKPOINT_NOW = 'CHECKPOINT_NOW'
+  /**
+   * Resubmit with fewer GPUs.
+   */
+  SCALE_DOWN = 'SCALE_DOWN'
+  /**
+   * Email the lab PI.
+   */
+  NOTIFY_PI = 'NOTIFY_PI'
+  /**
+   * Hold a pending job (scontrol hold).
+   */
+  HOLD = 'HOLD'
+}

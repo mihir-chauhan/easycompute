@@ -1,0 +1,26 @@
+/**
+ * Cached result of {@link Advisor#extractConstraints} for a lab. The id is the lab id; the row is reused while the
+ * context text hash is unchanged, so the LLM is called once per edit of the context dump.
+ */
+entity type Advisor.ConstraintSet {
+
+  /**
+   * Hash of the context text that was parsed.
+   */
+  textHash: string
+
+  /**
+   * The structured constraints as JSON text.
+   */
+  result: string
+
+  /**
+   * `llm` or `rules`.
+   */
+  source: string
+
+  /**
+   * When the text was parsed.
+   */
+  parsedAt: datetime
+}

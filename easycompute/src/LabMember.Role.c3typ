@@ -1,0 +1,21 @@
+/**
+ * Role of a {@link LabMember} in the lab.
+ */
+enum type LabMember.Role {
+  /**
+   * Principal investigator; owns the allocations and approves spending.
+   */
+  PI = 'PI'
+  /**
+   * Postdoctoral researcher.
+   */
+  POSTDOC = 'POSTDOC'
+  /**
+   * Graduate or undergraduate student.
+   */
+  STUDENT = 'STUDENT'
+  /**
+   * Research staff or lab manager.
+   */
+  STAFF = 'STAFF'
+}

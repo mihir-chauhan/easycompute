@@ -1,0 +1,46 @@
+/**
+ * What the autopilot may do on a lab's running jobs during {@link RunMonitor#tick}. Id equals the lab id.
+ */
+@db(index=['lab'])
+entity type AutopilotPolicy {
+
+  /**
+   * Lab the settings belong to.
+   */
+  lab: !Lab
+
+  /**
+   * Autopilot acts only when enabled.
+   */
+  enabled: boolean
+
+  /**
+   * Cancel a job whose GPUs have been idle this many minutes.
+   */
+  cancelIdleAfterMin: int
+
+  /**
+   * Signal a checkpoint this many minutes before the time limit (0 disables auto-checkpoint).
+   */
+  checkpointBeforeTimeoutMin: int
+
+  /**
+   * Request a walltime extension when a job is about to time out.
+   */
+  autoExtendWalltime: boolean
+
+  /**
+   * Requeue low-utilization jobs of priority-3 projects to standby.
+   */
+  requeueToStandbyOnLowPriority: boolean
+
+  /**
+   * Email the PI when a critical alert opens.
+   */
+  notifyPiOnCritical: boolean
+
+  /**
+   * Allocation share (0-1) at which BUDGET_BURN alerts start.
+   */
+  budgetAlertPct: double
+}

@@ -1,0 +1,61 @@
+/**
+ * One resource-usage sample of a {@link Job} (GPU, CPU, memory, I/O, power, checkpoint age).
+ */
+@db(index=['job, ts'])
+entity type JobMetric {
+
+  /**
+   * Job the sample belongs to.
+   */
+  job: !Job
+
+  /**
+   * Sample time.
+   */
+  ts: datetime
+
+  /**
+   * GPU utilization (0-100), mean over the job's GPUs.
+   */
+  gpuUtilPct: double
+
+  /**
+   * GPU memory used (0-100).
+   */
+  gpuMemPct: double
+
+  /**
+   * CPU utilization of allocated cores (0-100).
+   */
+  cpuUtilPct: double
+
+  /**
+   * Host memory used vs requested (0-100).
+   */
+  memPct: double
+
+  /**
+   * File-system read throughput in MB/s.
+   */
+  ioReadMBps: double
+
+  /**
+   * File-system write throughput in MB/s.
+   */
+  ioWriteMBps: double
+
+  /**
+   * GPU board power in watts (sum over GPUs).
+   */
+  powerW: double
+
+  /**
+   * Minutes since the last checkpoint.
+   */
+  checkpointAgeMin: double
+
+  /**
+   * Training loss reported by the application, when available.
+   */
+  trainingLoss: double
+}

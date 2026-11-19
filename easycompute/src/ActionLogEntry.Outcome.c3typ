@@ -1,0 +1,17 @@
+/**
+ * Result of an action.
+ */
+enum type ActionLogEntry.Outcome {
+  /**
+   * Applied.
+   */
+  DONE = 'DONE'
+  /**
+   * Could not be applied; the detail says why.
+   */
+  FAILED = 'FAILED'
+  /**
+   * Recorded as a request awaiting PI or admin approval.
+   */
+  PENDING_APPROVAL = 'PENDING_APPROVAL'
+}

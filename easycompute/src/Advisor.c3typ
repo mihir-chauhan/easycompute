@@ -1,0 +1,246 @@
+/**
+ * Server-side entry point and tools of the "EasyCompute Advisor" AI agent: a {@link GenaiCore.Agent.LangChain} agent
+ * (Agent Gallery, category "Research Computing") that answers questions about a lab, its allocations, deadlines,
+ * policies, run plans and live jobs with the read-only tool methods below (wrapped as {@link GenaiCore.Tool.C3Method}).
+ * It runs inside this app as the calling user, so it needs no app connection. The agent cannot change a run or a job:
+ * {@link Advisor#proposeRunSubmission} and {@link Advisor#proposeJobAction} only record an {@link Advisor.Proposal},
+ * which the user applies with {@link Advisor#confirmProposal} from the Assistant page.
+ */
+type Advisor {
+
+  /**
+   * Creates the tools of the agent and the agent, or a new agent version when its prompt, model or tools changed.
+   * Idempotent: when the latest version already matches, nothing is written.
+   *
+   * @param publish If true, also publishes the agent into this package (dev mode only) so other environments get it.
+   * @return the id of the latest {@link GenaiCore.Agent} version named "EasyCompute Advisor".
+   */
+  ensureAgent: function(publish: boolean): !string py
+
+  /**
+   * Asks the advisor a question about a lab and waits for the answer. Falls back to the deterministic offline advisor
+   * when the LLM agent is unavailable, so the page always gets an answer.
+   *
+   * @param question  The question of the user.
+   * @param sessionId Conversation id from a previous {@link Advisor.Reply#sessionId}; empty starts a new conversation.
+   * @param labId     The lab the user is looking at (header lab switcher); given to the agent as context.
+   * @param mode      `agent` (default) or `offline` to skip the LLM and use the deterministic advisor.
+   * @return the answer, the tools it used and any proposals awaiting confirmation.
+   */
+  ask: function(question: !string, sessionId: string, labId: string, mode: string): !Advisor.Reply py
+
+  /**
+   * Parses the free-text context dump of a lab into structured constraints with the platform LLM client, merged onto
+   * the rules-based parse. Without a working LLM it returns the rules-based parse (source `rules`). Results are cached
+   * per lab and text in {@link Advisor.ConstraintSet}.
+   *
+   * Result: `{source, budgets: [{kind, amount, period, scope, evidence}], deadlines: [{label, date, daysAway,
+   * evidence}], preferences: {clusters, gpuTypes, avoid, preemptibleOk, maxWalltimeHours, quietHours, notes},
+   * dataRestrictions: [{kind, description, evidence}], memberCaps: [{who, pct, evidence}], approvals: [{threshold,
+   * unit, evidence}], summary, warnings, labId, textHash, cached, llmError}`.
+   *
+   * @param labId The lab; its contextDump is parsed when text is empty.
+   * @param text  Context text to parse instead of the stored contextDump (for a preview before saving).
+   * @return the structured constraints as JSON.
+   */
+  extractConstraints: function(labId: string, text: string): json py
+
+  /**
+   * Rules-based constraint parser behind {@link Advisor#extractConstraints}; also its fallback when no LLM answers.
+   *
+   * @param labId The lab; its contextDump is parsed when text is empty.
+   * @param text  Context text to parse instead of the stored contextDump.
+   * @return the structured constraints as JSON text (same shape as extractConstraints plus inputText).
+   */
+  parseConstraintsRules: function(labId: string, text: string): !string js-server
+
+  /**
+   * Stores a parsed constraint result in the {@link Advisor.ConstraintSet} cache. Internal; called by extractConstraints.
+   *
+   * @param labId      The lab.
+   * @param hash       Hash of the parsed text.
+   * @param resultJson The result as JSON text.
+   * @param source     `llm` or `rules`.
+   * @return true.
+   */
+  saveConstraints: function(labId: !string, hash: !string, resultJson: !string, source: string): boolean js-server
+
+  /**
+   * Agent tool: everything known about one lab. Returns the lab profile, today, every allocation (total, used,
+   * remaining units and dollars, end date), every project with its deadline and days left, and the constraints parsed
+   * from the lab context dump (budgets, deadlines, cluster and GPU preferences, data restrictions). Call it first for
+   * any question about budget, deadlines or what the lab prefers.
+   *
+   * @param labId The lab id, e.g. as given in the conversation context.
+   * @return lab context as JSON text.
+   */
+  labContext: function(labId: !string): !string js-server
+
+  /**
+   * Agent tool: the dashboard numbers of one lab (spend, budget burn, efficiency, wasted GPU-hours, live jobs) from
+   * Insights.labSummary.
+   *
+   * @param labId The lab id.
+   * @return lab summary as JSON text.
+   */
+  labSummary: function(labId: !string): !string js-server
+
+  /**
+   * Agent tool: active university, cluster, partition and lab policies (rules) that apply to a lab, optionally only
+   * for one cluster or one rule kind.
+   *
+   * @param labId     The lab id; lab-scoped rules of other labs are left out.
+   * @param clusterId Optional cluster: anvil, gilbreth, gautschi, negishi, bell or aws-p4d.
+   * @param kind      Optional rule kind: MAX_WALLTIME, MAX_GPUS_PER_JOB, MAX_NODES_PER_JOB, MAX_JOBS_PER_USER,
+   *                  ALLOWED_GPU_TYPES, BUDGET_REMAINING, DEADLINE_FEASIBLE, FAIRSHARE_CAP, PREEMPTIBLE_ONLY,
+   *                  DATA_RESIDENCY, EXPORT_CONTROL, MIN_GPU_UTIL or QUIET_HOURS.
+   * @return matching policies as JSON text.
+   */
+  listPolicies: function(labId: string, clusterId: string, kind: string): !string js-server
+
+  /**
+   * Agent tool: predicted run duration from past jobs (Insights.predictDuration).
+   *
+   * @param workloadType TRAINING, FINETUNE, INFERENCE, SIMULATION, DATA_PROCESSING or INTERACTIVE.
+   * @param gpuTypeId    GPU type id, e.g. A100-40GB or H100-80GB.
+   * @param gpus         Number of GPUs.
+   * @param modelParamsB Model size in billions of parameters (0 when not a model).
+   * @return the prediction as JSON text.
+   */
+  predictDuration: function(workloadType: string, gpuTypeId: string, gpus: int, modelParamsB: double): !string js-server
+
+  // c3-analysis-disable c3-excessive-method-params -- flat optional filters are easier for an LLM tool caller than a spec object.
+  /**
+   * Agent tool: what-if check of a planned run. Creates a DRAFT run request (never submitted), runs the rule checks
+   * against university, cluster, partition and lab rules plus budget and deadline, and returns the top 3 launch plans
+   * (Fastest, Cheapest, Balanced) with cluster, partition, GPUs, walltime, estimated wait, duration, finish time, cost
+   * and whether each meets the deadline, plus the remaining allocations. Use it for every "can we finish X by Y",
+   * "where should we run", "how much will it cost" question. Every argument except labId is optional.
+   *
+   * @param labId         The lab id.
+   * @param name          Short name of the run.
+   * @param description   What the run does, in the words of the user.
+   * @param workloadType  TRAINING, FINETUNE, INFERENCE, SIMULATION, DATA_PROCESSING or INTERACTIVE.
+   * @param project       Project id or a word of its name or deadline label, e.g. NeurIPS; supplies the deadline.
+   * @param gpuTypeId     Requested GPU type id, e.g. A100-40GB or H100-80GB.
+   * @param gpus          Requested number of GPUs.
+   * @param walltimeHours Requested walltime in hours.
+   * @param clusterId     Requested cluster: anvil, gilbreth, gautschi, negishi, bell or aws-p4d.
+   * @param modelParamsB  Model size in billions of parameters.
+   * @param datasetGb     Dataset size in GB.
+   * @param deadline      Deadline as YYYY-MM-DD or a weekday name such as Friday; defaults to the project deadline.
+   * @return rule check results, ranked plans and remaining budget as JSON text, including runRequestId and planId values.
+   */
+  evaluateRun: function(labId: !string, name: string, description: string, workloadType: string, project: string, gpuTypeId: string, gpus: int, walltimeHours: double, clusterId: string, modelParamsB: double, datasetGb: double, deadline: string): !string js-server
+  // c3-analysis-enable c3-excessive-method-params
+
+  /**
+   * Agent tool: the live (running or pending) jobs of a lab with their latest GPU utilization, GPU memory, checkpoint
+   * age, walltime left, cost and open alerts with the recommended action.
+   *
+   * @param labId The lab id; empty lists live jobs of every lab.
+   * @param state Optional job state filter: PENDING or RUNNING.
+   * @return live jobs as JSON text.
+   */
+  liveJobs: function(labId: string, state: string): !string js-server
+
+  /**
+   * Agent tool: health of one job. Re-evaluates the health rules, then returns the job, min / avg / max of its last 12
+   * metric samples (GPU util, GPU memory, CPU, RAM, checkpoint age, training loss), open alerts, recent actions and the
+   * suggested actions.
+   *
+   * @param jobId The job id as returned by liveJobs.
+   * @return job health as JSON text.
+   */
+  jobHealth: function(jobId: !string): !string js-server
+
+  /**
+   * Agent tool: university-wide view from Insights.universityOverview: utilization and cost by cluster and billing
+   * type, fairness (share vs usage by lab), idle resources and where more resources are needed.
+   *
+   * @return the overview as JSON text.
+   */
+  universityOverview: function(): !string js-server
+
+  /**
+   * Agent tool: PROPOSES submitting a planned run with one of its plans. It does NOT submit: it stores an
+   * {@link Advisor.Proposal} that the user must confirm on the Assistant page. Call it only after evaluateRun and only
+   * when the user wants to go ahead or asks what to do.
+   *
+   * @param runRequestId The runRequestId returned by evaluateRun.
+   * @param planId       The planId of the chosen plan returned by evaluateRun.
+   * @param reason       Why this plan, in one sentence.
+   * @return the proposal and a reminder that it awaits the confirmation of the user.
+   */
+  proposeRunSubmission: function(runRequestId: !string, planId: !string, reason: string): !string js-server
+
+  /**
+   * Agent tool: PROPOSES an action on a live job. It does NOT change the job: it stores an {@link Advisor.Proposal}
+   * that the user must confirm on the Assistant page.
+   *
+   * @param jobId      The job id as returned by liveJobs.
+   * @param actionType EXTEND_WALLTIME, CANCEL, CHECKPOINT_NOW, REQUEUE_STANDBY, SCALE_DOWN, NOTIFY_PI or HOLD.
+   * @param reason     Why, in one sentence citing the metric or alert.
+   * @return the proposal and a reminder that it awaits the confirmation of the user.
+   */
+  proposeJobAction: function(jobId: !string, actionType: !string, reason: string): !string js-server
+
+  /**
+   * Applies a pending proposal: RunRequest.submit for a run, Job.applyAction (actor USER) for a job action. Called by the
+   * Assistant page when the user clicks Confirm; not an agent tool.
+   *
+   * @param proposalId Id of the {@link Advisor.Proposal}.
+   * @return `{proposalId, kind, state, message, jobId}`.
+   */
+  confirmProposal: function(proposalId: !string): json js-server
+
+  /**
+   * Discards a pending proposal without applying it. Called by the Assistant page; not an agent tool.
+   *
+   * @param proposalId Id of the {@link Advisor.Proposal}.
+   * @return `{proposalId, state, message}`.
+   */
+  discardProposal: function(proposalId: !string): json js-server
+
+  /**
+   * Pending proposals of a lab, newest first, for the Assistant page.
+   *
+   * @param labId The lab; empty returns every pending proposal.
+   * @return array of proposals as JSON.
+   */
+  pendingProposals: function(labId: string): json js-server
+
+  /**
+   * Starter questions for the Assistant page, personalised with the nearest deadline and open alerts of the lab.
+   *
+   * @param labId The lab.
+   * @return array of question strings.
+   */
+  suggestedPrompts: function(labId: string): json js-server
+
+  /**
+   * Server time marking the start of an ask turn. Internal; used by ask to collect the tool calls of the turn.
+   *
+   * @return ISO timestamp one second before now.
+   */
+  beginTurn: function(): !string js-server
+
+  /**
+   * Tool calls and proposals recorded since a turn started. Internal; used by ask.
+   *
+   * @param since ISO timestamp from beginTurn.
+   * @param labId Optional lab to restrict proposals to.
+   * @return JSON text `{toolCalls: [...], proposals: [...]}`.
+   */
+  turnTrace: function(since: !string, labId: string): !string js-server
+
+  /**
+   * Deterministic advisor used when the LLM agent is unavailable: routes the question by keywords to the same tools and
+   * writes a short markdown answer from their results.
+   *
+   * @param question The question of the user.
+   * @param labId    The lab the user is looking at.
+   * @return markdown answer.
+   */
+  offlineAnswer: function(question: !string, labId: string): !string js-server
+}

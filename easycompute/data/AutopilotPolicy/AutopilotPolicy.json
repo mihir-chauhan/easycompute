@@ -1,0 +1,10 @@
+[
+  {"id": "lab-nlp", "lab": {"id": "lab-nlp"}, "enabled": true, "cancelIdleAfterMin": 60, "checkpointBeforeTimeoutMin": 15, "autoExtendWalltime": false, "requeueToStandbyOnLowPriority": false, "notifyPiOnCritical": true, "budgetAlertPct": 0.85},
+  {"id": "lab-cv", "lab": {"id": "lab-cv"}, "enabled": true, "cancelIdleAfterMin": 60, "checkpointBeforeTimeoutMin": 15, "autoExtendWalltime": false, "requeueToStandbyOnLowPriority": false, "notifyPiOnCritical": true, "budgetAlertPct": 0.8},
+  {"id": "lab-chem", "lab": {"id": "lab-chem"}, "enabled": true, "cancelIdleAfterMin": 120, "checkpointBeforeTimeoutMin": 10, "autoExtendWalltime": false, "requeueToStandbyOnLowPriority": true, "notifyPiOnCritical": true, "budgetAlertPct": 0.9},
+  {"id": "lab-bio", "lab": {"id": "lab-bio"}, "enabled": false, "cancelIdleAfterMin": 120, "checkpointBeforeTimeoutMin": 15, "autoExtendWalltime": false, "requeueToStandbyOnLowPriority": false, "notifyPiOnCritical": true, "budgetAlertPct": 0.9},
+  {"id": "lab-robotics", "lab": {"id": "lab-robotics"}, "enabled": true, "cancelIdleAfterMin": 30, "checkpointBeforeTimeoutMin": 10, "autoExtendWalltime": false, "requeueToStandbyOnLowPriority": true, "notifyPiOnCritical": true, "budgetAlertPct": 0.85},
+  {"id": "lab-climate", "lab": {"id": "lab-climate"}, "enabled": true, "cancelIdleAfterMin": 90, "checkpointBeforeTimeoutMin": 20, "autoExtendWalltime": false, "requeueToStandbyOnLowPriority": false, "notifyPiOnCritical": false, "budgetAlertPct": 0.9},
+  {"id": "lab-ag", "lab": {"id": "lab-ag"}, "enabled": true, "cancelIdleAfterMin": 30, "checkpointBeforeTimeoutMin": 15, "autoExtendWalltime": false, "requeueToStandbyOnLowPriority": true, "notifyPiOnCritical": true, "budgetAlertPct": 0.95},
+  {"id": "lab-physics", "lab": {"id": "lab-physics"}, "enabled": true, "cancelIdleAfterMin": 45, "checkpointBeforeTimeoutMin": 15, "autoExtendWalltime": false, "requeueToStandbyOnLowPriority": false, "notifyPiOnCritical": true, "budgetAlertPct": 0.85}
+]

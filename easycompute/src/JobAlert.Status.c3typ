@@ -1,0 +1,21 @@
+/**
+ * Lifecycle of a {@link JobAlert}.
+ */
+enum type JobAlert.Status {
+  /**
+   * Detected and not yet handled.
+   */
+  OPEN = 'OPEN'
+  /**
+   * Acknowledged by a user; still active.
+   */
+  ACKED = 'ACKED'
+  /**
+   * Closed by a user or by an action.
+   */
+  RESOLVED = 'RESOLVED'
+  /**
+   * The condition cleared on its own at a later health evaluation.
+   */
+  AUTO_RESOLVED = 'AUTO_RESOLVED'
+}

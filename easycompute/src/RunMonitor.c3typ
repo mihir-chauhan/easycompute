@@ -1,0 +1,12 @@
+/**
+ * Live-run simulation and autopilot loop. Named `RunMonitor` because `Monitor` is a platform type.
+ */
+type RunMonitor {
+
+  /**
+   * Advances every live job by 15 simulated minutes (new metric sample, elapsed time, cost and allocation
+   * usage, start and finish transitions), evaluates job health and applies each lab's {@link AutopilotPolicy}.
+   * Returns a summary of what changed. Also run by the `EasyComputeMonitorTick` CronJob.
+   */
+  tick: function(): json js-server
+}

@@ -1,0 +1,17 @@
+/**
+ * Urgency of a {@link JobAlert}.
+ */
+enum type JobAlert.Severity {
+  /**
+   * Needs action now; autopilot may act and notify the PI.
+   */
+  CRITICAL = 'CRITICAL'
+  /**
+   * Should be looked at soon.
+   */
+  WARNING = 'WARNING'
+  /**
+   * Advisory.
+   */
+  INFO = 'INFO'
+}

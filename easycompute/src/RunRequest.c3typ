@@ -1,0 +1,123 @@
+/**
+ * A run a lab wants to launch, described in plain language plus sizing hints. The planner checks it against
+ * rules ({@link RunRequest#checkRules}), recommends launch settings ({@link RunRequest#recommendPlans}) and submits it
+ * ({@link RunRequest#submit}). Inherited `name` is the run name.
+ */
+@db(index=['lab', 'status', 'createdAt'])
+entity type RunRequest {
+
+  /**
+   * Lab launching the run.
+   */
+  lab: !Lab
+
+  /**
+   * Project the run belongs to; its deadline applies when the request has none.
+   */
+  project: Project
+
+  /**
+   * Member who described the run.
+   */
+  submittedBy: LabMember
+
+  /**
+   * Natural-language description of the run.
+   */
+  description: string
+
+  /**
+   * Kind of work.
+   */
+  workloadType: string enum WorkloadType
+
+  /**
+   * Model size in billions of parameters (0 when not a neural network).
+   */
+  modelParamsB: double
+
+  /**
+   * Dataset size in GB.
+   */
+  datasetGb: double
+
+  /**
+   * The user's own GPU-hour estimate (A100-equivalent), optional.
+   */
+  estGpuHours: double
+
+  /**
+   * GPUs the user asked for, optional.
+   */
+  requestedGpus: int
+
+  /**
+   * GPU type the user asked for, optional.
+   */
+  requestedGpuType: GpuType
+
+  /**
+   * Walltime the user asked for, optional.
+   */
+  requestedWalltimeHours: double
+
+  /**
+   * Cluster the user asked for, optional.
+   */
+  requestedCluster: ComputeCluster
+
+  /**
+   * Partition the user asked for, optional.
+   */
+  requestedPartition: Partition
+
+  /**
+   * When results are needed, optional.
+   */
+  deadline: datetime
+
+  /**
+   * Planner status.
+   */
+  status: string enum RunRequest.Status = 'DRAFT'
+
+  /**
+   * Plan chosen at submission.
+   */
+  chosenPlan: RunPlan
+
+  /**
+   * When the request was created.
+   */
+  createdAt: datetime
+
+  /**
+   * Rule results from the last check.
+   */
+  checks: [RuleCheck](runRequest)
+
+  /**
+   * Plans from the last recommendation.
+   */
+  plans: [RunPlan](runRequest)
+
+  /**
+   * Evaluates every active {@link Policy} in scope plus built-in lab constraints (allocation and account access,
+   * budget, deadline, GPU memory fit), replaces the request's {@link RuleCheck} rows and sets the status to CHECKED, or
+   * REJECTED when a blocking rule fails for every candidate partition. Returns the checks, failures first.
+   */
+  checkRules: member function(): [RuleCheck] js-server
+
+  /**
+   * Enumerates compliant (partition, GPU count, walltime) options, predicts duration from job history, wait from
+   * partition queue state and cost from the cluster unit price, and returns up to three ranked plans labeled Fastest,
+   * Cheapest and Balanced with a rationale and an sbatch script. Sets the status to PLANNED.
+   */
+  recommendPlans: member function(): [RunPlan] js-server
+
+  /**
+   * Submits the chosen plan: records it as {@link RunRequest#chosenPlan}, creates the live {@link Job} with its
+   * first metric samples and a SUBMIT {@link ActionLogEntry}, and sets the status to SUBMITTED.
+   */
+  submit: member function(planId: !string): Job js-server
+}

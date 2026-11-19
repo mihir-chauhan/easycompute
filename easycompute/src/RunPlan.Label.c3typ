@@ -1,0 +1,17 @@
+/**
+ * Why a {@link RunPlan} made the top three.
+ */
+enum type RunPlan.Label {
+  /**
+   * Earliest expected finish (queue wait plus runtime).
+   */
+  Fastest = 'Fastest'
+  /**
+   * Lowest estimated cost in USD.
+   */
+  Cheapest = 'Cheapest'
+  /**
+   * Best weighted score across finish time, cost, deadline slack and risk.
+   */
+  Balanced = 'Balanced'
+}

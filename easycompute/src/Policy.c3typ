@@ -1,0 +1,67 @@
+/**
+ * A checkable rule on runs: a Purdue-wide or cluster/partition limit, or a lab's own constraint. Evaluated by
+ * {@link RunRequest#checkRules}. Inherited `name` is unused; {@link Policy#title} is the display text.
+ */
+@db(index=['scope', 'kind', 'cluster', 'partition', 'lab', 'active'])
+entity type Policy {
+
+  /**
+   * Where the rule applies.
+   */
+  scope: string enum Policy.Scope
+
+  /**
+   * Condition the rule checks.
+   */
+  kind: string enum Policy.Kind
+
+  /**
+   * What a violation does.
+   */
+  severity: string enum Policy.Severity
+
+  /**
+   * Short title.
+   */
+  title: string
+
+  /**
+   * Full rule text as published.
+   */
+  description: string
+
+  /**
+   * Cluster for CLUSTER-scope rules (and optionally to narrow LAB rules).
+   */
+  cluster: ComputeCluster
+
+  /**
+   * Partition for PARTITION-scope rules.
+   */
+  partition: Partition
+
+  /**
+   * Lab for LAB-scope rules.
+   */
+  lab: Lab
+
+  /**
+   * Numeric limit, meaning depends on {@link Policy#kind}.
+   */
+  limitValue: double
+
+  /**
+   * Text limit (lists, hour ranges), meaning depends on {@link Policy#kind}.
+   */
+  limitText: string
+
+  /**
+   * Where the rule is published.
+   */
+  sourceUrl: string
+
+  /**
+   * Only active rules are evaluated.
+   */
+  active: boolean
+}

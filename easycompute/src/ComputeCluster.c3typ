@@ -1,0 +1,72 @@
+/**
+ * A compute cluster labs can run on: a Purdue RCAC community cluster, the NSF ACCESS Anvil system, or a
+ * commercial cloud. Named `ComputeCluster` because `Cluster` is a platform type. Inherited `name` is the display name.
+ */
+@db(index=['billing', 'status'])
+entity type ComputeCluster {
+
+  /**
+   * Who operates it ("RCAC", "NSF ACCESS", "AWS").
+   */
+  operator: string
+
+  /**
+   * How usage is charged.
+   */
+  billing: string enum ComputeCluster.Billing
+
+  /**
+   * Short description of the hardware and purpose.
+   */
+  description: string
+
+  /**
+   * Number of compute nodes.
+   */
+  totalNodes: int
+
+  /**
+   * Number of GPUs across all partitions.
+   */
+  totalGpus: int
+
+  /**
+   * Number of CPU cores across all nodes.
+   */
+  totalCores: int
+
+  /**
+   * Scratch plus project storage capacity in TB.
+   */
+  storageTb: double
+
+  /**
+   * Allocation unit ("SU", "GPU-hour", "USD").
+   */
+  unitName: string
+
+  /**
+   * USD value of one allocation unit (shadow price for in-house shares).
+   */
+  usdPerUnit: double
+
+  /**
+   * Operational status.
+   */
+  status: string enum ComputeCluster.Status
+
+  /**
+   * Data-center latitude, for maps.
+   */
+  latitude: double
+
+  /**
+   * Data-center longitude, for maps.
+   */
+  longitude: double
+
+  /**
+   * Partitions (Slurm partition + QOS combinations) of this cluster.
+   */
+  partitions: [Partition](cluster)
+}

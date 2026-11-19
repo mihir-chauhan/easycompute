@@ -1,0 +1,29 @@
+/**
+ * Kind of compute work, used for history-based duration prediction and memory sizing.
+ */
+enum type WorkloadType {
+  /**
+   * Training a model from scratch (full optimizer state, about 16 bytes per parameter).
+   */
+  TRAINING = 'TRAINING'
+  /**
+   * Fine-tuning a pretrained model (full or LoRA/QLoRA adapters).
+   */
+  FINETUNE = 'FINETUNE'
+  /**
+   * Batch inference or evaluation of a trained model (about 2 bytes per parameter in fp16).
+   */
+  INFERENCE = 'INFERENCE'
+  /**
+   * Scientific simulation (molecular dynamics, CFD, climate); usually long and checkpointable.
+   */
+  SIMULATION = 'SIMULATION'
+  /**
+   * Preprocessing, feature extraction or ETL; often CPU-bound.
+   */
+  DATA_PROCESSING = 'DATA_PROCESSING'
+  /**
+   * Jupyter or other interactive sessions; typically the least efficient GPU use.
+   */
+  INTERACTIVE = 'INTERACTIVE'
+}

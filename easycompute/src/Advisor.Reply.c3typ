@@ -1,0 +1,50 @@
+/**
+ * One answer from the EasyCompute Advisor, returned by {@link Advisor#ask} to the Assistant page.
+ */
+type Advisor.Reply {
+
+  /**
+   * The answer as markdown text.
+   */
+  answer: string
+
+  /**
+   * Conversation id; pass it back to {@link Advisor#ask} to continue the same conversation.
+   */
+  sessionId: string
+
+  /**
+   * Id of the {@link GenaiCore.Agent.Run} that produced the answer; empty in offline mode.
+   */
+  runId: string
+
+  /**
+   * Final run status, e.g. `completed` or `failed`.
+   */
+  status: string
+
+  /**
+   * `agent` when the LLM agent answered, `offline` when the deterministic advisor answered.
+   */
+  mode: string
+
+  /**
+   * Why the LLM agent was not used (offline mode only).
+   */
+  fallbackReason: string
+
+  /**
+   * Wall-clock seconds the answer took.
+   */
+  seconds: double
+
+  /**
+   * Tools called during this turn as a JSON array of `{tool, args, summary, ok, millis}`.
+   */
+  toolCalls: json
+
+  /**
+   * Proposals created during this turn as a JSON array (see {@link Advisor#pendingProposals}).
+   */
+  proposals: json
+}

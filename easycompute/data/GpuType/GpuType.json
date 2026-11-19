@@ -1,20 +1,10 @@
 [
-  {
-    "id": "A100-40GB",
-    "name": "NVIDIA A100 40GB",
-    "vendor": "NVIDIA",
-    "memoryGb": 40,
-    "fp16Tflops": 312,
-    "relativeThroughput": 1,
-    "costPerGpuHourUsd": 3
-  },
-  {
-    "id": "H100-80GB",
-    "name": "NVIDIA H100 80GB",
-    "vendor": "NVIDIA",
-    "memoryGb": 80,
-    "fp16Tflops": 990,
-    "relativeThroughput": 2.5,
-    "costPerGpuHourUsd": 6
-  }
+  {"id": "V100-32GB", "name": "NVIDIA V100 32GB", "vendor": "NVIDIA", "memoryGb": 32, "fp16Tflops": 125.0, "relativeThroughput": 0.45, "costPerGpuHourUsd": 3.9},
+  {"id": "A10-24GB", "name": "NVIDIA A10 24GB", "vendor": "NVIDIA", "memoryGb": 24, "fp16Tflops": 125.0, "relativeThroughput": 0.35, "costPerGpuHourUsd": 1.01},
+  {"id": "A30-24GB", "name": "NVIDIA A30 24GB", "vendor": "NVIDIA", "memoryGb": 24, "fp16Tflops": 165.0, "relativeThroughput": 0.5, "costPerGpuHourUsd": 0.9},
+  {"id": "L40S-48GB", "name": "NVIDIA L40S 48GB", "vendor": "NVIDIA", "memoryGb": 48, "fp16Tflops": 362.0, "relativeThroughput": 0.85, "costPerGpuHourUsd": 1.86},
+  {"id": "MI210-64GB", "name": "AMD Instinct MI210 64GB", "vendor": "AMD", "memoryGb": 64, "fp16Tflops": 181.0, "relativeThroughput": 0.55, "costPerGpuHourUsd": 1.2},
+  {"id": "A100-40GB", "name": "NVIDIA A100 40GB SXM", "vendor": "NVIDIA", "memoryGb": 40, "fp16Tflops": 312.0, "relativeThroughput": 1.0, "costPerGpuHourUsd": 4.1},
+  {"id": "A100-80GB", "name": "NVIDIA A100 80GB", "vendor": "NVIDIA", "memoryGb": 80, "fp16Tflops": 312.0, "relativeThroughput": 1.1, "costPerGpuHourUsd": 5.12},
+  {"id": "H100-80GB", "name": "NVIDIA H100 80GB SXM", "vendor": "NVIDIA", "memoryGb": 80, "fp16Tflops": 989.0, "relativeThroughput": 2.5, "costPerGpuHourUsd": 6.88}
 ]

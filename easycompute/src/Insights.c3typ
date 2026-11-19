@@ -1,0 +1,23 @@
+/**
+ * Server-side aggregates for the lab and Research Computing dashboards and the duration predictor.
+ */
+type Insights {
+
+  /**
+   * KPIs, allocations and burn rate, deadlines, usage by cluster/user/workload, efficiency, weekly trend and
+   * recommendations for one {@link Lab}.
+   */
+  labSummary: function(labId: !string): json js-server
+
+  /**
+   * University-wide utilization by cluster, cost by billing type, fair share vs usage by lab, idle resources and a
+   * demand forecast showing where more resources are needed.
+   */
+  universityOverview: function(): json js-server
+
+  /**
+   * Predicts runtime, GPU-hours, memory need and walltime for a workload on a GPU type (or `CPU`) from completed-job
+   * history, scaled by GPU relative throughput and model size; with `labId`, the lab's own history is blended in.
+   */
+  predictDuration: function(workloadType: !string, gpuTypeId: !string, gpus: int, modelParamsB: double, labId: string): json js-server
+}

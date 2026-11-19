@@ -1,0 +1,60 @@
+/**
+ * The checkable condition a {@link Policy} encodes; {@link Policy#limitValue} and
+ * {@link Policy#limitText} parameterize it.
+ */
+enum type Policy.Kind {
+  /**
+   * Requested walltime per job must not exceed limitValue hours (default: the partition maximum).
+   */
+  MAX_WALLTIME = 'MAX_WALLTIME'
+  /**
+   * GPUs per job must not exceed limitValue (default: the partition maximum).
+   */
+  MAX_GPUS_PER_JOB = 'MAX_GPUS_PER_JOB'
+  /**
+   * Nodes per job must not exceed limitValue (default: the partition maximum).
+   */
+  MAX_NODES_PER_JOB = 'MAX_NODES_PER_JOB'
+  /**
+   * The lab's running plus pending jobs on the partition plus this one must not exceed limitValue.
+   */
+  MAX_JOBS_PER_USER = 'MAX_JOBS_PER_USER'
+  /**
+   * The GPU type must be one of the comma-separated GpuType ids in limitText.
+   */
+  ALLOWED_GPU_TYPES = 'ALLOWED_GPU_TYPES'
+  /**
+   * Estimated cost must fit the lab's remaining allocation on the cluster; limitValue (0-1), when
+   * set, is the largest share of the remaining balance one run may use.
+   */
+  BUDGET_REMAINING = 'BUDGET_REMAINING'
+  /**
+   * Queue wait plus 1.2 x predicted runtime must finish before the request or project deadline.
+   */
+  DEADLINE_FEASIBLE = 'DEADLINE_FEASIBLE'
+  /**
+   * The lab's share of GPU-hours on the cluster must not exceed limitValue x its fair-share target
+   * (default 1.5).
+   */
+  FAIRSHARE_CAP = 'FAIRSHARE_CAP'
+  /**
+   * Only preemptible/standby partitions may be used (optionally only for the workload types in limitText).
+   */
+  PREEMPTIBLE_ONLY = 'PREEMPTIBLE_ONLY'
+  /**
+   * Data must stay on the cluster ids listed in limitText (default: no third-party cloud).
+   */
+  DATA_RESIDENCY = 'DATA_RESIDENCY'
+  /**
+   * Export-controlled (ITAR/EAR/CUI) work must run on Purdue-operated in-house clusters only.
+   */
+  EXPORT_CONTROL = 'EXPORT_CONTROL'
+  /**
+   * The lab's recent average GPU utilization should be at least limitValue percent.
+   */
+  MIN_GPU_UTIL = 'MIN_GPU_UTIL'
+  /**
+   * No submissions during the local (US Eastern) hour range in limitText, for example "22-06".
+   */
+  QUIET_HOURS = 'QUIET_HOURS'
+}

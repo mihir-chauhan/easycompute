@@ -25,6 +25,8 @@ export interface ChartSeries {
   area?: boolean;
   /** Line charts: dashed (forecast, target). */
   dashed?: boolean;
+  /** Bar charts: per-bar colours for this series (e.g. tone per value). */
+  colors?: string[];
 }
 
 export interface ChartThreshold {
@@ -83,7 +85,9 @@ export function barOption({ categories, series, horizontal, valueFormat, max, th
       type: 'bar',
       name: s.name,
       stack: s.stack,
-      data: itemColors && series.length === 1 ? s.data.map((v, k) => ({ value: v, itemStyle: { color: itemColors[k] } })) : s.data,
+      data: (s.colors ?? (series.length === 1 ? itemColors : undefined))?.length
+        ? s.data.map((v, k) => ({ value: v, itemStyle: { color: (s.colors ?? itemColors ?? [])[k] } }))
+        : s.data,
       itemStyle: { color: s.color ?? ink, borderRadius: s.stack ? 0 : horizontal ? [0, 3, 3, 0] : [3, 3, 0, 0] },
       barMaxWidth,
       emphasis: { focus: 'series' },

@@ -1,7 +1,7 @@
 /**
- * A GPU model available on Purdue and cloud clusters.
+ * A GPU model available on Purdue and cloud clusters. Id is the model key (for example "A100-80GB"); inherited
+ * `name` is the display name.
  */
-@db(index=[])
 entity type GpuType {
 
   /**
@@ -15,17 +15,17 @@ entity type GpuType {
   memoryGb: int
 
   /**
-   * Peak FP16 TFLOPS.
+   * Peak dense FP16/BF16 tensor TFLOPS.
    */
   fp16Tflops: double
 
   /**
-   * Throughput relative to A100-40GB.
+   * Training throughput relative to A100-40GB (= 1.0).
    */
   relativeThroughput: double
 
   /**
-   * Reference third-party price per GPU-hour.
+   * Reference third-party (cloud) price per GPU-hour in USD.
    */
   costPerGpuHourUsd: double
 }

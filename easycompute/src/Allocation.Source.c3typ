@@ -1,0 +1,25 @@
+/**
+ * Where an {@link Allocation} comes from.
+ */
+enum type Allocation.Source {
+  /**
+   * Purchased from a research grant (community-cluster node share or GPU-hour bank).
+   */
+  GRANT = 'GRANT'
+  /**
+   * Provided by the department.
+   */
+  DEPARTMENT = 'DEPARTMENT'
+  /**
+   * NSF ACCESS award exchanged for resource units.
+   */
+  ACCESS = 'ACCESS'
+  /**
+   * New-faculty startup allocation.
+   */
+  STARTUP = 'STARTUP'
+  /**
+   * Commercial cloud credits.
+   */
+  CLOUD_CREDITS = 'CLOUD_CREDITS'
+}

@@ -1,0 +1,36 @@
+/**
+ * A research project of a {@link Lab} with a deadline that compute must meet. Inherited `name` is the project name.
+ */
+@db(index=['lab', 'deadline'])
+entity type Project {
+
+  /**
+   * Lab running the project.
+   */
+  lab: !Lab
+
+  /**
+   * What the project does.
+   */
+  description: string
+
+  /**
+   * Deadline the compute must finish before.
+   */
+  deadline: datetime
+
+  /**
+   * What the deadline is (for example "NeurIPS 2026 submission").
+   */
+  deadlineLabel: string
+
+  /**
+   * Priority: 1 high, 2 medium, 3 low.
+   */
+  priority: int
+
+  /**
+   * Main kind of compute the project runs.
+   */
+  workloadType: string enum WorkloadType
+}

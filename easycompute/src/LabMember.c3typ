@@ -1,0 +1,21 @@
+/**
+ * A person in a {@link Lab}. Inherited `name` is the person's (synthetic) name.
+ */
+@db(index=['lab'])
+entity type LabMember {
+
+  /**
+   * Lab the member belongs to.
+   */
+  lab: !Lab
+
+  /**
+   * Cluster username (pseudonymized).
+   */
+  username: string
+
+  /**
+   * Role in the lab.
+   */
+  role: string enum LabMember.Role
+}

@@ -1,0 +1,151 @@
+/**
+ * One recommended way to launch a {@link RunRequest}, written by {@link RunRequest#recommendPlans}.
+ */
+@db(index=['runRequest, rank'])
+entity type RunPlan {
+
+  /**
+   * Request the plan is for.
+   */
+  runRequest: !RunRequest
+
+  /**
+   * Rank by overall score (1 = best).
+   */
+  rank: int
+
+  /**
+   * Cluster to run on.
+   */
+  cluster: ComputeCluster
+
+  /**
+   * Partition (and QOS) to run on.
+   */
+  partition: Partition
+
+  /**
+   * GPU type.
+   */
+  gpuType: GpuType
+
+  /**
+   * GPUs per job.
+   */
+  gpus: int
+
+  /**
+   * Nodes per job.
+   */
+  nodes: int
+
+  /**
+   * Walltime to request per job.
+   */
+  walltimeHours: double
+
+  /**
+   * Estimated queue wait.
+   */
+  estWaitHours: double
+
+  /**
+   * Predicted runtime (all chained jobs).
+   */
+  estDurationHours: double
+
+  /**
+   * Estimated cost in the cluster allocation unit.
+   */
+  estCostUnits: double
+
+  /**
+   * Estimated cost in USD.
+   */
+  estCostUsd: double
+
+  /**
+   * True when wait plus 1.2 x runtime finishes before the deadline (or there is none).
+   */
+  meetsDeadline: boolean
+
+  /**
+   * Weighted score 0-100 (finish time, cost, deadline slack, risk).
+   */
+  score: double
+
+  /**
+   * Why the plan made the top three.
+   */
+  label: string enum RunPlan.Label
+
+  /**
+   * Plain-English reasoning for the plan.
+   */
+  rationale: string
+
+  /**
+   * Generated Slurm batch script.
+   */
+  sbatchScript: string
+
+  /**
+   * Slurm QOS.
+   */
+  qos: string
+
+  /**
+   * Slurm account to charge.
+   */
+  account: string
+
+  /**
+   * Value of `sbatch -p`.
+   */
+  slurmPartition: string
+
+  /**
+   * Wait bucket: "<15 min", "15 min-2 h", "2-12 h" or ">12 h".
+   */
+  waitBucket: string
+
+  /**
+   * Why the wait estimate is what it is.
+   */
+  waitReason: string
+
+  /**
+   * Number of chained, checkpointed jobs (more than one when runtime exceeds the walltime limit).
+   */
+  chainedJobs: int
+
+  /**
+   * Probability (0-1) the run is preempted at least once.
+   */
+  preemptionRisk: double
+
+  /**
+   * Estimated GPU memory the run needs in total.
+   */
+  gpuMemNeedGb: double
+
+  /**
+   * Effective USD per GPU-hour on this partition.
+   */
+  costPerGpuHourUsd: double
+
+  /**
+   * Expected finish time.
+   */
+  finishBy: datetime
+
+  /**
+   * Hours between the expected finish and the deadline; empty without a deadline.
+   */
+  deadlineSlackHours: double
+
+  /**
+   * Number of WARN-severity rules this option violates.
+   */
+  ruleWarnings: int
+}

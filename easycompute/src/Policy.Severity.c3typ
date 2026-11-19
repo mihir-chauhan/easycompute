@@ -1,0 +1,17 @@
+/**
+ * What happens when a {@link Policy} is violated.
+ */
+enum type Policy.Severity {
+  /**
+   * The run cannot be submitted with settings that violate the rule.
+   */
+  BLOCK = 'BLOCK'
+  /**
+   * The run may be submitted but the user is warned.
+   */
+  WARN = 'WARN'
+  /**
+   * Informational guidance only; never blocks or warns.
+   */
+  INFO = 'INFO'
+}

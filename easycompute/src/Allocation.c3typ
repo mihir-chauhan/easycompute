@@ -1,0 +1,52 @@
+/**
+ * Compute a {@link Lab} can spend on a {@link ComputeCluster}: a node share or GPU-hour bank, an ACCESS
+ * award, a startup allocation or cloud credits. Inherited `name` is the display name.
+ */
+@db(index=['lab, cluster', 'endDate'])
+entity type Allocation {
+
+  /**
+   * Lab holding the allocation.
+   */
+  lab: !Lab
+
+  /**
+   * Cluster the units can be spent on.
+   */
+  cluster: !ComputeCluster
+
+  /**
+   * Where the allocation comes from.
+   */
+  source: string enum Allocation.Source
+
+  /**
+   * Funding grant or award name.
+   */
+  grantName: string
+
+  /**
+   * Units granted for the period.
+   */
+  totalUnits: double
+
+  /**
+   * Units used so far; updated as live jobs run.
+   */
+  usedUnits: double
+
+  /**
+   * Unit ("SU", "GPU-hour", "USD").
+   */
+  unitName: string
+
+  /**
+   * Start of the allocation period.
+   */
+  startDate: datetime
+
+  /**
+   * End of the allocation period.
+   */
+  endDate: datetime
+}

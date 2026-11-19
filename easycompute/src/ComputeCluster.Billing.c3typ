@@ -1,0 +1,18 @@
+/**
+ * How a {@link ComputeCluster} charges labs for compute.
+ */
+enum type ComputeCluster.Billing {
+  /**
+   * Purdue RCAC community cluster: the lab bought node shares or a GPU-hour bank
+   * (Gautschi, Gilbreth, Negishi). Usage is debited from the purchased share.
+   */
+  IN_HOUSE_NODE_SHARE = 'IN_HOUSE_NODE_SHARE'
+  /**
+   * NSF ACCESS allocation (Anvil) charged in service units from an awarded credit exchange.
+   */
+  ACCESS_SU = 'ACCESS_SU'
+  /**
+   * Commercial cloud billed per instance-hour in USD (for example AWS p4d).
+   */
+  THIRD_PARTY_HOURLY = 'THIRD_PARTY_HOURLY'
+}

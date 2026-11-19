@@ -1,0 +1,47 @@
+/**
+ * Audit log of actions on runs (submit, cancel, checkpoint, ...), by users, admins or autopilot. Named
+ * `ActionLogEntry` because `ActionLog` is a platform type.
+ */
+@db(index=['lab', 'job', 'runRequest', 'actedAt'])
+entity type ActionLogEntry {
+
+  /**
+   * Lab the action belongs to.
+   */
+  lab: Lab
+
+  /**
+   * Job acted on.
+   */
+  job: Job
+
+  /**
+   * Request acted on (for SUBMIT).
+   */
+  runRequest: RunRequest
+
+  /**
+   * Action.
+   */
+  actionType: string enum ActionType
+
+  /**
+   * Who acted.
+   */
+  actor: string enum ActionLogEntry.Actor
+
+  /**
+   * When.
+   */
+  actedAt: datetime
+
+  /**
+   * What was done, including the equivalent Slurm command.
+   */
+  detail: string
+
+  /**
+   * Result.
+   */
+  outcome: string enum ActionLogEntry.Outcome
+}

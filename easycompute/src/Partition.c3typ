@@ -1,0 +1,92 @@
+/**
+ * A Slurm partition and QOS combination on a {@link ComputeCluster} with its published limits, charge
+ * factor and current queue state. Inherited `name` is the display name (for example "ai (preemptible)").
+ */
+@db(index=['cluster', 'gpuType', 'preemptible'])
+entity type Partition {
+
+  /**
+   * Cluster the partition belongs to.
+   */
+  cluster: !ComputeCluster
+
+  /**
+   * GPU model on the nodes; empty for CPU-only partitions.
+   */
+  gpuType: GpuType
+
+  /**
+   * GPUs per node.
+   */
+  gpusPerNode: int
+
+  /**
+   * CPU cores per node.
+   */
+  coresPerNode: int
+
+  /**
+   * Host memory per node in GB.
+   */
+  memPerNodeGb: int
+
+  /**
+   * Maximum walltime per job in hours.
+   */
+  maxWalltimeHours: double
+
+  /**
+   * Maximum nodes per job.
+   */
+  maxNodesPerJob: int
+
+  /**
+   * Maximum GPUs per job.
+   */
+  maxGpusPerJob: int
+
+  /**
+   * Maximum running plus queued jobs per user.
+   */
+  maxJobsPerUser: int
+
+  /**
+   * True when jobs may be preempted (standby or preemptible QOS).
+   */
+  preemptible: boolean
+
+  /**
+   * Units charged per resource-hour (Gautschi: normal 1, preemptible 0.25, burst 2; standby 0).
+   */
+  chargeFactor: double
+
+  /**
+   * Jobs currently pending.
+   */
+  currentQueueDepth: int
+
+  /**
+   * Recent average queue wait in hours.
+   */
+  avgWaitHours: double
+
+  /**
+   * Current utilization of the partition (0-100).
+   */
+  utilizationPct: double
+
+  /**
+   * Nodes in the partition; GPU capacity is nodeCount x gpusPerNode.
+   */
+  nodeCount: int
+
+  /**
+   * Slurm QOS used with the partition ("normal", "standby", "preemptible", "burst", "training").
+   */
+  qos: string
+
+  /**
+   * Value passed to `sbatch -p` (for example "ai", "a100-80gb").
+   */
+  slurmPartition: string
+}

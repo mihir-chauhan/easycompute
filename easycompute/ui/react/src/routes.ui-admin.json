@@ -1,0 +1,7 @@
+[
+  { "path": "/admin", "element": "pages/AdminOverview/AdminOverview", "export": "default", "navLabel": "Overview", "icon": "LayoutDashboard", "section": "admin" },
+  { "path": "/admin/clusters", "element": "pages/AdminClusters/AdminClusters", "export": "default", "navLabel": "Clusters", "icon": "Server", "section": "admin" },
+  { "path": "/admin/clusters/:id", "element": "pages/AdminClusters/AdminClusterDetail", "export": "default", "section": "admin" },
+  { "path": "/admin/policies", "element": "pages/AdminPolicies/AdminPolicies", "export": "default", "navLabel": "Policies", "icon": "ScrollText", "section": "admin" },
+  { "path": "/admin/labs", "element": "pages/AdminLabs/AdminLabs", "export": "default", "navLabel": "Labs", "icon": "Users", "section": "admin" }
+]

@@ -1,0 +1,41 @@
+/**
+ * Health issue detected on a running {@link Job} by {@link Job#evaluateHealth}.
+ */
+enum type JobAlert.AlertType {
+  /**
+   * GPUs allocated but near 0% utilization for 30+ minutes while the job is otherwise alive.
+   */
+  IDLE_GPU = 'IDLE_GPU'
+  /**
+   * GPU utilization persistently low (5-35%): oversized GPU request or data-loader bound.
+   */
+  LOW_GPU_UTIL = 'LOW_GPU_UTIL'
+  /**
+   * GPU or host memory close to the limit and rising.
+   */
+  OOM_RISK = 'OOM_RISK'
+  /**
+   * The job is likely to hit its time limit before finishing or checkpointing.
+   */
+  WALLTIME_RISK = 'WALLTIME_RISK'
+  /**
+   * The job's projected cost pushes the lab allocation past its alert threshold.
+   */
+  BUDGET_BURN = 'BUDGET_BURN'
+  /**
+   * No GPU, CPU or I/O activity and no training progress for 30+ minutes.
+   */
+  HUNG_JOB = 'HUNG_JOB'
+  /**
+   * A node stopped reporting (power and utilization dropped to zero).
+   */
+  NODE_FAILURE = 'NODE_FAILURE'
+  /**
+   * Running on a preemptible partition with a checkpoint older than the 10-minute grace window allows.
+   */
+  PREEMPTION_RISK = 'PREEMPTION_RISK'
+  /**
+   * No checkpoint written for more than two hours.
+   */
+  STALE_CHECKPOINT = 'STALE_CHECKPOINT'
+}

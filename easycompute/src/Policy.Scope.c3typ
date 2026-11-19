@@ -1,0 +1,21 @@
+/**
+ * Where a {@link Policy} applies.
+ */
+enum type Policy.Scope {
+  /**
+   * Applies to every lab and cluster (Purdue-wide research computing policy).
+   */
+  UNIVERSITY = 'UNIVERSITY'
+  /**
+   * Applies to every partition of {@link Policy#cluster}.
+   */
+  CLUSTER = 'CLUSTER'
+  /**
+   * Applies only to {@link Policy#partition}.
+   */
+  PARTITION = 'PARTITION'
+  /**
+   * A constraint the lab set for itself (from its context dump); applies only to {@link Policy#lab}.
+   */
+  LAB = 'LAB'
+}

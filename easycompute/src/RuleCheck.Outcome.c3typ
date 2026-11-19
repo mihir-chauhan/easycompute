@@ -1,0 +1,17 @@
+/**
+ * Result of one rule for a {@link RunRequest}.
+ */
+enum type RuleCheck.Outcome {
+  /**
+   * The request complies.
+   */
+  PASS = 'PASS'
+  /**
+   * Allowed, but the user should review the message (or some options are ruled out).
+   */
+  WARN = 'WARN'
+  /**
+   * A blocking rule is violated.
+   */
+  FAIL = 'FAIL'
+}

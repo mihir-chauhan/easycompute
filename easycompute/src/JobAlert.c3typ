@@ -1,0 +1,57 @@
+/**
+ * A health issue on a {@link Job}, raised by {@link Job#evaluateHealth}. Named `JobAlert` because `Alert` is a
+ * platform type.
+ */
+@db(index=['job', 'lab', 'status', 'alertType', 'detectedAt'])
+entity type JobAlert {
+
+  /**
+   * Job with the issue.
+   */
+  job: !Job
+
+  /**
+   * Lab that owns the job.
+   */
+  lab: Lab
+
+  /**
+   * Kind of issue.
+   */
+  alertType: string enum JobAlert.AlertType
+
+  /**
+   * Urgency.
+   */
+  severity: string enum JobAlert.Severity
+
+  /**
+   * Lifecycle status.
+   */
+  status: string enum JobAlert.Status
+
+  /**
+   * When the issue was detected (time of the sample that triggered it).
+   */
+  detectedAt: datetime
+
+  /**
+   * Plain-English description with the evidence.
+   */
+  message: string
+
+  /**
+   * Action that addresses the issue.
+   */
+  recommendedAction: string enum ActionType
+
+  /**
+   * True when autopilot already acted on this alert.
+   */
+  autoActionTaken: boolean
+
+  /**
+   * When the alert was resolved.
+   */
+  resolvedAt: datetime
+}

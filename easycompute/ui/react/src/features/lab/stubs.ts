@@ -140,7 +140,7 @@ liveDefs.forEach(([name, user, cl, part, gpu, gpus, sc, el, lim], k) => {
   metrics[id] = Array.from({ length: n }, (_, i) => ({ id: `${id}-m${i}`, ts: iso(-(n - 1 - i) * 5 * 60000), ...sample(sc, i, n) }) as JobMetric);
   const util = metrics[id].map((m) => m.gpuUtilPct ?? 0);
   if (util.length) jobs[jobs.length - 1].gpuUtilAvg = util.reduce((a, b) => a + b, 0) / util.length;
-  const alertFor: Partial<Record<Scenario, [Alert['type'], Alert['severity'], string, Alert['recommendedAction']]>> = {
+  const alertFor: Partial<Record<Scenario, [Alert['alertType'], Alert['severity'], string, Alert['recommendedAction']]>> = {
     idle: ['IDLE_GPU', 'CRITICAL', '8 of 8 GPUs under 5% for 85 min after the dataloader stalled; burning ≈ $34/h.', 'CANCEL'],
     oom: ['OOM_RISK', 'WARNING', 'GPU memory at 98% and rising 1.2%/10 min; OOM expected in ~25 min.', 'CHECKPOINT_NOW'],
     walltime: ['WALLTIME_RISK', 'CRITICAL', 'ETA 3.1 h at current step rate, only 1.6 h of walltime left.', 'EXTEND_WALLTIME'],

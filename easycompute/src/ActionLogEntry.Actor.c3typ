@@ -1,0 +1,17 @@
+/**
+ * Who took an action.
+ */
+enum type ActionLogEntry.Actor {
+  /**
+   * A lab member from the app.
+   */
+  USER = 'USER'
+  /**
+   * The lab autopilot ({@link AutopilotPolicy}) during {@link RunMonitor#tick}.
+   */
+  AUTOPILOT = 'AUTOPILOT'
+  /**
+   * Research Computing staff.
+   */
+  ADMIN = 'ADMIN'
+}

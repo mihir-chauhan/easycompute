@@ -1,0 +1,51 @@
+/**
+ * Result of one rule for a {@link RunRequest}, written by {@link RunRequest#checkRules}.
+ */
+@db(index=['runRequest'])
+entity type RuleCheck {
+
+  /**
+   * Request that was checked.
+   */
+  runRequest: !RunRequest
+
+  /**
+   * Rule that was evaluated; empty for built-in checks.
+   */
+  policy: Policy
+
+  /**
+   * Result.
+   */
+  outcome: string enum RuleCheck.Outcome
+
+  /**
+   * Plain-English explanation with the numbers behind the result.
+   */
+  message: string
+
+  /**
+   * When the check ran.
+   */
+  checkedAt: datetime
+
+  /**
+   * Rule title (from the policy, or the built-in check name).
+   */
+  title: string
+
+  /**
+   * A {@link Policy.Kind} value, or CLUSTER_ONLINE, ACCOUNT_ACCESS, GPU_MEMORY_FIT for built-in checks.
+   */
+  ruleKind: string
+
+  /**
+   * Severity of the rule.
+   */
+  severity: string enum Policy.Severity
+
+  /**
+   * Scope of the rule.
+   */
+  scope: string enum Policy.Scope
+}

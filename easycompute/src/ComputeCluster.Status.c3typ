@@ -1,0 +1,21 @@
+/**
+ * Operational status of a {@link ComputeCluster}.
+ */
+enum type ComputeCluster.Status {
+  /**
+   * Accepting and running jobs normally.
+   */
+  ONLINE = 'ONLINE'
+  /**
+   * Running with reduced capacity (drained nodes, file-system issues); jobs may start late.
+   */
+  DEGRADED = 'DEGRADED'
+  /**
+   * In a maintenance window; new jobs are not scheduled.
+   */
+  MAINTENANCE = 'MAINTENANCE'
+  /**
+   * Decommissioned (for example Bell after 2026-10-31); no new jobs may be submitted.
+   */
+  RETIRED = 'RETIRED'
+}

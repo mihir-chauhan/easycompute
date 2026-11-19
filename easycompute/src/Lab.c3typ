@@ -1,0 +1,67 @@
+/**
+ * A Purdue research lab (PI group) that buys and uses compute. {@link Lab#contextDump} holds the free text the
+ * lab pasted about funding, deadlines and preferences. Inherited `name` is the lab name.
+ */
+@db(index=['department'])
+entity type Lab {
+
+  /**
+   * Principal investigator.
+   */
+  piName: string
+
+  /**
+   * PI email for notifications.
+   */
+  piEmail: string
+
+  /**
+   * Academic department.
+   */
+  department: string
+
+  /**
+   * Research area.
+   */
+  researchArea: string
+
+  /**
+   * Free text the lab pasted: funding, deadlines, projects, preferences and constraints.
+   */
+  contextDump: string
+
+  /**
+   * Comma-separated Slurm accounts (for example "asc170016,asc170016-gpu").
+   */
+  slurmAccounts: string
+
+  /**
+   * The lab's target share of university GPU usage (0-1).
+   */
+  fairShareTarget: double
+
+  /**
+   * Comma-separated preferred cluster ids.
+   */
+  preferredClusters: string
+
+  /**
+   * Additional notes.
+   */
+  notes: string
+
+  /**
+   * People in the lab.
+   */
+  members: [LabMember](lab)
+
+  /**
+   * Compute allocations the lab holds.
+   */
+  allocations: [Allocation](lab)
+
+  /**
+   * Research projects with deadlines.
+   */
+  projects: [Project](lab)
+}

@@ -13,6 +13,11 @@ export interface Ref {
   name?: string;
 }
 
+/** Job reference as included on alerts/actions (`job.jobName`). */
+export interface JobRef extends Ref {
+  jobName?: string;
+}
+
 export type ClusterBilling = 'IN_HOUSE_NODE_SHARE' | 'ACCESS_SU' | 'THIRD_PARTY_HOURLY';
 export type RuleScope = 'UNIVERSITY' | 'CLUSTER' | 'PARTITION' | 'LAB';
 export type RuleSeverity = 'BLOCK' | 'WARN' | 'INFO';
@@ -249,7 +254,7 @@ export interface JobMetric {
 
 export interface Alert {
   id: string;
-  job?: Ref;
+  job?: JobRef;
   lab?: Ref;
   alertType: AlertType;
   severity: AlertSeverity;
@@ -263,7 +268,7 @@ export interface Alert {
 export interface ActionLog {
   id: string;
   lab?: Ref;
-  job?: Ref;
+  job?: JobRef;
   runRequest?: Ref;
   actionType: ActionType;
   actor: Actor;

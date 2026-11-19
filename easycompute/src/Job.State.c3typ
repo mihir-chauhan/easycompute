@@ -1,0 +1,37 @@
+/**
+ * Slurm job state (sacct State, normalized).
+ */
+enum type Job.State {
+  /**
+   * Queued, waiting for resources or priority.
+   */
+  PENDING = 'PENDING'
+  /**
+   * Executing on allocated nodes.
+   */
+  RUNNING = 'RUNNING'
+  /**
+   * Finished with exit code 0.
+   */
+  COMPLETED = 'COMPLETED'
+  /**
+   * Finished with a non-zero exit code or a node failure.
+   */
+  FAILED = 'FAILED'
+  /**
+   * Killed at the walltime limit.
+   */
+  TIMEOUT = 'TIMEOUT'
+  /**
+   * Cancelled by the user, an admin or autopilot.
+   */
+  CANCELLED = 'CANCELLED'
+  /**
+   * Killed by the out-of-memory handler.
+   */
+  OUT_OF_MEMORY = 'OUT_OF_MEMORY'
+  /**
+   * Preempted by a higher-priority job (preemptible/standby QOS).
+   */
+  PREEMPTED = 'PREEMPTED'
+}

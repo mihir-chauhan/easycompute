@@ -7,84 +7,90 @@
  * This material may be covered by one or more patents or pending patent applications.
  */
 
-import React, { useCallback, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Route, Routes } from 'react-router-dom';
-import ShellControls from './components/ShellControls/ShellControls';
-import SideNav from './components/SideNav/SideNav';
-import TopNav from './components/TopNav/TopNav';
 import ErrorReporterProvider from './components/ErrorBoundary/ErrorBoundary';
+import AppShell, { AppShellProvider, useAppShell, type ShellLab } from './components/app/AppShell';
+import { ADMIN_NAV, LAB_NAV } from './config/navigation';
+import { fetchLabs } from './features/lab/api';
+import { setCurrentLabId } from './features/lab/useCurrentLab';
 // <routes-imports> (generated from routes.*.json by the integrator)
-
+import LabHome from './pages/LabHome/LabHome';
+import LabContext from './pages/LabContext/LabContext';
+import PlanRun from './pages/PlanRun/PlanRun';
+import RunList from './pages/Runs/RunList';
+import RunDetail from './pages/Runs/RunDetail';
+import History from './pages/History/History';
+import AssistantPage from './pages/Assistant/AssistantPage';
+import AdminOverview from './pages/AdminOverview/AdminOverview';
+import AdminClusters from './pages/AdminClusters/AdminClusters';
+import AdminClusterDetail from './pages/AdminClusters/AdminClusterDetail';
+import AdminPolicies from './pages/AdminPolicies/AdminPolicies';
+import AdminLabs from './pages/AdminLabs/AdminLabs';
 // </routes-imports>
 
-/** Stand-in for a page whose owning agent has not registered it yet (routes.<agent>.json). */
-function ComingSoon({ title }: { title: string }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-      <p className="text-c3-bold-heading-h4 text-[var(--c3-style-basic-fg-primary)]">{title}</p>
-      <p className="text-[var(--c3-style-basic-fg-neutral)]">This page is being built.</p>
-    </div>
-  );
+
+/** Mirrors the shell's current lab into the lab pages' `useCurrentLab` (features/lab), so both stay in step. */
+function LabSync() {
+  const { labId } = useAppShell();
+  useEffect(() => {
+    if (labId) setCurrentLabId(labId);
+  }, [labId]);
+  return null;
 }
 
 /**
- * Application shell.
- *
- * The chrome — {@link TopNav} across the top and {@link SideNav} down the left —
- * is rendered here, OUTSIDE `<Routes>`, so it is present on **every** page. The
- * router only ever swaps the `<main>` content; the top bar and side nav are part
- * of the shell and cannot be dropped by an individual page. Per the C3 Design
- * System, the TopNavBar is expected on every screen — keep it mounted here and
- * do not move it inside a route.
+ * Application shell: {@link AppShell} (top bar with the Lab view / Research Computing switch and the demo lab
+ * switcher, section-aware side nav) wraps every route, so the chrome is present on every page.
  */
 export default function App() {
-  // Phone width: the side nav is a drawer opened from the TopNav menu button.
-  const [navOpen, setNavOpen] = useState(false);
-  const openNav = useCallback(() => setNavOpen(true), []);
-  const closeNav = useCallback(() => setNavOpen(false), []);
+  const [labs, setLabs] = useState<ShellLab[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchLabs()
+      .then((rows) => {
+        if (!cancelled) setLabs(rows);
+      })
+      .catch(() => {
+        // Pages show their own load errors; the shell just has no lab switcher.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <ErrorReporterProvider>
-      <div className="h-screen flex flex-col max-w-full overflow-hidden">
-        <TopNav title="EasyCompute" onMenuClick={openNav} actions={<ShellControls />} />
-        <div className="flex flex-1 min-h-0">
-          <SideNav mobileOpen={navOpen} onMobileClose={closeNav} />
-          <div className="flex-1 flex flex-col min-w-0">
-            <main className="flex-1 overflow-auto bg-[var(--c3-style-basic-bg-page)]">
-              <Routes>
-                {/* <routes> */}
-                <Route path="/" element={<ComingSoon title="Lab Home" />} />
-                <Route path="/context" element={<ComingSoon title="Lab Context" />} />
-                <Route path="/plan" element={<ComingSoon title="Plan a Run" />} />
-                <Route path="/runs" element={<ComingSoon title="Live Runs" />} />
-                <Route path="/runs/:id" element={<ComingSoon title="Run detail" />} />
-                <Route path="/history" element={<ComingSoon title="History & Insights" />} />
-                <Route path="/assistant" element={<ComingSoon title="AI Advisor" />} />
-                <Route path="/admin" element={<ComingSoon title="University Overview" />} />
-                <Route path="/admin/clusters" element={<ComingSoon title="Clusters & Partitions" />} />
-                <Route path="/admin/clusters/:id" element={<ComingSoon title="Cluster detail" />} />
-                <Route path="/admin/policies" element={<ComingSoon title="Policies" />} />
-                <Route path="/admin/labs" element={<ComingSoon title="Labs" />} />
+      <AppShellProvider labs={labs}>
+        <LabSync />
+        <AppShell labNav={LAB_NAV} adminNav={ADMIN_NAV}>
+          <Routes>
+            {/* <routes> */}
+                <Route path="/" element={<LabHome />} />
+                <Route path="/context" element={<LabContext />} />
+                <Route path="/plan" element={<PlanRun />} />
+                <Route path="/runs" element={<RunList />} />
+                <Route path="/runs/:id" element={<RunDetail />} />
+                <Route path="/history" element={<History />} />
+                <Route path="/assistant" element={<AssistantPage />} />
+                <Route path="/admin" element={<AdminOverview />} />
+                <Route path="/admin/clusters" element={<AdminClusters />} />
+                <Route path="/admin/clusters/:id" element={<AdminClusterDetail />} />
+                <Route path="/admin/policies" element={<AdminPolicies />} />
+                <Route path="/admin/labs" element={<AdminLabs />} />
                 {/* </routes> */}
-                <Route
-                  path="*"
-                  element={
-                    import.meta.env.MODE === 'development' ? (
-                      <div className="flex h-full items-center justify-center p-8 text-center text-[var(--c3-style-basic-fg-neutral)]">
-                        <p>No route matched. Add routes in App.tsx.</p>
-                      </div>
-                    ) : (
-                      <div className="flex h-full items-center justify-center p-8 text-center text-[var(--c3-style-basic-fg-neutral)]">
-                        <p>Page not found.</p>
-                      </div>
-                    )
-                  }
-                />
-              </Routes>
-            </main>
-          </div>
-        </div>
-      </div>
+            <Route
+              path="*"
+              element={
+                <div className="flex h-full items-center justify-center p-8 text-center text-[var(--c3-style-basic-fg-neutral)]">
+                  <p>Page not found.</p>
+                </div>
+              }
+            />
+          </Routes>
+        </AppShell>
+      </AppShellProvider>
     </ErrorReporterProvider>
   );
 }

@@ -1,0 +1,3 @@
+[
+  { "path": "/assistant", "element": "pages/Assistant/AssistantPage", "export": "default", "navLabel": "AI Advisor", "icon": "Sparkles", "section": "lab" }
+]
