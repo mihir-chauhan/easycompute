@@ -1,0 +1,12 @@
+{
+  "id": "Job_TelemetryGpuMemPct",
+  "name": "Job_TelemetryGpuMemPct",
+  "description": "Average GPU memory used (%) of a Job over its JobMetric samples (live runs). Backs the Feature Store feature Job#telemetryGpuMemPct registered by JobDurationModel.train().",
+  "srcType": "Job",
+  "tsDecl": {
+    "data": "metrics",
+    "value": "gpuMemPct",
+    "start": "ts",
+    "treatment": "AVG"
+  }
+}

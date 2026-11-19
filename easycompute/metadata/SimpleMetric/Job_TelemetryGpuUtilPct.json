@@ -1,0 +1,12 @@
+{
+  "id": "Job_TelemetryGpuUtilPct",
+  "name": "Job_TelemetryGpuUtilPct",
+  "description": "Average GPU utilization (%) of a Job over its JobMetric samples (live runs). Backs the Feature Store feature Job#telemetryGpuUtilPct registered by JobDurationModel.train().",
+  "srcType": "Job",
+  "tsDecl": {
+    "data": "metrics",
+    "value": "gpuUtilPct",
+    "start": "ts",
+    "treatment": "AVG"
+  }
+}

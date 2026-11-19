@@ -29,6 +29,7 @@ import { notYetRules, toCandidateRules } from '@/features/lab/constraints';
 import { formatInt, titleCase } from '@/features/lab/format';
 import type { Allocation, ExtractedConstraint, LabConstraints, Project } from '@/features/lab/types';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
+import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { formatDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -51,6 +52,8 @@ const LabContext: React.FC = () => {
   const other = useLoad(() => (labId ? Promise.all([fetchAllocations(labId), fetchProjects(labId), fetchMembers(labId)]) : null), [labId]);
   const [allocations, projects, members] = other.data ?? [[], [], []];
 
+  const lr = useLabRole();
+  const ro = !lr.canEditContext;
   const [text, setText] = useState('');
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -176,6 +179,7 @@ const LabContext: React.FC = () => {
             <SectionCard title="Context dump" actions={<HeadNote>Free text: funding, deadlines, house rules</HeadNote>}>
               <Textarea
                 aria-label="Lab context"
+                readOnly={ro}
                 rows={16}
                 value={text}
                 className="text-sm leading-6"
@@ -185,6 +189,9 @@ const LabContext: React.FC = () => {
                   setDirty(true);
                 }}
               />
+              {ro ? (
+                <p className={cn('mt-4 text-[13px]', muted)}>Read-only for lab members. Your PI or lab admin edits the lab context and confirms extracted rules.</p>
+              ) : (
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 <Button leadingIcon={<Sparkles />} disabled={!text.trim()} loading={busy === 'extract'} onClick={extract}>
                   {parsed ? 'Extract again' : 'Extract constraints'}
@@ -196,6 +203,7 @@ const LabContext: React.FC = () => {
                   {dirty ? 'Unsaved changes' : `${formatInt(text.trim() ? text.trim().split(/\s+/).length : 0)} words · re-read whenever it changes`}
                 </span>
               </div>
+              )}
               {note && <p role="status" className="mt-3 text-[13px] text-[var(--c3-style-basic-fg-success)]">{note}</p>}
               {parsed?.summary && <p className={cn('mt-3 text-[13px]', muted)}>{parsed.summary}</p>}
             </SectionCard>
@@ -218,7 +226,7 @@ const LabContext: React.FC = () => {
               <p key={w} className="text-[13px] text-[var(--c3-style-basic-fg-warning)]">{w}</p>
             ))}
 
-            <SectionCard flush title="Funding" actions={<ToneBadge tone="good">{`${allocations.length} sources`}</ToneBadge>}>
+            <SectionCard flush title="Funding" actions={<ToneBadge tone="good">{`${allocations.length} source${allocations.length === 1 ? "" : "s"}`}</ToneBadge>}>
               <DataTable columns={allocColumns} rows={allocations} rowKey={(a) => a.id} loading={other.loading && !other.data} emptyLabel="No allocations recorded" />
             </SectionCard>
 
@@ -252,10 +260,10 @@ const LabContext: React.FC = () => {
                         right={
                           <>
                             <ToneBadge tone={tone}>{label}</ToneBadge>
-                            <Switch size="sm" aria-label={`Rule ${p.id} active`} checked={p.active !== false} disabled={busy === p.id} onCheckedChange={(v) => act(p.id, async () => { await setPolicyActive(p.id, v); rules.reload(); })} />
-                            <button type="button" aria-label={`Delete rule ${p.title}`} className={cn('rounded p-1 hover:text-[var(--c3-style-basic-fg-danger)]', muted)} onClick={() => act(`del-${p.id}`, async () => { await removePolicy(p.id); rules.reload(); })}>
+                            <Switch size="sm" aria-label={`Rule ${p.id} active`} checked={p.active !== false} disabled={ro || busy === p.id} onCheckedChange={(v) => act(p.id, async () => { await setPolicyActive(p.id, v); rules.reload(); })} />
+                            {!ro && <button type="button" aria-label={`Delete rule ${p.title}`} className={cn('rounded p-1 hover:text-[var(--c3-style-basic-fg-danger)]', muted)} onClick={() => act(`del-${p.id}`, async () => { await removePolicy(p.id); rules.reload(); })}>
                               <Trash2 className="size-3.5" />
-                            </button>
+                            </button>}
                           </>
                         }
                       />

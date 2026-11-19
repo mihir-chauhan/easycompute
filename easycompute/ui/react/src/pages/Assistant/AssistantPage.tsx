@@ -75,6 +75,12 @@ const AssistantPage: React.FC = () => {
     };
   }, []);
 
+  // Warm-up: wakes the Python worker and makes sure the agent is current before the first question (idempotent, ~0.3 s
+  // when warm; a cold worker otherwise adds 20-60 s to the first answer).
+  useEffect(() => {
+    c3Call('Advisor', 'ensureAgent', null, [false]).catch(() => undefined);
+  }, []);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, pending]);

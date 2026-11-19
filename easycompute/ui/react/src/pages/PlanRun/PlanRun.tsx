@@ -25,6 +25,7 @@ import { CheckRow, HeadNote, KV, muted, ScriptBlock } from '@/features/lab/compo
 import { formatDuration, formatInt, formatUsd, WORKLOAD_LABEL } from '@/features/lab/format';
 import type { RuleCheck, RunPlan, RunRequest, RunRequestStatus } from '@/features/lab/types';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
+import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { formatDateTime, formatShortDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -134,6 +135,7 @@ const PlanRun: React.FC = () => {
   const navigate = useNavigate();
   const { reportError } = useErrorBoundary();
   const { lab, labId, error: labError } = useCurrentLab();
+  const lr = useLabRole();
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<PlanForm>(EMPTY_FORM);
   const [request, setRequest] = useState<RunRequest | null>(null);
@@ -176,7 +178,7 @@ const PlanRun: React.FC = () => {
   const plan3 = () =>
     guard('check', async () => {
       if (!labId) return;
-      const body = toRunRequest(form, labId);
+      const body = { ...toRunRequest(form, labId), ...(lr.user ? { submittedBy: { id: lr.user.id } } : {}) };
       let rr: RunRequest;
       if (request) {
         await updateRunRequest({ ...body, id: request.id });

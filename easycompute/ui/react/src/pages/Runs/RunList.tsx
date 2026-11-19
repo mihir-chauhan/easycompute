@@ -9,6 +9,7 @@ import { FastForward, Rocket } from 'lucide-react';
 
 import {
   ClearFilters,
+  useAppShell,
   DataTable,
   ErrorState,
   PageFrame,
@@ -30,6 +31,7 @@ import { AlertTypeBadge, CliHint, JobStateBadge, Mono, muted, Notice } from '@/f
 import { whereLabel, formatDuration, formatInt, formatPct100, formatRelative, formatUsd } from '@/features/lab/format';
 import type { Alert, Job } from '@/features/lab/types';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
+import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { cn } from '@/lib/utils';
 
@@ -50,7 +52,15 @@ const RunList: React.FC = () => {
 
   // Live list: background refresh every 30 s while the page is open.
   const data = useLoad(() => (labId ? Promise.all([fetchRecentJobs(labId), fetchOpenAlerts(labId), fetchLiveMetrics(labId)]) : null), [labId], 30000);
-  const [jobs, alerts, metrics] = data.data ?? [[], [], []];
+  const [allJobs, alerts, metrics] = data.data ?? [[], [], []];
+  const lr = useLabRole();
+  const { clusterId } = useAppShell();
+  const mineOnly = lr.isMember && Boolean(lr.user);
+  const jobs = useMemo(
+    () => allJobs.filter((j) => (!clusterId || j.cluster?.id === clusterId) && (!mineOnly || lr.isOwn(j.user))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allJobs, clusterId, mineOnly, lr.user],
+  );
 
   const alertsByJob = useMemo(() => {
     const by: Record<string, Alert[]> = {};
@@ -182,8 +192,8 @@ const RunList: React.FC = () => {
           <b className="font-semibold text-[var(--c3-style-basic-fg-primary)]">{running}</b>
           {` run${running === 1 ? '' : 's'} live and `}
           <b className="font-semibold text-[var(--c3-style-basic-fg-primary)]">{queued}</b>
-          {' queued across '}
-          <b className="font-semibold text-[var(--c3-style-basic-fg-primary)]">all clusters</b>.
+          {` queued${mineOnly ? ' of yours' : ''} on `}
+          <b className="font-semibold text-[var(--c3-style-basic-fg-primary)]">{clusterId ? (allJobs.find((j) => j.cluster?.id === clusterId)?.cluster?.name ?? clusterId) : 'all clusters'}</b>.
         </span>
       }
       actions={

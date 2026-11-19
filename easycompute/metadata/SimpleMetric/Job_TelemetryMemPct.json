@@ -1,0 +1,12 @@
+{
+  "id": "Job_TelemetryMemPct",
+  "name": "Job_TelemetryMemPct",
+  "description": "Average host memory used (% of requested) of a Job over its JobMetric samples (live runs). Backs the Feature Store feature Job#telemetryMemPct registered by JobDurationModel.train().",
+  "srcType": "Job",
+  "tsDecl": {
+    "data": "metrics",
+    "value": "memPct",
+    "start": "ts",
+    "treatment": "AVG"
+  }
+}

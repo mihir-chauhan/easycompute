@@ -1,0 +1,39 @@
+/**
+ * Champion-model duration prediction for one live {@link Job}, written by {@link JobDurationModel#scoreLive}. The id is
+ * the job id, so each live job has exactly one current prediction; rows for jobs that are no longer live are removed on
+ * the next scoring pass.
+ */
+@db(index=['job', 'walltimeRisk', 'scoredAt'])
+entity type JobPrediction {
+
+  /**
+   * Scored live job (same id as this row).
+   */
+  job: Job
+
+  /**
+   * Predicted total run time in hours (inverse of the model's log1p target).
+   */
+  predictedHours: double
+
+  /**
+   * The job's requested walltime in hours ({@link Job#timelimitHours}) at scoring time.
+   */
+  timelimitHours: double
+
+  /**
+   * True when {@link JobPrediction#predictedHours} exceeds {@link JobPrediction#timelimitHours}: the job is likely to
+   * hit its walltime and be killed (TIMEOUT).
+   */
+  walltimeRisk: boolean
+
+  /**
+   * Id of the champion {@link MlModel} that produced the prediction.
+   */
+  modelId: string
+
+  /**
+   * When the prediction was written.
+   */
+  scoredAt: datetime
+}

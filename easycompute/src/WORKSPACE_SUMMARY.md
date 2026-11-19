@@ -25,7 +25,14 @@ Response shapes and method contracts: `project/API.md`. Platform-name collisions
   `seed/CronJob/EasyComputeMonitorTick.json` (every 5 min, ships inactive).
 - `Insights` (`Insights.js`): `predictDuration`, `labSummary`, `universityOverview` (all `json`). Aggregates that need
   GPU-hours are computed in JS over `fetchObjStream` (stored calcs were not populated by `upsertAllSeed`).
-- Tests: `test/js-rhino/test_{RunRequest,Job,Insights}.js` (self-contained fixtures, need `testtools` in the manifest).
+- Users & access: `AppUser` (+ `.Role`, `.Status`; rows created from LabMember on first use), `DemoIdentity` (demo
+  role switch per platform user), `UserAdmin` (`UserAdmin.js`: whoAmI, setDemoUser, listUsers, inviteUser, setRole,
+  removeUser, pendingApprovals, approve, reject; lab scope enforced in code). Platform roles
+  `metadata/Role/EasyCompute.{UniversityAdmin,LabPI,LabMember}.json` + same-id `seed/UserGroup/*.json`.
+  RunRequest `approvalStatus` (+ `.Approval`): checkRules sets PENDING for "PI approval" rules; submit blocks until approved.
+- `DataLineage.graph()` (`DataLineage.js`): sources → pipelines (native FileSourceCollections when deployed) → entities →
+  consumers with live row counts and freshness.
+- Tests: `test/js-rhino/test_{RunRequest,Job,Insights,UserAdmin}.js` (self-contained fixtures, need `testtools` in the manifest).
   Local runner without the platform: `node project/tools/backend-harness/run.js` (all methods on the seed) and
   `node project/tools/backend-harness/jasmine.js` (the Jasmine files on an in-memory mock).
 

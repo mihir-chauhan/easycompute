@@ -23,7 +23,7 @@ import { ArrowLeftRight, Bell, Building2, Check, ChevronDown, Lock, Search, Sett
 
 import { DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { c3Call } from '@/c3Action';
-import { getLabSummary, getUniversityOverview } from '@/features/admin/api';
+import { getLabSummary, getUniversityOverview, setDemoUser } from '@/features/admin/api';
 import type { LabSummaryLite, UniversityOverview } from '@/features/admin/types';
 import { cn } from '@/lib/utils';
 
@@ -125,6 +125,13 @@ export function AppShellProvider({ labs, defaultLabId, children }: { labs: Shell
     writeStored(LAB_KEY, id);
   }, []);
 
+  // Server-side enforcement follows the demo identity (UserAdmin.setDemoUser; AppUser id = LabMember id).
+  const demoUserId = role === 'UNIVERSITY_ADMIN' ? null : (role === 'PI' ? members.find((x) => x.role === 'PI') : members.find((x) => x.role === 'STUDENT') ?? members.find((x) => x.role === 'POSTDOC'))?.id ?? null;
+  useEffect(() => {
+    if (role !== 'UNIVERSITY_ADMIN' && !demoUserId) return;
+    void setDemoUser(demoUserId);
+  }, [role, demoUserId]);
+
   const value = useMemo<AppShellContextValue>(
     () => ({
       labs,
@@ -139,7 +146,7 @@ export function AppShellProvider({ labs, defaultLabId, children }: { labs: Shell
       can: (p: Permission) => roleCan(role, p),
       user: (() => {
         if (role === 'UNIVERSITY_ADMIN') return RCAC_USER;
-        const m = role === 'PI' ? members.find((x) => x.role === 'PI') ?? members.find((x) => x.role === 'STAFF') : members.find((x) => x.role === 'STUDENT') ?? members.find((x) => x.role === 'POSTDOC');
+        const m = role === 'PI' ? members.find((x) => x.role === 'PI') : members.find((x) => x.role === 'STUDENT') ?? members.find((x) => x.role === 'POSTDOC');
         return m ? { id: m.id, name: m.name, username: m.username, memberRole: m.role } : null;
       })(),
     }),
@@ -510,7 +517,7 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const items = view === 'admin' ? adminNav : labNav;
+  const items = view === 'admin' ? (role === 'UNIVERSITY_ADMIN' ? adminNav : []) : labNav;
   const active =
     items
       .filter((i) => (i.path === '/' || i.path === '/admin' ? location.pathname === i.path : location.pathname === i.path || location.pathname.startsWith(`${i.path}/`)))
@@ -679,7 +686,7 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
               {g.items.map((i) => navLink(i))}
             </React.Fragment>
           ))}
-          {role === 'UNIVERSITY_ADMIN' ? (
+          {role === 'UNIVERSITY_ADMIN' || view === 'admin' ? (
             <>
               <h6 className="mx-2 mt-3.5 mb-1.5 hidden text-xs font-medium text-[var(--ec-fg-2)] md:block">{view === 'admin' ? 'Lab' : 'University'}</h6>
               {navLink(

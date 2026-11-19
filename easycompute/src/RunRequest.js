@@ -599,10 +599,16 @@ function evalPolicy(ctx, pol, c) {
 
 /** Budget rules: balance, per-run approval threshold (limitValue > 1), cap as a share of the total (0-1), expiry ("days"). */
 function budgetCheck(ctx, c, pol) {
-  var alloc = ctx.allocations[c.cluster.id];
-  if (alloc == null) return { ok: false, msg: 'The lab has no active allocation on ' + c.cluster.name + '.' };
   var lv = pol && pol.limitValue != null ? Number(pol.limitValue) : null;
   var text = pol ? String(pol.limitText || '') : '';
+  if (lv != null && lv > 1 && !/day/i.test(text)) {
+    var gh = c.isGpu ? c.gpus * c.duration : c.costUnits;
+    return gh <= lv
+      ? { ok: true, msg: 'Estimated ' + round(gh, 1) + ' GPU-hours is under the ' + lv + ' GPU-hour approval threshold.' }
+      : { ok: false, msg: 'Estimated ' + round(gh, 1) + ' GPU-hours exceeds ' + lv + ' GPU-hours: ' + (pol.description || 'needs PI approval.') };
+  }
+  var alloc = ctx.allocations[c.cluster.id];
+  if (alloc == null) return { ok: false, msg: 'The lab has no active allocation on ' + c.cluster.name + '.' };
   var unit = alloc.unitName || c.cluster.unitName || 'units';
   var remaining = alloc.totalUnits - alloc.usedUnits;
   if (lv != null && /day/i.test(text)) {
@@ -610,12 +616,6 @@ function budgetCheck(ctx, c, pol) {
     return daysLeft == null || daysLeft > lv
       ? { ok: true, msg: 'The ' + c.cluster.name + ' allocation runs ' + (daysLeft == null ? 'without an end date' : 'for ' + Math.round(daysLeft) + ' more days') + '.' }
       : { ok: false, msg: 'The ' + c.cluster.name + ' allocation ends in ' + Math.max(0, Math.round(daysLeft)) + ' days (within ' + lv + '); outputs on project storage are purged after expiry.' };
-  }
-  if (lv != null && lv > 1) {
-    var gh = c.isGpu ? c.gpus * c.duration : c.costUnits;
-    return gh <= lv
-      ? { ok: true, msg: 'Estimated ' + round(gh, 1) + ' GPU-hours is under the ' + lv + ' GPU-hour approval threshold.' }
-      : { ok: false, msg: 'Estimated ' + round(gh, 1) + ' GPU-hours exceeds ' + lv + ' GPU-hours: ' + (pol.description || 'needs PI approval.') };
   }
   if (lv != null && lv > 0 && lv <= 1) {
     var capUnits = alloc.totalUnits * lv;
@@ -846,7 +846,18 @@ function checkRules() {
     return !c.blocked;
   });
   var status = feasible.length ? 'CHECKED' : 'REJECTED';
-  RunRequest.make({ id: req.id, status: status }).merge();
+  // a failing lab rule that asks for PI approval (e.g. runs above 500 GPU-hours) holds submission until decided
+  var approvalRule = null;
+  order.forEach(function (key) {
+    var e = byKey[key];
+    var pol = e.r.policy;
+    if (approvalRule || !e.fails.length || e.passes.length || e.r.severity == 'INFO' || pol == null) return;
+    if (/approv/i.test(String(pol.title || '') + ' ' + String(pol.description || '') + ' ' + String(pol.limitText || ''))) approvalRule = e;
+  });
+  var approval = req.approvalStatus == 'APPROVED' || req.approvalStatus == 'REJECTED' ? String(req.approvalStatus) : approvalRule ? 'PENDING' : 'NOT_REQUIRED';
+  var upd = { id: req.id, status: req.approvalStatus == 'REJECTED' ? 'REJECTED' : status, approvalStatus: approval };
+  if (approval == 'PENDING') upd.approvalReason = (approvalRule.r.policy.id || '') + ' ' + approvalRule.r.title + ': ' + approvalRule.firstFailMsg;
+  RunRequest.make(upd).merge();
   log.info('checkRules {}: {} checks, {} of {} options feasible -> {}', req.id, rows.length, feasible.length, everything.length, status);
 
   return list(RuleCheck.fetch({ filter: Filter.eq('runRequest.id', req.id), limit: 200 }).objs).sort(function (a, b) {
@@ -989,18 +1000,19 @@ function recommendPlans() {
     return RunPlan.fetch({ filter: Filter.eq('runRequest.id', req.id), limit: 10 }).objs;
   }
 
-  var minF = Infinity, maxF = -Infinity, minC = Infinity, maxC = -Infinity;
+  var minF = Infinity;
+  var minC = Infinity;
   options.forEach(function (c) {
     minF = Math.min(minF, c.finishHours);
-    maxF = Math.max(maxF, c.finishHours);
     minC = Math.min(minC, c.costUsd);
-    maxC = Math.max(maxC, c.costUsd);
   });
   var preferred = csv(ctx.lab.preferredClusters);
   options.forEach(function (c) {
-    var f = maxF > minF ? (c.finishHours - minF) / (maxF - minF) : 0;
-    var k = maxC > minC ? (c.costUsd - minC) / (maxC - minC) : 0;
-    var s = 100 * (1 - (0.4 * f + 0.35 * k + 0.15 * c.preemptionRisk + 0.1 * Math.min(1, warns(c.results).length / 3)));
+    // log ratios to the best option (0 = best, 1 = 4x worse or more): small absolute gaps stay small
+    var f = Math.min(1, Math.log(Math.max(c.finishHours, 0.01) / Math.max(minF, 0.01)) / Math.log(4));
+    var k = Math.min(1, Math.log((c.costUsd + 1) / (minC + 1)) / Math.log(4));
+    var s = 100 * (1 - (0.45 * f + 0.3 * k + 0.15 * c.preemptionRisk + 0.1 * Math.min(1, warns(c.results).length / 3)));
+    if (c.wait > 12) s -= 5;
     if (!c.meetsDeadline) s -= 30;
     if (preferred.indexOf(String(c.cluster.id)) >= 0) s += 3;
     if (req.requestedCluster != null && req.requestedCluster.id == c.cluster.id) s += 4;
@@ -1118,6 +1130,8 @@ function submit(planId) {
   var plan = RunPlan.make({ id: planId }).get('this, cluster.this, partition.this, gpuType.this');
   if (plan == null || plan.runRequest == null || plan.runRequest.id != req.id) throw new Error('RunPlan ' + planId + ' is not a plan of RunRequest ' + req.id);
   if (req.status == 'SUBMITTED') throw new Error('RunRequest ' + req.id + ' was already submitted');
+  if (req.approvalStatus == 'PENDING') throw new Error('RunRequest ' + req.id + ' needs PI approval before it can be submitted (' + (req.approvalReason || 'lab rule') + '). Approve it with UserAdmin.approve("RR:' + req.id + '").');
+  if (req.approvalStatus == 'REJECTED') throw new Error('RunRequest ' + req.id + ' was rejected by ' + (req.approvedBy || 'the PI') + '.');
 
   var now = Date.now();
   var clusterId = String(plan.cluster.id);

@@ -3,7 +3,8 @@
  *   UNIVERSITY_ADMIN  RCAC staff: everything, every lab, the Research Computing section.
  *   PI                PI / Lab admin: their lab's members, budgets, context, approvals and guardrails.
  *   MEMBER            Student / lab member: plan and submit runs within limits, act on their own runs.
- * LabMember.role maps onto these: PI and STAFF (lab manager) -> PI; POSTDOC and STUDENT -> MEMBER.
+ * Backend AppUser.role (API.md section 5): UNIVERSITY_ADMIN | PI | STUDENT | STAFF; STUDENT and STAFF are lab members.
+ * LabMember.role maps the same way: PI -> PI; POSTDOC, STAFF, STUDENT -> MEMBER.
  * Pages gate actions with `useAppShell().can('approve_requests')`; the shell hides nav items whose `roles` exclude
  * the current role and shows an access notice on /admin pages for non-admins.
  */
@@ -28,8 +29,9 @@ export const ROLE_DESCRIPTION: Record<EcRole, string> = {
   MEMBER: 'Plan and submit runs within the lab’s limits; see and act on their own runs.',
 };
 
-/** Map a LabMember.role (PI, POSTDOC, STUDENT, STAFF) to an app role. */
-export const roleFromMember = (memberRole?: string | null): EcRole => (memberRole === 'PI' || memberRole === 'STAFF' ? 'PI' : 'MEMBER');
+/** Map an AppUser.role or LabMember.role (UNIVERSITY_ADMIN, PI, POSTDOC, STUDENT, STAFF) to an app role. */
+export const roleFromMember = (memberRole?: string | null): EcRole =>
+  memberRole === 'UNIVERSITY_ADMIN' || memberRole === 'RCAC' ? 'UNIVERSITY_ADMIN' : memberRole === 'PI' ? 'PI' : 'MEMBER';
 
 export type Permission =
   | 'view_university'

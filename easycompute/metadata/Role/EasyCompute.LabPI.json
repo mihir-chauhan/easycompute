@@ -1,0 +1,21 @@
+{
+  "id": "EasyCompute.LabPI",
+  "description": "Lab PI: everything a lab member can do plus lab context, members, guardrail policies, autopilot settings, user management and approvals for their own lab.",
+  "permissions": [
+    "allow:Lab::merge",
+    "allow:LabMember::*",
+    "allow:AutopilotPolicy::*",
+    "allow:Policy::create",
+    "allow:Policy::merge",
+    "allow:Policy::remove",
+    "allow:RunRequest::*",
+    "allow:JobAlert::*",
+    "allow:UserAdmin::*",
+    "allow:DataLineage::*",
+    "allow:AppUser::*",
+    "allow:ActionLogEntry::merge"
+  ],
+  "nestedRoles": [
+    "EasyCompute.LabMember"
+  ]
+}

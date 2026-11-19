@@ -3,7 +3,7 @@
  * `<clusterId>-<slurmJobId>`. Inherited `name` is unused; {@link Job#jobName} is the Slurm job name.
  */
 @db(index=['lab', 'cluster', 'partition', 'state', 'isLive', 'user', 'workloadType', 'gpuType', 'submitTime', 'lab, submitTime'])
-entity type Job {
+entity type Job mixes MlSubject {
 
   /**
    * Slurm JobID.

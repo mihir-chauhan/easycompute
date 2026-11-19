@@ -1,0 +1,32 @@
+{
+  "id": "EasyCompute.UniversityAdmin",
+  "description": "Research Computing admin: every action on every EasyCompute type, all labs.",
+  "permissions": [
+    "allow:GpuType::*",
+    "allow:ComputeCluster::*",
+    "allow:Partition::*",
+    "allow:Lab::*",
+    "allow:LabMember::*",
+    "allow:Allocation::*",
+    "allow:Project::*",
+    "allow:Policy::*",
+    "allow:AutopilotPolicy::*",
+    "allow:RunRequest::*",
+    "allow:RuleCheck::*",
+    "allow:RunPlan::*",
+    "allow:Job::*",
+    "allow:JobMetric::*",
+    "allow:JobAlert::*",
+    "allow:ActionLogEntry::*",
+    "allow:AppUser::*",
+    "allow:DemoIdentity::*",
+    "allow:UserAdmin::*",
+    "allow:DataLineage::*",
+    "allow:Insights::*",
+    "allow:RunMonitor::*",
+    "allow:Advisor::*"
+  ],
+  "nestedRoles": [
+    "EasyCompute.LabPI"
+  ]
+}

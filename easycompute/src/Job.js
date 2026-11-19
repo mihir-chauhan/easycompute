@@ -298,6 +298,23 @@ function evaluateHealth() {
 
 // ---------------------------------------------------------------- actions
 
+/** A `json` result of another type's method as a plain object (it may arrive boxed or as a string). */
+function plainJson(v) {
+  if (v == null || typeof v.user !== 'undefined') return v;
+  if (v.value != null && typeof v.value.user !== 'undefined') return v.value;
+  return JSON.parse(typeof v.toJsonString === 'function' ? v.toJsonString() : String(v));
+}
+
+/** Lab scope for user actions: students/staff act on their own jobs, PIs on their lab's jobs, admins on all. */
+function checkActingUser(job, type) {
+  var me = plainJson(UserAdmin.whoAmI()).user;
+  var labId = job.lab ? String(job.lab.id) : null;
+  if (me.role == 'UNIVERSITY_ADMIN') return;
+  if (me.role == 'PI' && me.labId == labId) return;
+  if ((me.role == 'STUDENT' || me.role == 'STAFF') && me.labId == labId && String(job.user) == String(me.username)) return;
+  throw new Error(me.name + ' (' + me.role + ') may not ' + type + ' job ' + job.id + ' of ' + (job.user || 'another user') + (me.role == 'PI' ? ' outside their lab.' : '; members act only on their own jobs.'));
+}
+
 function standbyPartition(job) {
   if (!job.cluster) return null;
   var parts = list(Partition.fetch({ filter: Filter.eq('cluster.id', job.cluster.id).and().eq('preemptible', true), limit: 50 }).objs);
@@ -339,6 +356,7 @@ function applyAction(actionType, actor) {
   if (ACTIONS.indexOf(type) < 0) throw new Error('Unsupported actionType ' + actionType + ' for a job; use one of ' + ACTIONS.join(', '));
   if (ACTORS.indexOf(who) < 0) throw new Error('Unknown actor ' + actor + '; use one of ' + ACTORS.join(', '));
   var job = loadJob(this.id);
+  if (who == 'USER') checkActingUser(job, type);
   var now = Date.now();
   var sid = job.slurmJobId || job.id;
   var st = String(job.state);

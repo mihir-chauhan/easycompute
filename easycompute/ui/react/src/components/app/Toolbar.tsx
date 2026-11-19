@@ -112,7 +112,7 @@ export interface PageTab {
 /** Underline tabs (mockup ".tabs"): 28px gaps, active tab white with a 2px green underline. */
 export function PageTabs({ tabs, value, onChange, label = 'Sections' }: { tabs: PageTab[]; value: string; onChange: (v: string) => void; label?: string }) {
   return (
-    <div role="tablist" aria-label={label} className="flex gap-7 overflow-x-auto border-b border-[var(--ec-line)]">
+    <div role="tablist" aria-label={label} className="flex gap-7 overflow-x-auto border-b border-[var(--ec-line)] [scrollbar-width:none]">
       {tabs.map((t) => {
         const active = t.value === value;
         return (

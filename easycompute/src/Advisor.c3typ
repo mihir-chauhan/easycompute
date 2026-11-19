@@ -220,6 +220,15 @@ type Advisor {
   suggestedPrompts: function(labId: string): json js-server
 
   /**
+   * Compact facts about a lab (allocations left, next deadlines, live jobs and open alerts, data restrictions) that ask
+   * adds to every agent query, so simple budget and deadline questions need no tool call. Internal; not an agent tool.
+   *
+   * @param labId The lab.
+   * @return one line of text, empty when the lab is unknown.
+   */
+  contextSnapshot: function(labId: string): !string js-server
+
+  /**
    * Server time marking the start of an ask turn. Internal; used by ask to collect the tool calls of the turn.
    *
    * @return ISO timestamp one second before now.

@@ -1,0 +1,29 @@
+/**
+ * Native C3 ML job-duration model (scikit-learn through the platform ML framework, no LLM). Features come from the
+ * Feature Store sets `Job#durationInputs` (workloadType, cluster, partition, GPU type, lab, allocated GPUs/nodes/CPUs,
+ * requested memory, walltime) and `Job#durationLabel` (elapsedHours) on {@link Job}; the {@link MlPipeline} is a
+ * one-hot encoder + gradient boosting regressor trained on log1p(hours). Models live in the {@link MlProject}
+ * `job-duration` (rule router); the champion route scores live jobs into {@link JobPrediction}.
+ */
+type JobDurationModel {
+
+  /**
+   * Upserts and materializes the two {@link Feature.Set}s, splits finished history jobs (isLive false, state COMPLETED
+   * or TIMEOUT, elapsedHours > 0) 80/20 by a stable md5 hash of the job id, trains a new {@link MlModel} on the 80%,
+   * reports holdout MAE (hours) and R2 against a median-per-workloadType baseline, deploys it, promotes its route to
+   * CHAMPION and retires older routes. Returns the persisted {@link JobDurationModel.Run}.
+   */
+  train: function(): !JobDurationModel.Run py-sklearn_312
+
+  /**
+   * Materializes features for live jobs (isLive true), runs the champion {@link MlModel} of project `job-duration` on
+   * them, upserts one {@link JobPrediction} per live job, removes predictions for jobs that are no longer live and
+   * returns the number of predictions written. Run hourly by the `EasyComputeJobDurationScoring` CronJob.
+   */
+  scoreLive: function(): !int py-sklearn_312
+
+  /**
+   * The most recent {@link JobDurationModel.Run} by {@link JobDurationModel.Run#trainedAt}, or null if never trained.
+   */
+  latest: function(): JobDurationModel.Run js-server
+}

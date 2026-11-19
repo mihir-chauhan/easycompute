@@ -659,6 +659,51 @@ function saveConstraints(labId, hash, resultJson, source) {
   return true;
 }
 
+/**
+ * Compact lab facts put into every agent query (allocations left, next deadlines, live jobs / alerts, data rules), so
+ * budget and deadline questions need no tool round trip. Never throws: returns '' when the lab is unknown.
+ */
+function contextSnapshot(labId) {
+  try {
+    if (!str(labId)) return '';
+    var lab = requireLab(labId);
+    var parts = [];
+    parts.push(
+      'allocations: ' +
+        allocationsOf(lab.id)
+          .map(function (a) {
+            return a.cluster + ' ' + a.source + ' ' + a.remaining + ' of ' + a.total + ' ' + a.unit + ' left (' + a.usedPct + '% used' +
+              (a.remainingUsd !== null ? ', ~$' + a.remainingUsd : '') + (a.endDate ? ', ends ' + a.endDate.substring(0, 10) : '') + ')';
+          })
+          .join('; ')
+    );
+    var next = projectsOf(lab.id)
+      .filter(function (p) {
+        return p.daysToDeadline !== null && p.daysToDeadline > -1;
+      })
+      .slice(0, 3)
+      .map(function (p) {
+        return p.name + (p.deadlineLabel ? ' / ' + p.deadlineLabel : '') + ' due ' + p.deadline.substring(0, 16).replace('T', ' ') + ' (' + p.workloadType + ', projectId ' + p.projectId + ')';
+      });
+    if (next.length) parts.push('next deadlines: ' + next.join('; '));
+    var live = Job.fetchCount({ filter: Filter.eq('isLive', true).and().eq('lab.id', lab.id) });
+    var alerts = openAlerts(Filter.eq('lab.id', lab.id).and().eq('job.isLive', true));
+    parts.push('live jobs: ' + live + ', open alerts: ' + alerts.length + (alerts.length ? ' (' + alerts.slice(0, 4).map(function (a) {
+      return str(a.severity) + ' ' + str(a.alertType) + ' on ' + ref(a.job);
+    }).join(', ') + ')' : ''));
+    var c = constraintsFor(lab);
+    var rules = (c.dataRestrictions || []).map(function (d) {
+      return d.kind;
+    });
+    if (rules.length) parts.push('data restrictions: ' + rules.join(', '));
+    if ((c.preferences && c.preferences.avoid || []).length) parts.push('avoid: ' + c.preferences.avoid.join(', '));
+    return parts.join(' | ');
+  } catch (e) {
+    log.warn('contextSnapshot failed: {}', e);
+    return '';
+  }
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Read-only agent tools.
 // ---------------------------------------------------------------------------------------------------------------

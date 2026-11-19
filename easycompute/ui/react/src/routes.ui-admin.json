@@ -49,5 +49,43 @@
     "icon": "Users",
     "section": "admin",
     "group": "Research Computing"
+  },
+  {
+    "path": "/admin/data",
+    "element": "pages/AdminData/AdminData",
+    "export": "default",
+    "navLabel": "Data Fusion",
+    "icon": "Workflow",
+    "section": "admin",
+    "group": "Platform",
+    "roles": [
+      "UNIVERSITY_ADMIN"
+    ]
+  },
+  {
+    "path": "/admin/users",
+    "element": "pages/AdminUsers/AdminUsers",
+    "export": "default",
+    "navLabel": "Users & roles",
+    "icon": "UserCog",
+    "section": "admin",
+    "group": "Platform",
+    "roles": [
+      "UNIVERSITY_ADMIN"
+    ]
+  },
+  {
+    "path": "/members",
+    "element": "pages/AdminUsers/AdminUsers",
+    "export": "default",
+    "navLabel": "Members & roles",
+    "icon": "Users",
+    "section": "lab",
+    "group": "Lab",
+    "roles": [
+      "UNIVERSITY_ADMIN",
+      "PI",
+      "MEMBER"
+    ]
   }
 ]

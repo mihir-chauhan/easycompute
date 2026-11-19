@@ -1,0 +1,13 @@
+{
+  "id": "EasyComputeJobDurationScoring",
+  "name": "EasyComputeJobDurationScoring",
+  "description": "Hourly: scores every live job (isLive true) with the CHAMPION model of MlProject job-duration and writes JobPrediction rows (JobDurationModel.scoreLive).",
+  "action": {
+    "typeName": "JobDurationModel",
+    "actionName": "scoreLive"
+  },
+  "concurrent": false,
+  "scheduleDef": {
+    "cronExpression": "0 0 * * * ?"
+  }
+}

@@ -30,6 +30,8 @@ import AdminOverview from './pages/AdminOverview/AdminOverview';
 import AdminClusters from './pages/AdminClusters/AdminClusters';
 import AdminClusterDetail from './pages/AdminClusters/AdminClusterDetail';
 import AdminLabs from './pages/AdminLabs/AdminLabs';
+import AdminData from './pages/AdminData/AdminData';
+import AdminUsers from './pages/AdminUsers/AdminUsers';
 // </routes-imports>
 
 
@@ -116,6 +118,9 @@ export default function App() {
                 <Route path="/admin/clusters/:id" element={<AdminClusterDetail />} />
                 <Route path="/admin/policies" element={<AdminPolicies />} />
                 <Route path="/admin/labs" element={<AdminLabs />} />
+                <Route path="/admin/data" element={<AdminData />} />
+                <Route path="/admin/users" element={<AdminUsers />} />
+                <Route path="/members" element={<AdminUsers />} />
                 {/* </routes> */}
             <Route
               path="*"

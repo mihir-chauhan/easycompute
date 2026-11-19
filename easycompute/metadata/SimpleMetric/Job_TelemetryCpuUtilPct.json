@@ -1,0 +1,12 @@
+{
+  "id": "Job_TelemetryCpuUtilPct",
+  "name": "Job_TelemetryCpuUtilPct",
+  "description": "Average CPU utilization (%) of a Job over its JobMetric samples (live runs). Backs the Feature Store feature Job#telemetryCpuUtilPct registered by JobDurationModel.train().",
+  "srcType": "Job",
+  "tsDecl": {
+    "data": "metrics",
+    "value": "cpuUtilPct",
+    "start": "ts",
+    "treatment": "AVG"
+  }
+}

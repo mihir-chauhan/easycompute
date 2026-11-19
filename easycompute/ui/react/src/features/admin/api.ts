@@ -87,64 +87,153 @@ export const listFailedChecks = (): Promise<Array<{ id: string; policy?: { id: s
   fetchObjs('RuleCheck', { include: 'id, policy.id, checkedAt', filter: "outcome == 'FAIL'", order: 'descending(checkedAt)', limit: 2000 });
 
 /* ------------------------------------------------------------ users & approvals ------------------------------------------------------------ */
+/*
+ * Contract: API.md section 5 (UserAdmin + AppUser). Until UserAdmin is deployed in the workspace ("Missing TypeMeta"),
+ * the same shapes are derived from LabMember / ActionLogEntry so the page works either way.
+ */
 
-export interface MemberRow {
+export type AppRole = 'UNIVERSITY_ADMIN' | 'PI' | 'STUDENT' | 'STAFF';
+
+export interface AppUserRow {
   id: string;
   name: string;
-  username: string;
-  role: string;
-  lab?: { id: string; name?: string };
-  meta?: { created?: string; updated?: string };
+  email?: string | null;
+  username?: string | null;
+  role: AppRole;
+  status: 'ACTIVE' | 'INVITED' | 'DISABLED';
+  labId?: string | null;
+  labName?: string | null;
+  lastActive?: string | null;
+  invitedBy?: string | null;
+  invitedAt?: string | null;
+  jobs30d?: number | null;
+  gpuHours30d?: number | null;
 }
 
-export const listMembers = (labId?: string | null): Promise<MemberRow[]> =>
-  fetchObjs<MemberRow>('LabMember', {
-    include: 'id, name, username, role, lab.id, lab.name, meta.created, meta.updated',
+export interface ApprovalItem {
+  id: string;
+  kind: 'WALLTIME_EXTENSION' | 'RUN_APPROVAL' | string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  labId?: string | null;
+  labName?: string | null;
+  jobId?: string | null;
+  runRequestId?: string | null;
+  requestedBy?: string | null;
+  requestedAt?: string | null;
+  title: string;
+  detail?: string | null;
+  amount?: number | null;
+  unit?: string | null;
+}
+
+const missingType = (e: unknown) => e instanceof Error && /Missing TypeMeta|Missing type/i.test(e.message);
+let userAdminDeployed: boolean | null = null;
+
+/** Calls UserAdmin.<method>; returns undefined when the type is not deployed yet (fallback path). */
+async function userAdmin<T>(method: string, args: unknown[]): Promise<T | undefined> {
+  if (userAdminDeployed === false) return undefined;
+  try {
+    const r = unbox<T>(await adminCall('UserAdmin', method, null, args));
+    userAdminDeployed = true;
+    return r;
+  } catch (e) {
+    if (missingType(e)) {
+      userAdminDeployed = false;
+      return undefined;
+    }
+    throw e;
+  }
+}
+
+/** True once a UserAdmin call succeeded; false when the type is missing; null before the first call. */
+export const isUserAdminDeployed = () => userAdminDeployed;
+
+const RCAC_ADMINS: AppUserRow[] = [
+  { id: 'admin-rcac-ops', name: 'RCAC research computing staff', username: 'rcac-ops', role: 'UNIVERSITY_ADMIN', status: 'ACTIVE', labId: null, labName: null },
+  { id: 'admin-rcac-alloc', name: 'RCAC allocations desk', username: 'rcac-alloc', role: 'UNIVERSITY_ADMIN', status: 'ACTIVE', labId: null, labName: null },
+];
+
+export async function listUsers(labId?: string | null): Promise<AppUserRow[]> {
+  const r = await userAdmin<{ users: AppUserRow[] }>('listUsers', [labId ?? null]);
+  if (r) return r.users ?? [];
+  const members = await fetchObjs<{ id: string; name: string; username: string; role: string; lab?: { id: string; name?: string }; meta?: { created?: string } }>('LabMember', {
+    include: 'id, name, username, role, lab.id, lab.name, meta.created',
     ...(labId ? { filter: `lab.id == ${filterLiteral(labId)}` } : {}),
     order: 'name',
     limit: 500,
   });
-
-export const createMember = (m: { id: string; name: string; username: string; role: string; labId: string }) =>
-  adminCall<MemberRow>('LabMember', 'create', { id: m.id, name: m.name, username: m.username, role: m.role, lab: { id: m.labId } });
-
-export const updateMemberRole = (id: string, role: string) => adminCall<MemberRow>('LabMember', 'merge', { id, role });
-
-export const removeMember = (id: string) => adminCall<boolean>('LabMember', 'remove', { id });
-
-export interface ApprovalRow {
-  id: string;
-  actionType: string;
-  actor: string;
-  actedAt?: string;
-  detail?: string;
-  outcome: string;
-  lab?: { id: string; name?: string };
-  job?: { id: string; user?: string; jobName?: string; state?: string };
+  const rows: AppUserRow[] = members.map((m) => ({
+    id: m.id,
+    name: m.name,
+    username: m.username,
+    role: m.role === 'PI' ? 'PI' : m.role === 'STUDENT' ? 'STUDENT' : 'STAFF',
+    status: 'ACTIVE',
+    labId: m.lab?.id ?? null,
+    labName: m.lab?.name ?? null,
+    invitedAt: m.meta?.created ?? null,
+  }));
+  return labId ? rows : [...RCAC_ADMINS, ...rows];
 }
 
-export const listPendingApprovals = (labId?: string | null): Promise<ApprovalRow[]> =>
-  fetchObjs<ApprovalRow>('ActionLogEntry', {
-    include: 'id, actionType, actor, actedAt, detail, outcome, lab.id, lab.name, job.id, job.user, job.jobName, job.state',
-    filter: `outcome == 'PENDING_APPROVAL'${labId ? ` && lab.id == ${filterLiteral(labId)}` : ''}`,
-    order: 'descending(actedAt)',
-    limit: 200,
-  });
+export async function inviteUser(email: string, name: string, role: AppRole, labId: string | null): Promise<void> {
+  const r = await userAdmin('inviteUser', [email, name, role, labId]);
+  if (r !== undefined) return;
+  if (!labId) throw new Error('University Admins can be invited once UserAdmin is deployed.');
+  const username = email.split('@')[0].toLowerCase();
+  await adminCall('LabMember', 'create', { id: `m-${labId.replace(/^lab-/, '')}-${username}`, name, username, role: role === 'STAFF' ? 'STAFF' : role, lab: { id: labId } });
+}
 
-/** Approve: run the action as ADMIN on a still-running job (best effort), then close the request as DONE. */
-export async function approveRequest(a: ApprovalRow, approver: string): Promise<void> {
-  if (a.job?.id && a.job.state === 'RUNNING' && a.actionType !== 'NOTIFY_PI') {
-    try {
-      await adminCall('Job', 'applyAction', { id: a.job.id }, [a.actionType, 'ADMIN']);
-    } catch {
-      // The job may have moved on; the request is still recorded as approved.
-    }
+export async function setUserRole(userId: string, role: AppRole): Promise<void> {
+  const r = await userAdmin('setRole', [userId, role]);
+  if (r === undefined) await adminCall('LabMember', 'merge', { id: userId, role });
+}
+
+export async function removeUser(userId: string): Promise<void> {
+  const r = await userAdmin('removeUser', [userId]);
+  if (r === undefined) await adminCall('LabMember', 'remove', { id: userId });
+}
+
+export async function pendingApprovals(labId?: string | null): Promise<ApprovalItem[]> {
+  const r = await userAdmin<{ items: ApprovalItem[] }>('pendingApprovals', [labId ?? null]);
+  if (r) return (r.items ?? []).filter((i) => i.status === 'PENDING');
+  const rows = await fetchObjs<{ id: string; actionType: string; actor: string; actedAt?: string; detail?: string; lab?: { id: string; name?: string }; job?: { id: string; user?: string; jobName?: string } }>(
+    'ActionLogEntry',
+    {
+      include: 'id, actionType, actor, actedAt, detail, lab.id, lab.name, job.id, job.user, job.jobName',
+      filter: `outcome == 'PENDING_APPROVAL'${labId ? ` && lab.id == ${filterLiteral(labId)}` : ''}`,
+      order: 'descending(actedAt)',
+      limit: 200,
+    },
+  );
+  return rows.map((a) => ({
+    id: `ALE:${a.id}`,
+    kind: a.actionType === 'EXTEND_WALLTIME' ? 'WALLTIME_EXTENSION' : a.actionType,
+    status: 'PENDING',
+    labId: a.lab?.id,
+    labName: a.lab?.name,
+    jobId: a.job?.id,
+    requestedBy: a.job?.user ?? a.actor,
+    requestedAt: a.actedAt,
+    title: `${a.actionType.replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase())} for ${a.job?.jobName ?? a.job?.id ?? 'a run'}`,
+    detail: a.detail,
+  }));
+}
+
+export async function decideApproval(item: ApprovalItem, approve: boolean, note: string): Promise<void> {
+  const r = await userAdmin(approve ? 'approve' : 'reject', [item.id, note]);
+  if (r !== undefined) return;
+  const aleId = item.id.replace(/^ALE:/, '');
+  await adminCall('ActionLogEntry', 'merge', { id: aleId, outcome: approve ? 'DONE' : 'FAILED', detail: `${item.detail ?? ''} · ${approve ? 'Approved' : 'Denied'}: ${note}`.trim() });
+}
+
+/** Tell the server which app user the demo role switch acts as (null = clear). Best effort. */
+export async function setDemoUser(appUserId: string | null): Promise<void> {
+  try {
+    await userAdmin('setDemoUser', [appUserId]);
+  } catch {
+    // Older backend or no permission: the UI role switch still works client-side.
   }
-  await adminCall('ActionLogEntry', 'merge', { id: a.id, outcome: 'DONE', detail: `${a.detail ?? ''} · Approved by ${approver}`.trim() });
 }
-
-export const denyRequest = (a: ApprovalRow, approver: string) =>
-  adminCall('ActionLogEntry', 'merge', { id: a.id, outcome: 'FAILED', detail: `${a.detail ?? ''} · Denied by ${approver}`.trim() });
 
 /* ---------------------------------------------------------------- data fusion ---------------------------------------------------------------- */
 

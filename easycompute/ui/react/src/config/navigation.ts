@@ -3,7 +3,7 @@
  * Confidential and Proprietary C3 Materials.
  */
 
-import { Activity, FileText, House, LayoutDashboard, List, Rocket, ScrollText, Server, ShieldCheck, Sparkles, Users, Wallet, Zap } from 'lucide-react';
+import { Activity, FileText, House, LayoutDashboard, List, Rocket, ScrollText, Server, ShieldCheck, Sparkles, UserCog, Users, Wallet, Workflow, Zap } from 'lucide-react';
 
 import type { ShellNavItem } from '@/components/app/AppShell';
 
@@ -24,6 +24,7 @@ export const labNav = (liveCount?: number): ShellNavItem[] => [
   },
   { path: '/guardrails', label: 'Guardrails', icon: Zap, group: 'During a run', badge: 'New' },
   { path: '/history', label: 'Allocations & usage', icon: Wallet, group: 'Lab' },
+  { path: '/members', label: 'Members & roles', icon: Users, group: 'Lab' },
   { path: '/assistant', label: 'AI Advisor', icon: Sparkles, group: 'Lab' },
 ];
 
@@ -33,4 +34,6 @@ export const ADMIN_NAV: ShellNavItem[] = [
   { path: '/admin/clusters', label: 'Clusters', icon: Server, group: 'Research Computing' },
   { path: '/admin/policies', label: 'Policies', icon: ScrollText, group: 'Research Computing' },
   { path: '/admin/labs', label: 'Labs', icon: Users, group: 'Research Computing' },
+  { path: '/admin/data', label: 'Data Fusion', icon: Workflow, group: 'Platform' },
+  { path: '/admin/users', label: 'Users & roles', icon: UserCog, group: 'Platform' },
 ];

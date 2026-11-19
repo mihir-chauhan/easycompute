@@ -54,6 +54,12 @@ const elapsedFrac = (a: SummaryAllocation): number | null => {
   return e > s ? Math.min(1, Math.max(0, (Date.now() - s) / (e - s))) : null;
 };
 
+/** Weeks that have fully elapsed (the current ISO week is partial and would understate the burn rate). */
+const completeWeeks = <T extends { week: string }>(weekly: T[], asOf?: string): T[] => {
+  const now = asOf ? new Date(asOf).getTime() : Date.now();
+  return weekly.filter((w) => new Date(w.week).getTime() + 7 * 86400000 <= now);
+};
+
 const History: React.FC = () => {
   const navigate = useNavigate();
   const themeKey = useThemeKey();
@@ -126,7 +132,8 @@ const History: React.FC = () => {
     if (weekly.length < 2) return null;
     let cum = 0;
     const actual = weekly.map((w) => (cum += w.costUsd));
-    const pace = weekly.slice(-4).reduce((n, w) => n + w.costUsd, 0) / Math.min(4, weekly.length);
+    const full = completeWeeks(weekly, s?.asOf);
+    const pace = full.length ? full.slice(-4).reduce((n, w) => n + w.costUsd, 0) / Math.min(4, full.length) : 0;
     const budget = cum + allocations.reduce((n, a) => n + (a.remainingUsd ?? 0), 0);
     const ahead = 12;
     const fx = Array.from({ length: ahead }, (_, i) => cum + pace * (i + 1));
@@ -245,8 +252,9 @@ const History: React.FC = () => {
 
   const error = labError ?? summary.error ?? res.error;
   const wastedShare = totals.gh ? totals.wasted / totals.gh : 0;
-  const tiles = [...allocations].sort((a, b) => (b.remainingUsd ?? 0) - (a.remainingUsd ?? 0)).slice(0, 3);
-  const lastWeekCost = s?.weekly?.at(-1)?.costUsd;
+  const tiles = [...allocations].sort((a, b) => (b.remainingUsd ?? 0) - (a.remainingUsd ?? 0)).slice(0, 2);
+  const fullWeeks = completeWeeks(s?.weekly ?? [], s?.asOf);
+  const lastWeekCost = fullWeeks.at(-1)?.costUsd;
 
   return (
     <PageFrame
@@ -298,8 +306,17 @@ const History: React.FC = () => {
             label="Burn rate"
             value={formatUsd(lastWeekCost ?? forecast?.pace)}
             unit="/ week"
-            caption={forecast && lastWeekCost != null ? `${lastWeekCost >= forecast.pace ? '+' : ''}${formatPct100(((lastWeekCost - forecast.pace) / (forecast.pace || 1)) * 100)} vs 4-week average` : 'Last full week'}
+            caption={forecast && lastWeekCost != null ? `Last full week · ${lastWeekCost >= forecast.pace ? '+' : ''}${formatPct100(((lastWeekCost - forecast.pace) / (forecast.pace || 1)) * 100)} vs 4-week average` : 'Last full week'}
           />
+          <KpiTile label="GPU-hours (30 d)" value={formatInt(s.kpis.gpuHours30d)} caption={`${formatUsd(s.kpis.costUsd30d)} charged · ${formatPct100(s.kpis.avgGpuUtil)} avg GPU util`} />
+          {tiles.length < 2 && (
+            <KpiTile
+              label="Wasted GPU-hours"
+              value={formatInt(s.kpis.wastedGpuHours)}
+              tone={(s.kpis.wastePct ?? 0) > 0.25 ? 'bad' : (s.kpis.wastePct ?? 0) > 0.1 ? 'warn' : 'good'}
+              caption={`${formatPct100((s.kpis.wastePct ?? 0) * 100)} of all GPU time · ${formatInt(s.kpis.failedJobs)} failed jobs`}
+            />
+          )}
         </KpiRow>
       ) : null}
 

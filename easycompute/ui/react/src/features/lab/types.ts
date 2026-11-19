@@ -160,6 +160,7 @@ export interface RunRequest {
   id: string;
   lab?: Ref;
   project?: Ref;
+  submittedBy?: Ref;
   name: string;
   description?: string;
   workloadType?: WorkloadType;

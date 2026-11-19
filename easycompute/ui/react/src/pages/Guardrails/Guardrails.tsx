@@ -15,6 +15,7 @@ import { ActivityRow, HeadNote, Mono, muted } from '@/features/lab/components';
 import { ACTION_LABEL, formatInt, formatShortDateTime } from '@/features/lab/format';
 import type { AutopilotPolicy } from '@/features/lab/types';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
+import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { cn } from '@/lib/utils';
 
@@ -90,6 +91,8 @@ const Guardrails: React.FC = () => {
   const { labId, error: labError } = useCurrentLab();
   const ap = useLoad(() => (labId ? getAutopilot(labId) : null), [labId]);
   const acts = useLoad(() => (labId ? fetchLabActions(labId, 200) : null), [labId], 30000);
+  const lr = useLabRole();
+  const ro = !lr.canEditGuardrails;
   const [draft, setDraft] = useState<AutopilotPolicy | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -127,7 +130,7 @@ const Guardrails: React.FC = () => {
           type="number"
           aria-label={f}
           className="w-16"
-          disabled={!draft.enabled}
+          disabled={!draft.enabled || ro}
           value={draft[f] != null ? Math.round((draft[f] as number) * scale) : ''}
           onChange={(e) => setDraft({ ...draft, [f]: Number(e.target.value) / scale })}
           onBlur={() => persist(draft)}
@@ -146,7 +149,7 @@ const Guardrails: React.FC = () => {
         draft ? (
           <label htmlFor="ap-enabled" className="flex items-center gap-3 rounded-md border border-[var(--c3-style-basic-border-border)] px-3 py-1.5 text-sm">
             <span className="font-medium text-[var(--c3-style-basic-fg-primary)]">{draft.enabled ? 'Acting automatically' : 'Alert only'}</span>
-            <Switch id="ap-enabled" checked={Boolean(draft.enabled)} onCheckedChange={(v) => persist({ ...draft, enabled: v })} />
+            <Switch id="ap-enabled" disabled={ro} checked={Boolean(draft.enabled)} onCheckedChange={(v) => persist({ ...draft, enabled: v })} />
           </label>
         ) : undefined
       }
@@ -168,7 +171,7 @@ const Guardrails: React.FC = () => {
       <SectionCard
         flush
         title="Rules"
-        actions={<HeadNote>{saving ? 'Saving…' : draft?.enabled ? 'Applies to all live runs of this lab' : 'Autopilot off: alerts only'}</HeadNote>}
+        actions={<HeadNote>{ro ? 'Read-only: your PI manages guardrails' : saving ? 'Saving…' : draft?.enabled ? 'Applies to all live runs of this lab' : 'Autopilot off: alerts only'}</HeadNote>}
       >
         {!draft ? (
           <TableSkeleton rows={6} />
@@ -193,7 +196,7 @@ const Guardrails: React.FC = () => {
                           size="sm"
                           aria-label={`${r.name} automatic action`}
                           checked={on && Boolean(draft.enabled)}
-                          disabled={!r.toggle || !draft.enabled}
+                          disabled={!r.toggle || !draft.enabled || ro}
                           title={r.toggle ? undefined : 'Detection is always on'}
                           onCheckedChange={(v) => r.toggle && persist({ ...draft, [r.toggle]: v })}
                         />
