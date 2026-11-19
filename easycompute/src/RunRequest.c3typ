@@ -79,7 +79,7 @@ entity type RunRequest {
   /**
    * Planner status.
    */
-  status: string enum RunRequest.Status
+  status: string enum RunRequest.Status = DRAFT
 
   /**
    * Plan chosen at submission.
@@ -121,3 +121,4 @@ entity type RunRequest {
    */
   submit: member function(planId: !string): Job js-server
 }
+
