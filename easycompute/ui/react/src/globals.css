@@ -272,3 +272,110 @@
 .dark .app-map .leaflet-tile-pane {
   filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9);
 }
+
+/* ------------------------------------------------------------------------------------------------------------
+ * EasyCompute design system (owner: ui-admin; docs src/components/app/README.md). Unlayered so it beats the
+ * vendored SCSS. Card = white, 1px neutral border, 8px radius, hairline shadow, 20px padding.
+ * ---------------------------------------------------------------------------------------------------------- */
+:root {
+  font-feature-settings: 'cv11', 'ss01';
+}
+:root .c3-container {
+  border-radius: var(--ec-card-radius);
+  box-shadow: var(--ec-card-shadow);
+}
+:root .c3-container--size-md:not(.c3-container--full-width) {
+  padding: 20px;
+  gap: 16px;
+}
+:root .c3-container--full-width.c3-container--size-md .c3-container__header {
+  padding: 14px 20px;
+}
+:root .c3-container--full-width.c3-container--size-md .c3-container__footer {
+  padding: 10px 20px;
+}
+
+/* KPI tiles (MetricCard): label 13px muted, value 28px semibold tabular, caption 12px muted. */
+:root [data-slot='metric-card'] {
+  border-radius: var(--ec-card-radius);
+  box-shadow: var(--ec-card-shadow);
+  padding: 16px 20px;
+  gap: 6px;
+  background: var(--c3-style-basic-bg-primary);
+}
+:root [data-slot='metric-card-label'] {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--c3-style-basic-fg-secondary);
+}
+:root [data-slot='metric-card-value'] {
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+:root [data-slot='metric-card-caption'] {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--c3-style-basic-fg-secondary);
+}
+
+/* Page header band blends into the page (no white band); title block aligned with the content column. */
+:root .page-header {
+  background: transparent;
+  border-bottom: 0;
+}
+:root .page-header .header--size-xl .header__title {
+  letter-spacing: -0.01em;
+}
+
+/* Table rows: hover tint, clickable rows get a pointer. */
+:root .c3-data-grid__row[data-clickable='true'] {
+  cursor: pointer;
+}
+:root .c3-data-grid__body .c3-data-grid__row:hover {
+  background: var(--c3-style-basic-bg-hover);
+}
+
+/* Side nav active item: gold rule on the left edge, tinted background. */
+:root .side-nav-panel-v2-item[data-selected='true'] {
+  box-shadow: inset 2px 0 0 var(--ec-accent);
+}
+
+/* App shell top bar: Purdue black with a gold wordmark in both themes. */
+:root .ec-shellbar[data-slot='top-nav-bar'] {
+  background: var(--ec-shell-bar);
+  border-bottom-color: var(--ec-shell-bar);
+  color: var(--ec-shell-bar-fg);
+}
+:root .ec-shellbar [data-slot='top-nav-bar-logo'] {
+  color: var(--ec-shell-gold);
+}
+:root .ec-shellbar .text-c3-bold-heading-h6 {
+  color: var(--ec-shell-bar-fg);
+}
+
+/* Skeleton shimmer for loading states. */
+@keyframes ec-skeleton {
+  0% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.55;
+  }
+}
+.ec-skeleton {
+  background: var(--c3-style-basic-bg-secondary);
+  border-radius: 4px;
+  animation: ec-skeleton 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ec-skeleton {
+    animation: none;
+  }
+}

@@ -18,13 +18,19 @@ interface PageFrameProps {
   badges?: ReactNode;
   actions?: ReactNode;
   tabs?: ReactNode;
+  /** One-row filter toolbar rendered between the header and the content (search, filters, result count). */
+  toolbar?: ReactNode;
   children: ReactNode;
 }
 
-/** Standard page frame: the design-system PageHeader band over a padded content stack. */
-export default function PageFrame({ title, description, breadcrumbs, badges, actions, tabs, children }: PageFrameProps) {
+/**
+ * Standard page frame (EasyCompute design system): the PageHeader (breadcrumb, 24px semibold title, muted one-line
+ * description, actions right) over a content stack; everything is centred at max-width 1440px with 24px padding and
+ * 16px gaps (16px gutters on phones). Every page uses it.
+ */
+export default function PageFrame({ title, description, breadcrumbs, badges, actions, tabs, toolbar, children }: PageFrameProps) {
   return (
-    <div className="flex min-h-full flex-col">
+    <div className="mx-auto flex min-h-full w-full max-w-[1440px] flex-col c3-page-content-enter">
       <PageHeader
         title={title}
         description={description}
@@ -33,7 +39,10 @@ export default function PageFrame({ title, description, breadcrumbs, badges, act
         actions={actions}
         tabs={tabs}
       />
-      <div className="flex min-w-0 flex-1 flex-col gap-4 p-4 md:p-6">{children}</div>
+      <div className="flex min-w-0 flex-1 flex-col gap-4 px-4 pb-8 pt-2 md:px-6">
+        {toolbar ? <div className="flex flex-wrap items-center gap-2">{toolbar}</div> : null}
+        {children}
+      </div>
     </div>
   );
 }

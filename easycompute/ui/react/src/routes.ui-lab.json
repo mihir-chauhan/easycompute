@@ -1,0 +1,8 @@
+[
+  { "path": "/", "element": "pages/LabHome/LabHome", "export": "default", "navLabel": "Lab Home", "icon": "LayoutDashboard", "section": "lab" },
+  { "path": "/plan", "element": "pages/PlanRun/PlanRun", "export": "default", "navLabel": "Plan a Run", "icon": "Rocket", "section": "lab" },
+  { "path": "/runs", "element": "pages/Runs/RunList", "export": "default", "navLabel": "Live Runs", "icon": "Activity", "section": "lab" },
+  { "path": "/runs/:id", "element": "pages/Runs/RunDetail", "export": "default", "section": "lab" },
+  { "path": "/history", "element": "pages/History/History", "export": "default", "navLabel": "History & Insights", "icon": "ChartColumn", "section": "lab" },
+  { "path": "/context", "element": "pages/LabContext/LabContext", "export": "default", "navLabel": "Lab Context", "icon": "BookOpenText", "section": "lab" }
+]

@@ -14,7 +14,7 @@ import { Moon, Sun } from 'lucide-react';
 import { SideNavPanelV2, SideNavPanelV2Item } from '@/components/ui/side-nav-panel-v2';
 import { DESKTOP_QUERY, PHONE_QUERY, useMediaQuery } from '@/hooks/useMediaQuery';
 import { useTheme } from '@/hooks/useTheme';
-import { navigationConfig } from '@/config/navigation';
+import { navigationConfig, sectionForPath } from '@/config/navigation';
 import { NavigationItem } from '@/types/navigation';
 
 // Key under which the desktop sidebar expanded/collapsed state is persisted so it survives a refresh.
@@ -84,8 +84,12 @@ export default function SideNav({ mobileOpen = false, onMobileClose }: SideNavPr
     return location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
   };
 
+  // Only the current view's items (lab view or Research Computing view).
+  const section = sectionForPath(location.pathname);
+  const items = navigationConfig.filter((item) => item.section === section);
+
   // Longest matching path wins, so `/sites/map` selects "Sites Map" rather than "Sites".
-  const activeItem = navigationConfig
+  const activeItem = items
     .filter(isActiveRoute)
     .sort((a, b) => b.path.length - a.path.length)[0];
   const activeValue = activeItem?.path ?? '';
@@ -112,7 +116,7 @@ export default function SideNav({ mobileOpen = false, onMobileClose }: SideNavPr
         />
       }
     >
-      {navigationConfig.map((item) => (
+      {items.map((item) => (
         <SideNavPanelV2Item
           key={item.id}
           value={item.path}

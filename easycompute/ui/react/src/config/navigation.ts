@@ -7,51 +7,41 @@
  * This material may be covered by one or more patents or pending patent applications.
  */
 
-import { Cpu } from 'lucide-react';
+import {
+  Activity,
+  BookOpenText,
+  Building2,
+  ChartColumn,
+  FlaskConical,
+  LayoutDashboard,
+  Rocket,
+  Scale,
+  Server,
+  Sparkles,
+} from 'lucide-react';
 
-import { NavigationItem } from '@/types/navigation';
+import { NavigationItem, NavSection } from '@/types/navigation';
 
 /**
- * Navigation configuration for the application
- * To add a new page:
- * 1. Add a new item to this array
- * 2. Make sure the path matches your route in App.tsx
- * 3. Add the corresponding page component
+ * Navigation for both shell views. The SideNav lists only the items of the current view
+ * ({@link sectionForPath}); the TopNav role toggle switches views. Paths must match routes in App.tsx.
  */
 export const navigationConfig: NavigationItem[] = [
-  {
-    id: 'gpu-types',
-    path: '/gpu-types',
-    icon: Cpu,
-    iconActive: Cpu,
-    label: 'GPU Types',
-    tooltip: 'Browse gpu types',
-  },
+  { id: 'lab-home', path: '/', icon: LayoutDashboard, label: 'Lab Home', tooltip: 'Lab overview', section: 'lab' },
+  { id: 'lab-context', path: '/context', icon: BookOpenText, label: 'Lab Context', tooltip: 'What makes this lab unique', section: 'lab' },
+  { id: 'plan', path: '/plan', icon: Rocket, label: 'Plan a Run', tooltip: 'Check rules and get launch plans', section: 'lab' },
+  { id: 'runs', path: '/runs', icon: Activity, label: 'Live Runs', tooltip: 'Monitor running jobs', section: 'lab' },
+  { id: 'history', path: '/history', icon: ChartColumn, label: 'History & Insights', tooltip: 'Past usage and efficiency', section: 'lab' },
+  { id: 'assistant', path: '/assistant', icon: Sparkles, label: 'AI Advisor', tooltip: 'Ask the compute advisor', section: 'lab' },
+  { id: 'admin', path: '/admin', icon: Building2, label: 'University Overview', tooltip: 'Purdue-wide compute', section: 'admin' },
+  { id: 'admin-clusters', path: '/admin/clusters', icon: Server, label: 'Clusters & Partitions', tooltip: 'Clusters and partitions', section: 'admin' },
+  { id: 'admin-policies', path: '/admin/policies', icon: Scale, label: 'Policies', tooltip: 'Rule catalog', section: 'admin' },
+  { id: 'admin-labs', path: '/admin/labs', icon: FlaskConical, label: 'Labs', tooltip: 'Labs and budget burn', section: 'admin' },
 ];
 
-/**
- * Helper function to add navigation item dynamically
- */
-export const addNavigationItem = (item: NavigationItem) => {
-  navigationConfig.push(item);
-};
+/** Default landing path of each view. */
+export const SECTION_HOME: Record<NavSection, string> = { lab: '/', admin: '/admin' };
 
-/**
- * Helper function to remove navigation item
- */
-export const removeNavigationItem = (id: string) => {
-  const index = navigationConfig.findIndex((item) => item.id === id);
-  if (index > -1) {
-    navigationConfig.splice(index, 1);
-  }
-};
-
-/**
- * Helper function to update badge count
- */
-export const updateNavigationBadge = (id: string, badge?: number) => {
-  const item = navigationConfig.find((item) => item.id === id);
-  if (item) {
-    item.badge = badge;
-  }
-};
+/** `/admin` and everything below it is the Research Computing view; every other path is the lab view. */
+export const sectionForPath = (pathname: string): NavSection =>
+  pathname === '/admin' || pathname.startsWith('/admin/') ? 'admin' : 'lab';

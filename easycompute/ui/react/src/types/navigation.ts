@@ -9,6 +9,9 @@
 
 import type { LucideIcon } from 'lucide-react';
 
+/** The two shell views; the TopNav role toggle switches between them. */
+export type NavSection = 'lab' | 'admin';
+
 export interface NavigationItem {
   id: string;
   path: string;
@@ -18,6 +21,8 @@ export interface NavigationItem {
   tooltip: string;
   badge?: number;
   disabled?: boolean;
+  /** Which shell view lists this item: the lab view or the Research Computing (admin) view. */
+  section: NavSection;
 }
 
 export interface NavigationConfig {

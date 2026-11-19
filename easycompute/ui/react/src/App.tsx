@@ -8,11 +8,24 @@
  */
 
 import React, { useCallback, useState } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
-import GpuTypeList from './pages/GpuTypes/GpuTypeList';
+import { Route, Routes } from 'react-router-dom';
+import ShellControls from './components/ShellControls/ShellControls';
 import SideNav from './components/SideNav/SideNav';
 import TopNav from './components/TopNav/TopNav';
 import ErrorReporterProvider from './components/ErrorBoundary/ErrorBoundary';
+// <routes-imports> (generated from routes.*.json by the integrator)
+
+// </routes-imports>
+
+/** Stand-in for a page whose owning agent has not registered it yet (routes.<agent>.json). */
+function ComingSoon({ title }: { title: string }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
+      <p className="text-c3-bold-heading-h4 text-[var(--c3-style-basic-fg-primary)]">{title}</p>
+      <p className="text-[var(--c3-style-basic-fg-neutral)]">This page is being built.</p>
+    </div>
+  );
+}
 
 /**
  * Application shell.
@@ -33,15 +46,26 @@ export default function App() {
   return (
     <ErrorReporterProvider>
       <div className="h-screen flex flex-col max-w-full overflow-hidden">
-        <TopNav title="EasyCompute" onMenuClick={openNav} />
+        <TopNav title="EasyCompute" onMenuClick={openNav} actions={<ShellControls />} />
         <div className="flex flex-1 min-h-0">
           <SideNav mobileOpen={navOpen} onMobileClose={closeNav} />
           <div className="flex-1 flex flex-col min-w-0">
             <main className="flex-1 overflow-auto bg-[var(--c3-style-basic-bg-page)]">
               <Routes>
-                {/* Add page routes here */}
-                <Route path="/" element={<Navigate to="/gpu-types" replace />} />
-                <Route path="/gpu-types" element={<GpuTypeList />} />
+                {/* <routes> */}
+                <Route path="/" element={<ComingSoon title="Lab Home" />} />
+                <Route path="/context" element={<ComingSoon title="Lab Context" />} />
+                <Route path="/plan" element={<ComingSoon title="Plan a Run" />} />
+                <Route path="/runs" element={<ComingSoon title="Live Runs" />} />
+                <Route path="/runs/:id" element={<ComingSoon title="Run detail" />} />
+                <Route path="/history" element={<ComingSoon title="History & Insights" />} />
+                <Route path="/assistant" element={<ComingSoon title="AI Advisor" />} />
+                <Route path="/admin" element={<ComingSoon title="University Overview" />} />
+                <Route path="/admin/clusters" element={<ComingSoon title="Clusters & Partitions" />} />
+                <Route path="/admin/clusters/:id" element={<ComingSoon title="Cluster detail" />} />
+                <Route path="/admin/policies" element={<ComingSoon title="Policies" />} />
+                <Route path="/admin/labs" element={<ComingSoon title="Labs" />} />
+                {/* </routes> */}
                 <Route
                   path="*"
                   element={
