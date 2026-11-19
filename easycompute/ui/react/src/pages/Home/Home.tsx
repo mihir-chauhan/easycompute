@@ -35,7 +35,7 @@ const DOT = 'inline-block size-[7px] shrink-0 rounded-full bg-[var(--ec-accent-h
 const EXAMPLE =
   'Fine-tune Llama-3-8B with LoRA on our 40 MB dataset, done before the RSS deadline of Jan 2nd. Use free compute if there is any, and then the cost-based compute';
 
-/** Icon for an attached file chip, by extension (demo only: files are never uploaded). */
+/** Icon for an attached file chip, by extension (files stay local; nothing is uploaded). */
 const fileIcon = (name: string) => {
   const ext = name.split('.').pop()?.toLowerCase() ?? '';
   if (ext === 'py' || ext === 'ipynb' || ext === 'sh') return FileCode;
@@ -107,7 +107,7 @@ const Home: React.FC = () => {
     setPlans([]);
     setChecks([]);
     try {
-      // Attached files are demo-only chips: they are never uploaded or sent to the backend.
+      // Attached files are shown as chips only; they are never uploaded or sent to the backend.
       const full = description;
       setStage({ model: 'LabContextExtractor', text: 'is reading your request and lab context…' });
       const ctx = await Promise.race<LabConstraints | null>([
@@ -181,8 +181,9 @@ const Home: React.FC = () => {
   };
 
   const addFiles = (list: FileList | null) => {
-    if (!list) return;
-    setFiles((f) => [...f, ...Array.from(list).map((x) => x.name)]);
+    if (!list || !list.length) return;
+    const names = Array.from(list).map((x) => x.name); // read now: the input is cleared right after
+    setFiles((f) => [...f, ...names]);
   };
 
   const reset = () => {
