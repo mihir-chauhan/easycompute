@@ -99,6 +99,7 @@ export function mergeSnap(j: Job, s?: SnapJob): Job & { queuePosition?: number |
   return {
     ...j,
     state: s.state ?? j.state,
+    workloadType: s.workloadType ?? j.workloadType,
     nodeList: s.nodeList ?? j.nodeList,
     startTime: s.startTime ?? j.startTime,
     endTime: s.endTime ?? j.endTime,
@@ -112,6 +113,31 @@ export function mergeSnap(j: Job, s?: SnapJob): Job & { queuePosition?: number |
     etaStartAt: s.etaStartAt,
     progressPerRealSec: s.progressPerRealSec,
     latest: s.latest,
+  };
+}
+
+/** A Job for a liveSnapshot entry that the Job query has not returned yet (e.g. launched since the last read). */
+export function snapToJob(s: SnapJob): Job {
+  return {
+    id: s.id,
+    jobName: s.jobName,
+    user: s.user,
+    state: s.state,
+    workloadType: s.workloadType,
+    cluster: s.clusterId ? { id: s.clusterId } : undefined,
+    partition: s.partitionId ? { id: s.partitionId } : undefined,
+    qos: s.qos,
+    allocGpus: s.gpus,
+    gpuType: s.gpuTypeId ? { id: s.gpuTypeId } : undefined,
+    nodeList: s.nodeList,
+    submitTime: s.submitTime,
+    startTime: s.startTime,
+    endTime: s.endTime,
+    elapsedHours: s.elapsedHours,
+    timelimitHours: s.timelimitHours,
+    costUnits: s.costUnits,
+    costUsd: s.costUsd,
+    isLive: true,
   };
 }
 

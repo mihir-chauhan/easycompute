@@ -7,11 +7,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, File, FileCode, FileCog, FileJson, FileSpreadsheet, FileText, Plus, Rocket, X } from 'lucide-react';
 
-import { BrandMark, errorMessage, ROLE_LABEL, useAppShell, type EcRole } from '@/components/app';
+import { BrandMark, errorMessage, ROLE_LABEL, Sparkline, useAppShell, type EcRole } from '@/components/app';
 import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { checkRules, createRunRequest, extractConstraints, fetchJobMetrics, fetchProjects, getJob, getLabSummary, recommendPlans, submitWithApproval } from '@/features/lab/api';
-import { LiveBadge, liveJob, mergeSnap, SimNote, useLiveSnapshot, useNow } from '@/features/lab/live';
+import { LiveBadge, liveJob, mergeSnap, SimNote, useLiveSnapshot, useNow, withLatest } from '@/features/lab/live';
+import { queueStatus, useTelemetry } from '@/features/lab/telemetry';
 import { formatDuration, formatInt, formatUsd, WORKLOAD_LABEL } from '@/features/lab/format';
 import { ModelComputing, ModelProvenance, type ModelName } from '@/features/lab/models';
 import { costPhrase, doneBy, fixesOf, pickPlan, PREFERENCE_LABEL, preferenceFrom, settingsOf, type Preference } from '@/features/lab/oneBox';
@@ -84,7 +85,10 @@ const Home: React.FC = () => {
   const sj = launched ? snap.byJob[launched.id] : undefined;
   const base = follow.data?.[0] ? mergeSnap(follow.data[0], sj) : launched;
   const lj = base ? liveJob(base, sj ? snap.updatedAt : follow.updatedAt, now, sj?.progressPerRealSec) : null;
-  const lastMetric = sj?.latest ?? follow.data?.[1]?.at(-1);
+  const serverMetrics = useMemo(() => withLatest(follow.data?.[1] ?? [], sj?.latest), [follow.data, sj]);
+  const telemetry = useTelemetry(base, serverMetrics, { windowMs: 10 * 60_000, points: 60 });
+  const lastMetric = telemetry.at(-1);
+  const qs = lj?.state === 'PENDING' ? queueStatus({ ...lj, queuePosition: sj?.queuePosition, etaStartAt: sj?.etaStartAt }, now) : null;
   const plan = picked.plan;
   const busy = stage !== null;
 
@@ -444,10 +448,35 @@ const Home: React.FC = () => {
                   {lj?.state === 'RUNNING'
                     ? `Running on ${lj.nodeList ?? 'its node'} as job ${lj.slurmJobId ?? lj.id}.`
                     : lj?.state === 'PENDING'
-                      ? `Queued as job ${lj.slurmJobId ?? lj.id}. Starts in about ${formatDuration(Math.max(0, (plan?.estWaitHours ?? 0) - (lj.submitTime ? (now - new Date(lj.submitTime).getTime()) / 3600000 : 0)))}.`
+                      ? qs?.starting
+                        ? `Job ${lj.slurmJobId ?? lj.id}: ${qs.label}`
+                        : `Queued as job ${lj.slurmJobId ?? lj.id}${qs?.position != null ? ` (#${qs.position} in line)` : ''}. Starts in about ${qs?.etaMs != null ? formatDuration(Math.max(0, (qs.etaMs - now) / 3600000)) : formatDuration(Math.max(0, (plan?.estWaitHours ?? 0) - (lj.submitTime ? (now - new Date(lj.submitTime).getTime()) / 3600000 : 0)))}.`
                       : `Job ${lj?.slurmJobId ?? lj?.id} is ${String(lj?.state ?? '').toLowerCase()}.`}{' '}
                   <span className="text-[var(--c3-style-basic-fg-secondary)]">EasyCompute will only message you if something needs you.</span>
                 </p>
+                {lj?.state === 'RUNNING' && telemetry.length > 1 && (
+                  <div className="grid grid-cols-2 gap-3 text-left text-xs text-[var(--c3-style-basic-fg-secondary)]">
+                    <div>
+                      <div className="flex justify-between">
+                        <span>GPU util</span>
+                        <span className="tabular-nums text-[var(--c3-style-basic-fg-primary)]">{lastMetric?.gpuUtilPct != null ? `${Math.round(lastMetric.gpuUtilPct)}%` : '—'}</span>
+                      </div>
+                      <Sparkline values={telemetry.map((p) => p.gpuUtilPct)} tone="accent" domain={[0, 100]} className="h-10" ariaLabel="GPU utilization, live" />
+                    </div>
+                    <div>
+                      <div className="flex justify-between">
+                        <span>GPU memory</span>
+                        <span className="tabular-nums text-[var(--c3-style-basic-fg-primary)]">{lastMetric?.gpuMemPct != null ? `${Math.round(lastMetric.gpuMemPct)}%` : '—'}</span>
+                      </div>
+                      <Sparkline values={telemetry.map((p) => p.gpuMemPct)} tone="pink" domain={[0, 100]} className="h-10" ariaLabel="GPU memory, live" />
+                    </div>
+                  </div>
+                )}
+                {lj?.state === 'PENDING' && qs?.etaMs != null && (
+                  <div className="mx-auto h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-[color-mix(in_srgb,white_8%,transparent)]" role="progressbar" aria-label="Queue wait elapsed" aria-valuenow={Math.round(qs.progress * 100)}>
+                    <div className="h-full rounded-full bg-[var(--ec-blue,var(--c3-style-basic-fg-info))] transition-[width] duration-1000" style={{ width: `${Math.max(2, qs.progress * 100)}%` }} />
+                  </div>
+                )}
                 {lj?.state === 'RUNNING' && (
                   <div className="flex flex-wrap justify-center gap-1.5 text-xs">
                     <span className="rounded-md bg-[color-mix(in_srgb,white_6%,transparent)] px-2 leading-6 tabular-nums">{`Elapsed ${formatDuration(lj.elapsedHours)} of ${formatDuration(lj.timelimitHours)}`}</span>

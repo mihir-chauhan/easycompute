@@ -18,6 +18,7 @@ import {
   SearchBox,
   SectionCard,
   Segmented,
+  Sparkline,
   ToneBadge,
   utilTone,
   TONE_TEXT,
@@ -26,10 +27,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { fetchLiveMetrics, fetchOpenAlerts, fetchRecentJobs } from '@/features/lab/api';
 import { AlertTypeBadge, CliHint, JobStateBadge, Mono, muted } from '@/features/lab/components';
-import { whereLabel, formatClock, formatDuration, formatPct100, formatRelative, formatUsd } from '@/features/lab/format';
-import type { Alert, Job } from '@/features/lab/types';
+import { whereLabel, formatDuration, formatPct100, formatRelative, formatUsd } from '@/features/lab/format';
+import type { Alert, Job, JobMetric } from '@/features/lab/types';
+import { queueStatus, useTelemetry, type TelemetryJob } from '@/features/lab/telemetry';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
-import { LIVE_POLL_MS, LiveBadge, liveJob, mergeSnap, SimNote, useLiveSnapshot, useNow } from '@/features/lab/live';
+import { LIVE_POLL_MS, LiveBadge, liveJob, mergeSnap, SimNote, useLiveSnapshot, useNow, withLatest } from '@/features/lab/live';
 import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { cn } from '@/lib/utils';
@@ -37,6 +39,18 @@ import { cn } from '@/lib/utils';
 type View = 'all' | 'running' | 'queued' | 'approval' | 'completed' | 'failed';
 const VIEWS: View[] = ['all', 'running', 'queued', 'approval', 'completed', 'failed'];
 const FAILED = ['FAILED', 'TIMEOUT', 'OUT_OF_MEMORY', 'CANCELLED', 'PREEMPTED'];
+
+/** Running job's GPU util: streaming sparkline (last 5 min) and the current value. */
+function LiveUtil({ job, server }: { job: TelemetryJob; server: JobMetric[] }) {
+  const series = useTelemetry(job, server, { windowMs: 5 * 60_000, points: 30 });
+  const u = [...series].reverse().find((p) => p.gpuUtilPct != null)?.gpuUtilPct ?? null;
+  return (
+    <span className="inline-flex items-center justify-end gap-2">
+      <Sparkline values={series.map((p) => p.gpuUtilPct)} tone="accent" domain={[0, 100]} area={false} className="h-6 w-16" ariaLabel="GPU utilization, last 5 minutes" />
+      <span className={cn('w-9 tabular-nums', TONE_TEXT[utilTone(u)])}>{formatPct100(u)}</span>
+    </span>
+  );
+}
 
 const RunList: React.FC = () => {
   const navigate = useNavigate();
@@ -75,6 +89,15 @@ const RunList: React.FC = () => {
     metrics.forEach((m) => {
       if (m.job?.id && m.gpuUtilPct != null && by[m.job.id] == null) by[m.job.id] = m.gpuUtilPct;
     });
+    return by;
+  }, [metrics]);
+
+  const metricsByJob = useMemo(() => {
+    const by: Record<string, JobMetric[]> = {};
+    metrics.forEach((m) => {
+      if (m.job?.id) (by[m.job.id] ??= []).push(m);
+    });
+    Object.values(by).forEach((l) => l.reverse());
     return by;
   }, [metrics]);
 
@@ -127,8 +150,14 @@ const RunList: React.FC = () => {
       );
     }
     if (j.state === 'PENDING') {
-      const q = j as Job & { queuePosition?: number | null; etaStartAt?: string | null };
-      return <span className={muted}>{`${q.queuePosition != null ? `Queue #${q.queuePosition}` : 'Waiting'}${q.etaStartAt ? ` · starts ~${formatClock(q.etaStartAt)}` : ` · queued ${formatRelative(j.submitTime)}`}`}</span>;
+      const qs = queueStatus(j as Job & { queuePosition?: number | null; etaStartAt?: string | null }, now);
+      if (qs.etaMs == null) return <span className={muted}>{`${qs.position != null ? `Queue #${qs.position}` : 'Waiting'} · queued ${formatRelative(j.submitTime)}`}</span>;
+      return (
+        <div className="flex w-36 flex-col gap-1">
+          <ProgressBar value={qs.progress} tone="info" ariaLabel="Queue wait elapsed" />
+          <span className={cn('text-xs tabular-nums', muted)}>{qs.label}</span>
+        </div>
+      );
     }
     const top = alertsByJob[j.id]?.[0];
     if (top) return <AlertTypeBadge type={top.alertType} severity={top.severity} />;
@@ -161,7 +190,8 @@ const RunList: React.FC = () => {
       hideBelow: 'sm',
       sortValue: (j) => utilNow[j.id] ?? j.gpuUtilAvg ?? -1,
       render: (j) => {
-        const u = j.state === 'RUNNING' ? (utilNow[j.id] ?? j.gpuUtilAvg) : j.gpuUtilAvg;
+        if (j.state === 'RUNNING') return <LiveUtil job={j} server={withLatest(metricsByJob[j.id] ?? [], snap.byJob[j.id]?.latest)} />;
+        const u = j.gpuUtilAvg;
         return u == null ? <span className={muted}>–</span> : <span className={TONE_TEXT[utilTone(u)]}>{formatPct100(u)}</span>;
       },
     },

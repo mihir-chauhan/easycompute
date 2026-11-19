@@ -476,6 +476,7 @@ export interface SnapJob {
   partitionId?: string;
   qos?: string;
   state?: JobState;
+  workloadType?: WorkloadType;
   gpus?: number;
   gpuTypeId?: string;
   nodeList?: string;

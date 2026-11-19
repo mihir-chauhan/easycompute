@@ -31,6 +31,7 @@ import {
   LoadingState,
   MetricChart,
   PageFrame,
+  ProgressBar,
   SectionCard,
   StatusBadge,
   ToneBadge,
@@ -53,7 +54,8 @@ import { ActivityRow, AlertTypeBadge, HeadNote, JobStateBadge, muted, Notice } f
 import { ACTION_LABEL, ALERT_TYPE_LABEL, formatShortDateTime, formatClock, formatDuration, formatInt, formatPct100, formatRelative, formatUsd, walltimeLeft } from '@/features/lab/format';
 import type { ActionType, Alert, JobMetric } from '@/features/lab/types';
 import { alertModel, ModelComputing, ModelProvenance, WhyFired } from '@/features/lab/models';
-import { LIVE_POLL_MS, LiveBadge, liveJob, mergeSnap, seeded, SimNote, useLiveSnapshot, useNow, withLatest } from '@/features/lab/live';
+import { LIVE_POLL_MS, LiveBadge, liveJob, mergeSnap, SimNote, useLiveSnapshot, useNow, withLatest } from '@/features/lab/live';
+import { queueStatus, useTelemetry } from '@/features/lab/telemetry';
 import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { formatDateTime } from '@/lib/format';
@@ -99,7 +101,6 @@ const RunDetail: React.FC = () => {
   const job = useLoad(() => getJob(id), [id], LIVE_POLL_MS);
   const detail = useLoad(() => Promise.all([fetchJobMetrics(id), fetchJobAlerts(id), fetchJobActions(id)]), [id], LIVE_POLL_MS);
   const now = useNow(1000);
-  const tick = Math.floor(now / 2000);
   const reloadAll = () => {
     job.reload();
     detail.reload();
@@ -109,9 +110,10 @@ const RunDetail: React.FC = () => {
   const snap = useLiveSnapshot(job.data?.lab?.id ?? null);
   const approvals = useLoad(() => (job.data?.lab?.id ? pendingApprovals(job.data.lab.id) : null), [job.data?.lab?.id], LIVE_POLL_MS);
   const proposals = (approvals.data?.items ?? []).filter((i) => i.jobId === id && i.status === 'PENDING');
-  const metrics = useMemo(() => withLatest(fetchedMetrics, snap.byJob[id]?.latest), [fetchedMetrics, snap, id]);
+  const serverMetrics = useMemo(() => withLatest(fetchedMetrics, snap.byJob[id]?.latest), [fetchedMetrics, snap, id]);
   const sj = snap.byJob[id];
   const merged = job.data ? mergeSnap(job.data, sj) : null;
+  const metrics = useTelemetry(merged, serverMetrics);
   const j = merged ? liveJob(merged, sj ? snap.updatedAt : job.updatedAt, now, merged.progressPerRealSec) : null;
   const latest = metrics.at(-1);
   const openAlerts = alerts.filter((a) => a.status === 'OPEN' || a.status === 'ACKED');
@@ -120,7 +122,7 @@ const RunDetail: React.FC = () => {
   const canAct = Boolean(j && lr.canActOn(j.user));
 
   const charts = useMemo(() => {
-    const x = metrics.map((m) => formatClock(m.ts));
+    const x = metrics.map((m) => new Date(m.t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }));
     const pct = (v: number) => `${Math.round(v)}%`;
     const defs: { key: string; title: string; sub: string; series: ChartSeries[]; fmt: (v: number) => string; max?: number; thresholds?: ChartThreshold[]; color?: string }[] = [
       { key: 'util', title: 'GPU utilization', sub: 'Mean SM activity across allocated GPUs', series: [{ name: 'GPU util', data: pts(metrics, 'gpuUtilPct'), area: true, color: toneColor('good') }], fmt: pct, max: 100, thresholds: [{ value: 15, label: 'Idle below 15%', tone: 'warn' }] },
@@ -130,21 +132,9 @@ const RunDetail: React.FC = () => {
       { key: 'power', title: 'Node power', sub: 'Per-GPU average, watts', series: [{ name: 'Power', data: pts(metrics, 'powerW'), area: true, color: toneColor('warn') }], fmt: (v) => `${Math.round(v)} W` },
       { key: 'host', title: 'CPU and host memory', sub: 'Allocated cores · RSS vs --mem', series: [{ name: 'CPU', data: pts(metrics, 'cpuUtilPct') }, { name: 'RAM', data: pts(metrics, 'memPct'), color: toneColor('info'), dashed: true }], fmt: pct, max: 100, thresholds: [{ value: 90, label: 'OOM-kill', tone: 'bad' }] },
     ];
-    // Live head: between server samples, extend each series to "now" with small seeded jitter around the last server
-    // value (never moving the server samples themselves); the next poll replaces it with real data.
-    const streaming = job.data?.state === 'RUNNING' && metrics.length > 1;
-    const xs = streaming ? [...x, formatClock(new Date(Date.now()).toISOString())] : x;
-    const withTail = (sr: ChartSeries, max?: number): ChartSeries => {
-      if (!streaming) return sr;
-      const last = [...sr.data].reverse().find((v) => v != null);
-      if (last == null) return { ...sr, data: [...sr.data, null] };
-      const jit = seeded(`${id}:${sr.name}`, tick) * Math.max(0.5, Math.abs(last) * 0.015);
-      const v = Math.max(0, max != null ? Math.min(max, last + jit) : last + jit);
-      return { ...sr, data: [...sr.data, Math.round(v * 100) / 100] };
-    };
-    return defs.map((d) => ({ ...d, option: lineOption({ x: xs, series: d.series.map((sr) => withTail(sr, d.max)), valueFormat: d.fmt, min: 0, max: d.max, thresholds: d.thresholds }) }));
+    return defs.map((d) => ({ ...d, option: lineOption({ x, series: d.series, valueFormat: d.fmt, min: 0, max: d.max, thresholds: d.thresholds }) }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [metrics, themeKey, latest, tick, job.data?.state]);
+  }, [metrics, themeKey, latest]);
 
   const run = async (action: ActionType) => {
     if (!j) return;
@@ -215,7 +205,7 @@ const RunDetail: React.FC = () => {
   const left = walltimeLeft(j);
   const part = j.partition as (typeof j.partition & { avgWaitHours?: number; currentQueueDepth?: number }) | undefined;
   const queueDepth = part?.currentQueueDepth ?? null;
-  const eta = merged?.etaStartAt ? new Date(merged.etaStartAt).getTime() : j.submitTime && part?.avgWaitHours != null ? new Date(j.submitTime).getTime() + part.avgWaitHours * 3600000 : null;
+  const qs = queueStatus({ ...j, partition: part, queuePosition: merged?.queuePosition, etaStartAt: merged?.etaStartAt }, now);
   const wallFrac = j.timelimitHours ? (j.elapsedHours ?? 0) / j.timelimitHours : 0;
   const burn = j.elapsedHours ? (j.costUsd ?? 0) / j.elapsedHours : null;
   const ckpt = latest?.checkpointAgeMin;
@@ -240,6 +230,7 @@ const RunDetail: React.FC = () => {
         empty={metrics.length < 2}
         emptyLabel={j.state === 'PENDING' ? 'Waiting for the job to start' : 'No samples yet'}
         heightClass={height}
+        live={j.state === 'RUNNING'}
         ariaLabel={c.title}
         legend={c.series.length > 1 ? c.series.map((sr, i) => ({ label: sr.name, swatchClass: i === 0 ? TONE_BG.info : TONE_BG.accent, dashed: sr.dashed })) : undefined}
       />
@@ -306,11 +297,12 @@ const RunDetail: React.FC = () => {
           <span aria-hidden className="ec-pulse inline-block size-2.5 rounded-full bg-[var(--c3-style-basic-fg-info)]" />
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">
-              {`Queued on ${j.cluster?.name ?? j.cluster?.id} ${j.partition?.slurmPartition ?? j.partition?.name ?? ''}${merged?.queuePosition != null ? ` · position #${merged.queuePosition}` : queueDepth != null ? ` · about ${formatInt(queueDepth + 1)} jobs ahead in this partition` : ''}`}
+              {qs.starting ? qs.label : `Queued on ${j.cluster?.name ?? j.cluster?.id} ${j.partition?.slurmPartition ?? j.partition?.name ?? ''}${merged?.queuePosition != null ? ` · position #${merged.queuePosition}` : queueDepth != null ? ` · about ${formatInt(queueDepth + 1)} jobs ahead in this partition` : ''}`}
             </div>
             <div className={`text-[13px] ${muted}`}>
-              {`Submitted ${formatRelative(j.submitTime)}${eta ? ` · expected to start ${eta > now ? `in ~${formatDuration((eta - now) / 3600000)}` : 'any moment now'}` : ''}. Metrics start flowing as soon as Slurm places it on a node.`}
+              {`Submitted ${formatRelative(j.submitTime)}${qs.etaMs ? ` · ${qs.starting ? 'Slurm is placing it now' : qs.label}` : ''}. Metrics start flowing as soon as Slurm places it on a node.`}
             </div>
+            {qs.etaMs != null && <ProgressBar value={qs.progress} tone="info" size="sm" className="mt-2 max-w-sm" ariaLabel="Queue wait elapsed" />}
           </div>
           <ModelProvenance name="AnvilQueueWaitQ50Q90" confidence="low" />
         </div>

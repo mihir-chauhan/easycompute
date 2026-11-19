@@ -17,7 +17,10 @@ import {
   MetricChart,
   PageFrame,
   SectionCard,
+  Sparkline,
   TableSkeleton,
+  TONE_TEXT,
+  utilTone,
   ToneBadge,
   TONE_BG,
   errorMessage,
@@ -32,11 +35,12 @@ import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { applyJobAction, fetchLabActions, fetchLiveJobs, fetchLiveMetrics, fetchMembers, fetchOpenAlerts, getLabSummary } from '@/features/lab/api';
 import { ActivityRow, CheckRow, HeadNote, JobStateBadge, muted } from '@/features/lab/components';
-import { ACTION_LABEL, ALERT_TYPE_LABEL, whereLabel, formatShortDateTime, formatClock, formatInt, formatPct100, formatUsd } from '@/features/lab/format';
-import type { Alert, Job, SummaryAllocation, SummaryDeadline } from '@/features/lab/types';
+import { ACTION_LABEL, ALERT_TYPE_LABEL, whereLabel, formatShortDateTime, formatInt, formatPct100, formatUsd } from '@/features/lab/format';
+import type { Alert, Job, JobMetric, SummaryAllocation, SummaryDeadline } from '@/features/lab/types';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
 import { alertModel, ModelProvenance } from '@/features/lab/models';
-import { LIVE_POLL_MS, LiveBadge, SimNote } from '@/features/lab/live';
+import { LIVE_POLL_MS, LiveBadge, SimNote, useNow } from '@/features/lab/live';
+import { buildTelemetry, fleetUtil, TELEMETRY_TICK_MS } from '@/features/lab/telemetry';
 import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { formatDate, formatShortDate } from '@/lib/format';
@@ -92,34 +96,35 @@ const LabHome: React.FC = () => {
   const next = deadlines[0];
   const clusterNames = [...new Set(allocations.map((a) => a.clusterName ?? a.clusterId).filter(Boolean))];
 
-  /** Fleet-average GPU utilization across the lab's live jobs, per sample time. */
-  const utilOption = useMemo(() => {
-    const byTs = new Map<string, number[]>();
+  /** Fleet-average GPU utilization across the lab's running jobs, streaming (server samples + live profile). */
+  const tick = useNow(TELEMETRY_TICK_MS);
+  const metricsByJob = useMemo(() => {
+    const by: Record<string, JobMetric[]> = {};
     metrics.forEach((m) => {
-      if (m.gpuUtilPct == null) return;
-      const k = m.ts.slice(0, 16);
-      byTs.set(k, [...(byTs.get(k) ?? []), m.gpuUtilPct]);
+      if (m.job?.id) (by[m.job.id] ??= []).push(m);
     });
-    const keys = [...byTs.keys()].sort();
-    if (keys.length < 2) return null;
+    Object.values(by).forEach((l) => l.reverse());
+    return by;
+  }, [metrics]);
+  const perJob = useMemo(
+    () => Object.fromEntries(running.map((j) => [j.id, buildTelemetry(j, metricsByJob[j.id] ?? [], tick, { windowMs: 30 * 60_000, points: 60 })])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [jobs, metricsByJob, tick],
+  );
+  const fleet = useMemo(() => fleetUtil(Object.values(perJob), tick), [perJob, tick]);
+  const nowUtil = [...fleet.v].reverse().find((v) => v != null) ?? null;
+  const utilOption = useMemo(() => {
+    if (fleet.v.filter((v) => v != null).length < 2) return null;
     return lineOption({
-      x: keys.map((k) => formatClock(`${k}:00Z`)),
-      series: [{ name: 'Avg GPU util', data: keys.map((k) => Math.round(byTs.get(k)!.reduce((a, b) => a + b, 0) / byTs.get(k)!.length)), area: true, color: toneColor('good') }],
+      x: fleet.t.map((t) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })),
+      series: [{ name: 'Avg GPU util', data: fleet.v, area: true, color: toneColor('good') }],
       valueFormat: (v) => `${Math.round(v)}%`,
       min: 0,
       max: 100,
       thresholds: [{ value: 70, label: 'Target 70%' }],
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [metrics, themeKey]);
-  const nowUtil = useMemo(() => {
-    const latest = new Map<string, number>();
-    metrics.forEach((m) => {
-      if (m.job?.id && m.gpuUtilPct != null && !latest.has(m.job.id)) latest.set(m.job.id, m.gpuUtilPct);
-    });
-    const v = [...latest.values()];
-    return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
-  }, [metrics]);
+  }, [fleet, themeKey]);
 
   const runAction = async (a: Alert) => {
     if (!a.job || !a.recommendedAction) return;
@@ -213,6 +218,23 @@ const LabHome: React.FC = () => {
     { key: 'cl', header: 'Cluster', hideBelow: 'md', render: (j) => whereLabel(j) },
     { key: 'gpus', header: 'GPUs', align: 'right', render: (j) => formatInt(j.allocGpus) },
     { key: 'st', header: 'Status', render: (j) => (alerts.some((a) => a.job?.id === j.id && a.severity === 'CRITICAL' && a.status === 'OPEN') ? <ToneBadge tone="warn">Needs approval</ToneBadge> : <JobStateBadge value={j.state} />) },
+    {
+      key: 'util',
+      header: 'GPU util',
+      align: 'right',
+      hideBelow: 'sm',
+      render: (j) => {
+        const sr = perJob[j.id];
+        if (!sr?.length) return <span className={muted}>–</span>;
+        const u = [...sr].reverse().find((p) => p.gpuUtilPct != null)?.gpuUtilPct ?? null;
+        return (
+          <span className="inline-flex items-center justify-end gap-2">
+            <Sparkline values={sr.slice(-45).map((p) => p.gpuUtilPct)} tone="accent" domain={[0, 100]} area={false} className="h-6 w-16" ariaLabel="GPU utilization trend" />
+            <span className={cn('w-9 tabular-nums', TONE_TEXT[utilTone(u)])}>{formatPct100(u)}</span>
+          </span>
+        );
+      },
+    },
     { key: 'cost', header: 'Cost', align: 'right', render: (j) => formatUsd(j.costUsd) },
   ];
 
@@ -336,6 +358,7 @@ const LabHome: React.FC = () => {
         emptyLabel="No live GPU jobs right now"
         ariaLabel="Lab GPU utilization"
         heightClass="h-64"
+        live
       />
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
