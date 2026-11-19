@@ -272,13 +272,17 @@ function removeUser(userId) {
 
 // ---------------------------------------------------------------- approvals
 
+/** A PENDING_APPROVAL action-log row: a walltime extension request, or an action proposed by autopilot / AI triage. */
 function walltimeItem(e, names) {
   var labId = e.lab ? String(e.lab.id) : null;
-  var m = String(e.detail || '').match(/from ([\d.]+) h to ([\d.]+) h/);
+  var isExt = String(e.actionType) == 'EXTEND_WALLTIME';
+  var m = isExt ? String(e.detail || '').match(/from ([\d.]+) h to ([\d.]+) h/) : null;
   var decided = e.outcome != 'PENDING_APPROVAL';
   return {
     id: 'ALE:' + e.id,
-    kind: 'WALLTIME_EXTENSION',
+    kind: isExt ? 'WALLTIME_EXTENSION' : 'ACTION_CONFIRMATION',
+    actionType: String(e.actionType),
+    actor: String(e.actor),
     status: !decided ? 'PENDING' : e.outcome == 'DONE' ? 'APPROVED' : 'REJECTED',
     labId: labId,
     labName: labId ? names[labId] || labId : null,
@@ -286,10 +290,10 @@ function walltimeItem(e, names) {
     runRequestId: null,
     requestedBy: e.job && e.job.user ? String(e.job.user) : String(e.actor),
     requestedAt: iso(e.actedAt),
-    title: 'Extend walltime of ' + (e.job ? e.job.jobName || e.job.id : 'job') + (m ? ' to ' + m[2] + ' h' : ''),
+    title: isExt ? 'Extend walltime of ' + (e.job ? e.job.jobName || e.job.id : 'job') + (m ? ' to ' + m[2] + ' h' : '') : 'Confirm ' + e.actionType + ' on ' + (e.job ? e.job.jobName || e.job.id : 'job') + ' (proposed by ' + String(e.actor).toLowerCase() + ')',
     detail: e.detail,
     amount: m ? round(Number(m[2]) - Number(m[1]), 2) : null,
-    unit: 'hours',
+    unit: isExt ? 'hours' : null,
   };
 }
 
@@ -335,37 +339,48 @@ function pendingApprovals(labId) {
   items.sort(function (a, b) {
     return String(b.requestedAt).localeCompare(String(a.requestedAt));
   });
-  var walltime = items.filter(function (i) {
-    return i.kind == 'WALLTIME_EXTENSION';
-  }).length;
-  return { items: items, counts: { total: items.length, walltime: walltime, run: items.length - walltime } };
+  var count = function (k) {
+    return items.filter(function (i) {
+      return i.kind == k;
+    }).length;
+  };
+  return { items: items, counts: { total: items.length, walltime: count('WALLTIME_EXTENSION'), run: count('RUN_APPROVAL'), confirmation: count('ACTION_CONFIRMATION') } };
 }
 
 function decide(id, note, approve) {
   var me = actor();
-  if (!capabilities(me.user.role).approve) throw new Error(me.user.name + ' (' + me.user.role + ') cannot approve or reject; ask the lab PI.');
   var parts = String(id || '').split(':');
   var kind = parts.shift();
   var key = parts.join(':');
   var names = labNames();
   var now = Date.now();
-  var who = me.user.name + (me.user.role == 'UNIVERSITY_ADMIN' ? ' (Research Computing)' : ' (PI)');
+  var who = me.user.name + (me.user.role == 'UNIVERSITY_ADMIN' ? ' (Research Computing)' : me.user.role == 'PI' ? ' (PI)' : ' (job owner)');
   var suffix = note ? ' Note: ' + note : '';
   if (kind == 'ALE') {
     var e = ActionLogEntry.make({ id: key }).get('this, job.user, job.jobName');
     if (e == null) throw new Error('Approval ' + id + ' not found');
     if (e.outcome != 'PENDING_APPROVAL') throw new Error('Approval ' + id + ' was already decided');
-    requireManager(me, e.lab ? String(e.lab.id) : null);
-    if (approve && e.job) {
+    var ownJob = e.job && e.job.user != null && String(e.job.user) == String(me.user.username) && (me.user.role == 'STUDENT' || me.user.role == 'STAFF');
+    if (ownJob && String(e.actionType) != 'EXTEND_WALLTIME') {
+      // the job owner confirms (or declines) an action proposed for their own job
+    } else {
+      if (!capabilities(me.user.role).approve) throw new Error(me.user.name + ' (' + me.user.role + ') cannot approve or reject; ask the lab PI.');
+      requireManager(me, e.lab ? String(e.lab.id) : null);
+    }
+    if (approve && e.job && String(e.actionType) != 'EXTEND_WALLTIME') {
+      var done = Job.make({ id: e.job.id }).applyAction(String(e.actionType), 'ADMIN');
+      ActionLogEntry.make({ id: e.id, outcome: done.outcome == 'DONE' ? 'DONE' : 'FAILED', detail: e.detail + ' — Confirmed by ' + who + '; ' + done.detail + suffix }).merge();
+    } else if (approve && e.job) {
       var applied = Job.make({ id: e.job.id }).applyAction('EXTEND_WALLTIME', 'ADMIN');
       ActionLogEntry.make({ id: e.id, outcome: applied.outcome == 'DONE' ? 'DONE' : 'FAILED', detail: e.detail + ' — Approved by ' + who + '; ' + applied.detail + suffix }).merge();
     } else {
-      ActionLogEntry.make({ id: e.id, outcome: 'FAILED', detail: e.detail + ' — ' + (approve ? 'Approved' : 'Rejected') + ' by ' + who + '.' + suffix }).merge();
+      ActionLogEntry.make({ id: e.id, outcome: 'FAILED', detail: e.detail + ' — ' + (approve ? 'Approved' : 'Declined') + ' by ' + who + '.' + suffix }).merge();
     }
     log.info('{} {} by {}', approve ? 'approve' : 'reject', id, me.user.id);
     return walltimeItem(ActionLogEntry.make({ id: e.id }).get('this, job.user, job.jobName'), names);
   }
   if (kind == 'RR') {
+    if (!capabilities(me.user.role).approve) throw new Error(me.user.name + ' (' + me.user.role + ') cannot approve or reject; ask the lab PI.');
     var r = RunRequest.make({ id: key }).get('this, submittedBy.name');
     if (r == null) throw new Error('Approval ' + id + ' not found');
     if (r.approvalStatus != 'PENDING') throw new Error('Approval ' + id + ' is not pending');

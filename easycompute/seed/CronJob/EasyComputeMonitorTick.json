@@ -1,14 +1,14 @@
 {
   "id": "EasyComputeMonitorTick",
   "name": "EasyComputeMonitorTick",
-  "description": "Every 5 minutes advances live runs by one simulated 15-minute step, evaluates job health and applies lab autopilot policies (RunMonitor.tick). Ships inactive; resume it with CronJob.forId('EasyComputeMonitorTick').resume().",
+  "description": "Every minute advances the live cluster simulation by the real elapsed time (RunMonitor.tick): telemetry, job lifecycle, partition drift, allocation charges, guardrails and autopilot. Kill switch: RunSimulatorSettings.make({id:'default', enabled:false}).merge() (or pause this CronJob).",
   "action": {
     "typeName": "RunMonitor",
     "actionName": "tick"
   },
   "concurrent": false,
-  "inactive": true,
+  "inactive": false,
   "scheduleDef": {
-    "cronExpression": "0 0/5 * * * ?"
+    "cronExpression": "0 * * * * ?"
   }
 }

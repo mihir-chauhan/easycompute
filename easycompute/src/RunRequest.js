@@ -1248,27 +1248,6 @@ function nextSlurmJobId(clusterId) {
   return String(Date.now() % 100000000);
 }
 
-/**
- * A node name in the cluster's real naming scheme: Gilbreth `gilbreth-k007` (letter = node type of the partition),
- * Gautschi `gautschi-h012` / `gautschi-g002` / `gautschi-a219`, Negishi `negishi-a336`, Anvil `g012` (gpu), `h009`
- * (ai), `a142` (cpu), AWS ParallelCluster `p4d-dy-4` / `p4d-sp-3`.
- */
-function nodeName(p, i) {
-  var cid = p.cluster ? String(p.cluster.id) : '';
-  var part = slurmPartitionName(p);
-  var gt = p.gpuType ? String(p.gpuType.id) : '';
-  var letter;
-  if (cid == 'aws-p4d') return (p.preemptible ? 'p4d-sp-' : 'p4d-dy-') + (1 + (i % Math.max(1, num(p.nodeCount, 4))));
-  if (cid == 'gilbreth') letter = { 'a100-80gb': 'k', 'a100-40gb': 'n', a10: 'h', a30: 'b', h100: 'l', training: 'j' }[part] || 'k';
-  else if (cid == 'gautschi') letter = part == 'ai' ? 'h' : part == 'smallgpu' ? 'g' : part == 'highmem' ? 'b' : 'a';
-  else if (cid == 'negishi') letter = part == 'gpu' ? 'g' : part == 'highmem' ? 'b' : 'a';
-  else if (cid == 'anvil') letter = /H100/.test(gt) ? 'h' : gt ? 'g' : part == 'highmem' ? 'b' : 'a';
-  else letter = 'a';
-  var n = String(1 + (i % Math.max(1, num(p.nodeCount, 20))));
-  while (n.length < 3) n = '0' + n;
-  return (cid == 'anvil' ? '' : cid + '-') + letter + n;
-}
-
 function submit(planId) {
   var req = RunRequest.make({ id: this.id }).get('this, lab.this, project, submittedBy.this');
   if (req == null) throw new Error('RunRequest ' + this.id + ' not found');
@@ -1282,15 +1261,16 @@ function submit(planId) {
   var clusterId = String(plan.cluster.id);
   var slurmJobId = nextSlurmJobId(clusterId);
   var jobId = clusterId + '-' + slurmJobId;
-  var running = num(plan.estWaitHours, 0) < 0.25;
-  var startMs = running ? now - 15 * 60 * 1000 : null;
+  // always queued first: the live simulator starts it at the demo-compressed ETA (RunSimulatorSettings.queueWaitCompression)
+  var sim = RunSimulatorSettings.make({ id: 'default' }).get('queueWaitCompression');
+  var compression = sim && sim.queueWaitCompression ? Number(sim.queueWaitCompression) : 60;
+  var etaMs = now + Math.max(20 * 1000, Math.min(5 * 60 * 1000, (num(plan.estWaitHours, 0.5) * 3600 * 1000) / compression));
+  var pendingAhead = Job.fetchCount({ filter: Filter.eq('partition.id', plan.partition.id).and().eq('isLive', true).and().eq('state', 'PENDING') });
   var gpus = num(plan.gpus, 0);
   var nodes = Math.max(1, num(plan.nodes, 1));
   var p = plan.partition;
   var gpusPerNode = Math.max(1, num(p.gpusPerNode, 1));
   var cores = gpus > 0 ? Math.floor(num(p.coresPerNode, 64) / gpusPerNode) * gpus : nodes * num(p.coresPerNode, 64);
-  var nodeList = [];
-  for (var i = 0; i < nodes; i++) nodeList.push(nodeName(p, Number(slurmJobId) % 97 + i));
   var lab = req.lab;
   var user = req.submittedBy && req.submittedBy.username ? String(req.submittedBy.username) : 'user_' + String(lab.id).substring(0, 3);
 
@@ -1307,11 +1287,13 @@ function submit(planId) {
     qos: plan.qos,
     jobName: slug(req.name),
     workloadType: req.workloadType,
-    state: running ? 'RUNNING' : 'PENDING',
-    submitTime: toDt(running ? startMs - 60 * 1000 : now),
-    startTime: running ? toDt(startMs) : null,
+    state: 'PENDING',
+    submitTime: toDt(now),
+    etaStartAt: toDt(etaMs),
+    queuePosition: pendingAhead + 1,
+    simScenario: 'HEALTHY',
     timelimitHours: num(plan.walltimeHours, 4),
-    elapsedHours: running ? 0.25 : 0,
+    elapsedHours: 0,
     allocCpus: cores,
     allocNodes: nodes,
     allocGpus: gpus,
@@ -1320,36 +1302,9 @@ function submit(planId) {
     costUnits: 0,
     costUsd: 0,
     isLive: true,
-    nodeList: running ? nodeList.join(',') : null,
+    nodeList: null,
     exitCode: null,
   }).create();
-
-  if (running) {
-    var tdp = plan.gpuType && /H100/.test(plan.gpuType.id) ? 700 : plan.gpuType && /A100/.test(plan.gpuType.id) ? 400 : 300;
-    var wt = String(req.workloadType || '');
-    var training = wt == 'TRAINING' || wt == 'FINETUNE';
-    var samples = [];
-    for (var s = 0; s < 4; s++) {
-      var util = gpus > 0 ? 40 + s * 14 : 0;
-      samples.push(
-        JobMetric.make({
-          id: jobId + '-m' + s,
-          job: { id: jobId },
-          ts: toDt(startMs + s * 5 * 60 * 1000),
-          gpuUtilPct: util,
-          gpuMemPct: gpus > 0 ? 35 + s * 10 : 0,
-          cpuUtilPct: 55 + s * 5,
-          memPct: 30 + s * 3,
-          ioReadMBps: round(Math.min(2000, 150 + num(req.datasetGb, 10) * 2) * (s === 0 ? 2 : 1), 1),
-          ioWriteMBps: 4,
-          powerW: gpus > 0 ? round(gpus * (70 + ((tdp - 70) * util) / 100), 0) : 0,
-          checkpointAgeMin: s * 5,
-          trainingLoss: training ? round(2.9 - s * 0.08, 3) : null,
-        })
-      );
-    }
-    JobMetric.createBatch(samples);
-  }
 
   RunRequest.make({ id: req.id, status: 'SUBMITTED', chosenPlan: { id: plan.id } }).merge();
   var cmd = 'sbatch -A ' + plan.account + ' -p ' + plan.slurmPartition + ' -q ' + plan.qos + ' --nodes=' + nodes +
@@ -1362,7 +1317,7 @@ function submit(planId) {
     actionType: 'SUBMIT',
     actor: 'USER',
     actedAt: toDt(now),
-    detail: 'Submitted plan "' + plan.label + '" (' + plan.id + '): ' + cmd + ' -> Submitted batch job ' + slurmJobId + (running ? ' (started immediately).' : ' (queued; expected wait ' + plan.waitBucket + ').'),
+    detail: 'Submitted plan "' + plan.label + '" (' + plan.id + '): ' + cmd + ' -> Submitted batch job ' + slurmJobId + ' (queued at position ' + (pendingAhead + 1) + '; expected start ' + new Date(etaMs).toISOString().substring(11, 19) + ' UTC in this demo, plan wait ' + plan.waitBucket + ').',
     outcome: 'DONE',
   }).create();
   log.info('submit {}: plan {} -> job {}', req.id, plan.id, jobId);

@@ -1,0 +1,51 @@
+/**
+ * Settings of the live cluster simulator ({@link RunMonitor}). One row, id `default`. Setting {@link #enabled} to false
+ * is the kill switch.
+ */
+entity type RunSimulatorSettings {
+
+  /**
+   * The simulator runs only when enabled.
+   */
+  enabled: boolean
+
+  /**
+   * Job progress per real second, in seconds (10 = one real minute is ten minutes of job progress).
+   */
+  demoTimeScale: double
+
+  /**
+   * Queue waits are divided by this factor (60 = a 2 h wait starts after about 2 minutes).
+   */
+  queueWaitCompression: double
+
+  /**
+   * Real seconds between telemetry samples.
+   */
+  sampleIntervalSec: int
+
+  /**
+   * At most this many real minutes are caught up after downtime.
+   */
+  maxCatchUpMin: int
+
+  /**
+   * Samples kept per job at full resolution; older ones are thinned to every 6th.
+   */
+  maxSamplesPerJob: int
+
+  /**
+   * Queue a successor with the same scenario when a scripted demo job ends.
+   */
+  respawnScriptedJobs: boolean
+
+  /**
+   * Real time of the last tick.
+   */
+  lastTickAt: datetime
+
+  /**
+   * Summary returned by the last tick.
+   */
+  lastTickSummary: json
+}

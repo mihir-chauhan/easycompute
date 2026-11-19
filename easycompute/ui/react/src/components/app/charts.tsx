@@ -6,7 +6,7 @@
 
 import React, { type ReactNode } from 'react';
 
-import EChart from '@/components/charts/EChart';
+import EChart from './Chart';
 import type { EChartsCoreOption } from '@/lib/echarts';
 import { cn } from '@/lib/utils';
 
@@ -194,11 +194,13 @@ interface MetricChartProps {
   /** MODEL_MAP component behind the numbers: "<model> is computing…" while loading, provenance chip after. */
   model?: string;
   provenance?: Provenance | null;
+  /** Live view: merge option updates so the chart animates between polls. */
+  live?: boolean;
   className?: string;
 }
 
 /** Chart card: SectionCard + EChart + HTML legend, with loading / empty / error states built in. */
-export function MetricChart({ title, subtitle, actions, option, legend, loading, error, onRetry, empty, emptyLabel = 'No data for this view yet.', heightClass = 'h-72', ariaLabel, onItemClick, footer, model, provenance, className }: MetricChartProps) {
+export function MetricChart({ title, subtitle, actions, option, legend, loading, error, onRetry, empty, emptyLabel = 'No data for this view yet.', heightClass = 'h-72', ariaLabel, onItemClick, footer, model, provenance, live, className }: MetricChartProps) {
   let body: ReactNode;
   if (error) body = <ErrorState message={error} onRetry={onRetry} />;
   else if (loading)
@@ -209,7 +211,7 @@ export function MetricChart({ title, subtitle, actions, option, legend, loading,
       </div>
     );
   else if (empty || !option) body = <EmptyState title={emptyLabel} className={heightClass} />;
-  else body = <EChart option={option} className={heightClass} ariaLabel={ariaLabel} onItemClick={onItemClick} />;
+  else body = <EChart option={option} className={heightClass} ariaLabel={ariaLabel} onItemClick={onItemClick} merge={live} />;
   return (
     <SectionCard
       title={title}

@@ -20,11 +20,12 @@ import {
   Segmented,
   Skeleton,
   StatusBadge,
-  useC3Data,
+  LiveIndicator,
+  useLivePoll,
   utilTone,
   type Billing,
 } from '@/components/app';
-import { getUniversityOverview, listClusters } from '@/features/admin/api';
+import { getLiveSnapshot, getUniversityOverview, listClusters, mergeLiveClusters } from '@/features/admin/api';
 import { compact, hours, num, pct, unitPrice, usd } from '@/features/admin/components';
 import type { ComputeCluster, OverviewCluster } from '@/features/admin/types';
 import { cn } from '@/lib/utils';
@@ -45,10 +46,15 @@ export default function AdminClusters() {
   const [q, setQ] = useState('');
   const [billing, setBilling] = useState('ALL');
 
-  const { data, loading, error, reload } = useC3Data<Row[]>(async () => {
-    const [clusters, overview] = await Promise.all([listClusters(), getUniversityOverview()]);
-    return clusters.map((c) => ({ ...c, live: overview.clusters.find((o) => o.id === c.id) }));
-  }, []);
+  const { data, loading, error, reload, updatedAt, live } = useLivePoll<Row[]>(
+    async () => {
+      const [clusters, overview, snap] = await Promise.all([listClusters(), getUniversityOverview(), getLiveSnapshot().catch(() => null)]);
+      const rows = mergeLiveClusters(overview.clusters, snap);
+      return clusters.map((c) => ({ ...c, live: rows.find((o) => o.id === c.id) }));
+    },
+    [],
+    { intervalMs: 10000 },
+  );
 
   const rows = useMemo(
     () =>
@@ -67,6 +73,7 @@ export default function AdminClusters() {
       title="Clusters"
       description="Purdue community clusters, NSF ACCESS and third-party cloud: capacity, load and how each is billed"
       breadcrumbs={[{ label: 'Research Computing', href: '#/admin' }, { label: 'Clusters' }]}
+      actions={<LiveIndicator updatedAt={updatedAt} live={live} />}
       toolbar={
         <>
           <SearchBox value={q} onChange={setQ} label="Search clusters" placeholder="Search clusters" />

@@ -27,7 +27,6 @@ import {
   CardGrid,
   KpiRow,
   KpiTile,
-  Countdown,
   EmptyState,
   ErrorState,
   LoadingState,
@@ -42,6 +41,7 @@ import {
   toneColor,
   useThemeKey,
   utilTone,
+  provenanceOf,
   type ChartSeries,
   type ChartThreshold,
 } from '@/components/app';
@@ -54,6 +54,7 @@ import { ActivityRow, AlertTypeBadge, HeadNote, JobStateBadge, muted, Notice } f
 import { ACTION_LABEL, ALERT_TYPE_LABEL, formatShortDateTime, formatClock, formatDuration, formatInt, formatPct100, formatRelative, formatUsd, walltimeLeft } from '@/features/lab/format';
 import type { ActionType, Alert, JobMetric } from '@/features/lab/types';
 import { alertModel, ModelComputing, ModelProvenance, WhyFired } from '@/features/lab/models';
+import { LIVE_POLL_MS, LiveBadge, liveJob, mergeSnap, seeded, SimNote, useLiveSnapshot, useNow, withLatest } from '@/features/lab/live';
 import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { formatDateTime } from '@/lib/format';
@@ -96,15 +97,21 @@ const RunDetail: React.FC = () => {
   const [tab, setTab] = useState<Tab>('metrics');
 
   const themeKey = useThemeKey();
-  const job = useLoad(() => getJob(id), [id], 30000);
-  const detail = useLoad(() => Promise.all([fetchJobMetrics(id), fetchJobAlerts(id), fetchJobActions(id)]), [id], 30000);
+  const job = useLoad(() => getJob(id), [id], LIVE_POLL_MS);
+  const detail = useLoad(() => Promise.all([fetchJobMetrics(id), fetchJobAlerts(id), fetchJobActions(id)]), [id], LIVE_POLL_MS);
+  const now = useNow(1000);
+  const tick = Math.floor(now / 2000);
   const reloadAll = () => {
     job.reload();
     detail.reload();
   };
 
-  const [metrics, alerts, log] = detail.data ?? [[], [], []];
-  const j = job.data;
+  const [fetchedMetrics, alerts, log] = detail.data ?? [[], [], []];
+  const snap = useLiveSnapshot(job.data?.lab?.id ?? null);
+  const metrics = useMemo(() => withLatest(fetchedMetrics, snap.byJob[id]?.latest), [fetchedMetrics, snap, id]);
+  const sj = snap.byJob[id];
+  const merged = job.data ? mergeSnap(job.data, sj) : null;
+  const j = merged ? liveJob(merged, sj ? snap.updatedAt : job.updatedAt, now, merged.progressPerRealSec) : null;
   const latest = metrics.at(-1);
   const openAlerts = alerts.filter((a) => a.status === 'OPEN' || a.status === 'ACKED');
   const live = j?.state === 'RUNNING' || j?.state === 'PENDING';
@@ -122,9 +129,21 @@ const RunDetail: React.FC = () => {
       { key: 'power', title: 'Node power', sub: 'Per-GPU average, watts', series: [{ name: 'Power', data: pts(metrics, 'powerW'), area: true, color: toneColor('warn') }], fmt: (v) => `${Math.round(v)} W` },
       { key: 'host', title: 'CPU and host memory', sub: 'Allocated cores · RSS vs --mem', series: [{ name: 'CPU', data: pts(metrics, 'cpuUtilPct') }, { name: 'RAM', data: pts(metrics, 'memPct'), color: toneColor('info'), dashed: true }], fmt: pct, max: 100, thresholds: [{ value: 90, label: 'OOM-kill', tone: 'bad' }] },
     ];
-    return defs.map((d) => ({ ...d, option: lineOption({ x, series: d.series, valueFormat: d.fmt, min: 0, max: d.max, thresholds: d.thresholds }) }));
+    // Live head: between server samples, extend each series to "now" with small seeded jitter around the last server
+    // value (never moving the server samples themselves); the next poll replaces it with real data.
+    const streaming = job.data?.state === 'RUNNING' && metrics.length > 1;
+    const xs = streaming ? [...x, formatClock(new Date(Date.now()).toISOString())] : x;
+    const withTail = (sr: ChartSeries, max?: number): ChartSeries => {
+      if (!streaming) return sr;
+      const last = [...sr.data].reverse().find((v) => v != null);
+      if (last == null) return { ...sr, data: [...sr.data, null] };
+      const jit = seeded(`${id}:${sr.name}`, tick) * Math.max(0.5, Math.abs(last) * 0.015);
+      const v = Math.max(0, max != null ? Math.min(max, last + jit) : last + jit);
+      return { ...sr, data: [...sr.data, Math.round(v * 100) / 100] };
+    };
+    return defs.map((d) => ({ ...d, option: lineOption({ x: xs, series: d.series.map((sr) => withTail(sr, d.max)), valueFormat: d.fmt, min: 0, max: d.max, thresholds: d.thresholds }) }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [metrics, themeKey, latest]);
+  }, [metrics, themeKey, latest, tick, job.data?.state]);
 
   const run = async (action: ActionType) => {
     if (!j) return;
@@ -191,6 +210,9 @@ const RunDetail: React.FC = () => {
   }
 
   const left = walltimeLeft(j);
+  const part = j.partition as (typeof j.partition & { avgWaitHours?: number; currentQueueDepth?: number }) | undefined;
+  const queueDepth = part?.currentQueueDepth ?? null;
+  const eta = merged?.etaStartAt ? new Date(merged.etaStartAt).getTime() : j.submitTime && part?.avgWaitHours != null ? new Date(j.submitTime).getTime() + part.avgWaitHours * 3600000 : null;
   const wallFrac = j.timelimitHours ? (j.elapsedHours ?? 0) / j.timelimitHours : 0;
   const burn = j.elapsedHours ? (j.costUsd ?? 0) / j.elapsedHours : null;
   const ckpt = latest?.checkpointAgeMin;
@@ -231,7 +253,12 @@ const RunDetail: React.FC = () => {
         </span>
       }
       description={[j.user, [j.cluster?.name ?? j.cluster?.id, j.partition?.slurmPartition ?? j.partition?.name].filter(Boolean).join(' '), j.qos && `${j.qos} QOS`, j.slurmJobId && `job ${j.slurmJobId}`, j.nodeList && `node ${j.nodeList}`, j.project?.name].filter(Boolean).join(' · ')}
-      badges={banner && live ? <ToneBadge tone="warn">Needs approval</ToneBadge> : <JobStateBadge value={j.state} />}
+      badges={
+        <span className="flex flex-wrap items-center gap-2">
+          {banner && live ? <ToneBadge tone="warn">Needs approval</ToneBadge> : <JobStateBadge value={j.state} />}
+          {live && <LiveBadge updatedAt={snap.updatedAt ?? job.updatedAt} />}
+        </span>
+      }
       actions={
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" appearance="secondary" leadingIcon={<FastForward />} loading={busy === 'tick'} onClick={simulate}>
@@ -251,6 +278,20 @@ const RunDetail: React.FC = () => {
       }
     >
       {actionError && <ErrorState message={actionError} />}
+      {j.state === 'PENDING' && (
+        <div role="status" className="flex flex-wrap items-center gap-4 rounded-[var(--ec-card-radius,8px)] border border-[var(--c3-style-basic-border-info,var(--c3-style-basic-border-border))] bg-[var(--c3-style-basic-bg-info,var(--c3-style-basic-bg-secondary))] px-5 py-4">
+          <span aria-hidden className="ec-pulse inline-block size-2.5 rounded-full bg-[var(--c3-style-basic-fg-info)]" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">
+              {`Queued on ${j.cluster?.name ?? j.cluster?.id} ${j.partition?.slurmPartition ?? j.partition?.name ?? ''}${merged?.queuePosition != null ? ` · position #${merged.queuePosition}` : queueDepth != null ? ` · about ${formatInt(queueDepth + 1)} jobs ahead in this partition` : ''}`}
+            </div>
+            <div className={`text-[13px] ${muted}`}>
+              {`Submitted ${formatRelative(j.submitTime)}${eta ? ` · expected to start ${eta > now ? `in ~${formatDuration((eta - now) / 3600000)}` : 'any moment now'}` : ''}. Metrics start flowing as soon as Slurm places it on a node.`}
+            </div>
+          </div>
+          <ModelProvenance name="AnvilQueueWaitQ50Q90" confidence="low" />
+        </div>
+      )}
       {busy === 'tick' && (
         <Notice>
           <span className="flex flex-wrap gap-4">
@@ -267,8 +308,8 @@ const RunDetail: React.FC = () => {
             <div className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">{`${ALERT_TYPE_LABEL[banner.alertType] ?? banner.alertType} · ${formatClock(banner.detectedAt)}`}</div>
             <div className={`mt-0.5 text-[13px] ${muted}`}>{banner.message}</div>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
-              <ModelProvenance name={alertModel(banner.alertType)} />
-              <WhyFired type={banner.alertType} />
+              <ModelProvenance name={alertModel(banner.alertType)} provenance={provenanceOf(banner)} />
+              <WhyFired type={banner.alertType} firedRule={banner.firedRule} evidence={banner.evidence} />
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
@@ -292,7 +333,7 @@ const RunDetail: React.FC = () => {
           label="Walltime"
           value={formatDuration(j.elapsedHours)}
           unit={`of ${formatDuration(j.timelimitHours)}`}
-          caption={j.state === 'RUNNING' ? <span className="inline-flex items-center gap-1"><Countdown hoursLeft={left} icon={false} /></span> : (j.startTime ? `Started ${formatDateTime(j.startTime)}` : `Queued ${formatRelative(j.submitTime)}`)}
+          caption={j.state === 'RUNNING' ? `${formatDuration(left)} left · ticking` : (j.startTime ? `Started ${formatDateTime(j.startTime)}` : `Queued ${formatRelative(j.submitTime)}`)}
           tone={wallFrac > 0.9 ? 'bad' : wallFrac > 0.75 ? 'warn' : 'good'}
         />
         <KpiTile
@@ -341,10 +382,10 @@ const RunDetail: React.FC = () => {
                         <div className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">{ALERT_TYPE_LABEL[a.alertType] ?? a.alertType}</div>
                         <div className={`text-[13px] ${muted}`}>{a.message}</div>
                         <div className="mt-1">
-                          <WhyFired type={a.alertType} />
+                          <WhyFired type={a.alertType} firedRule={a.firedRule} evidence={a.evidence} />
                         </div>
                         <div className="mt-1">
-                          <ModelProvenance name={alertModel(a.alertType)} />
+                          <ModelProvenance name={alertModel(a.alertType)} provenance={provenanceOf(a)} />
                         </div>
                         <div className={`mt-0.5 text-[12px] ${muted}`}>
                           {a.status === 'OPEN' || a.status === 'ACKED'
@@ -388,8 +429,8 @@ const RunDetail: React.FC = () => {
                       </span>
                       <span className="text-[13px] text-[var(--c3-style-basic-fg-primary)]">{a.message}</span>
                       <span className="flex flex-wrap items-center gap-2">
-                        <ModelProvenance name={alertModel(a.alertType)} />
-                        <WhyFired type={a.alertType} />
+                        <ModelProvenance name={alertModel(a.alertType)} provenance={provenanceOf(a)} />
+                        <WhyFired type={a.alertType} firedRule={a.firedRule} evidence={a.evidence} />
                       </span>
                     </div>
                     {isOpen && (
@@ -493,6 +534,7 @@ const RunDetail: React.FC = () => {
           </ModalFooter>
         </ModalContent>
       </Modal>
+      <SimNote />
     </PageFrame>
   );
 };

@@ -1,0 +1,8 @@
+{
+  "id": "AllocationForeignKeys",
+  "name": "AllocationForeignKeys",
+  "description": "Every Allocation reference (lab, cluster) points at an existing row.",
+  "targetType": "Allocation",
+  "kind": "FOREIGN_KEY",
+  "typeIdent": "FKEY"
+}

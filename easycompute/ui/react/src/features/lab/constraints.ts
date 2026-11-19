@@ -66,6 +66,25 @@ export function toCandidateRules(c: LabConstraints | null | undefined): Extracte
   return out;
 }
 
+/** The extraction minus the items the reviewer dismissed (candidate keys from `toCandidateRules`). */
+export function withoutDismissed(c: LabConstraints, dismissed: string[]): LabConstraints {
+  const keep = (prefix: string) => (_: unknown, i: number) => !dismissed.includes(`${prefix}-${i}`);
+  const p = { ...(c.preferences ?? {}) };
+  if (dismissed.includes('preempt')) p.preemptibleOk = null;
+  if (dismissed.includes('wall')) p.maxWalltimeHours = null;
+  if (dismissed.includes('quiet')) p.quietHours = null;
+  if (p.avoid) p.avoid = p.avoid.filter(keep('avoid'));
+  return {
+    ...c,
+    budgets: (c.budgets ?? []).filter(keep('budget')),
+    deadlines: (c.deadlines ?? []).filter(keep('deadline')),
+    dataRestrictions: (c.dataRestrictions ?? []).filter(keep('data')),
+    memberCaps: (c.memberCaps ?? []).filter(keep('cap')),
+    approvals: (c.approvals ?? []).filter(keep('approve')),
+    preferences: p,
+  };
+}
+
 /** Drop candidates that already exist as lab rules (same kind + same title). */
 export const notYetRules = (cands: ExtractedConstraint[], rules: Policy[]) =>
   cands.filter((c) => !rules.some((r) => r.kind === c.kind && r.title.trim().toLowerCase() === c.title.trim().toLowerCase()));

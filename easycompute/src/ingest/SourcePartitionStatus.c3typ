@@ -1,0 +1,56 @@
+/**
+ * One raw row of the partition status snapshot (sinfo/squeue summary) CSV delivered to the `ClusterStatusFeed`
+ * {@link FileSourceCollection}. Every column is kept as text so a malformed value never fails the file;
+ * {@link EasyComputeIngest#partitionStatusToCanonical} parses and validates it into a
+ * {@link CanonicalPartitionStatus}.
+ */
+type SourcePartitionStatus mixes Source {
+
+  /**
+   * Snapshot time, ISO-8601 UTC.
+   */
+  @ser(name="snapshot_time")
+  snapshotTimeRaw: string
+
+  /**
+   * {@link ComputeCluster} id.
+   */
+  @ser(name="cluster")
+  clusterRaw: string
+
+  /**
+   * Cluster state, a {@link ComputeCluster.Status} value.
+   */
+  @ser(name="cluster_state")
+  clusterStateRaw: string
+
+  /**
+   * Slurm partition (matched against {@link Partition#slurmPartition}).
+   */
+  @ser(name="partition")
+  partitionRaw: string
+
+  /**
+   * Slurm QOS (matched against {@link Partition#qos}).
+   */
+  @ser(name="qos")
+  qosRaw: string
+
+  /**
+   * Jobs pending in the partition.
+   */
+  @ser(name="pending_jobs")
+  pendingJobsRaw: string
+
+  /**
+   * Recent average queue wait in hours.
+   */
+  @ser(name="avg_wait_hours")
+  avgWaitHoursRaw: string
+
+  /**
+   * Partition utilization (0-100).
+   */
+  @ser(name="util_pct")
+  utilPctRaw: string
+}

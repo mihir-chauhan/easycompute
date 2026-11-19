@@ -5,6 +5,8 @@
 
 var SLURM_FEED = 'SlurmSacctFeed';
 var TELEMETRY_FEED = 'JobTelemetryFeed';
+var ALLOCATION_FEED = 'AllocationLedgerFeed';
+var CLUSTER_STATUS_FEED = 'ClusterStatusFeed';
 var REF_TTL_MS = 60 * 1000;
 
 var SLURM_COLUMNS = [
@@ -49,6 +51,30 @@ var TELEMETRY_COLUMNS = [
   ['train_loss', 'trainLossRaw'],
 ];
 
+var ALLOCATION_COLUMNS = [
+  ['allocation_id', 'allocationIdRaw'],
+  ['lab_id', 'labIdRaw'],
+  ['resource', 'resourceRaw'],
+  ['funding_source', 'fundingSourceRaw'],
+  ['grant_name', 'grantNameRaw'],
+  ['award_units', 'awardUnitsRaw'],
+  ['used_units', 'usedUnitsRaw'],
+  ['unit', 'unitRaw'],
+  ['start_date', 'startDateRaw'],
+  ['end_date', 'endDateRaw'],
+];
+
+var PARTITION_STATUS_COLUMNS = [
+  ['snapshot_time', 'snapshotTimeRaw'],
+  ['cluster', 'clusterRaw'],
+  ['cluster_state', 'clusterStateRaw'],
+  ['partition', 'partitionRaw'],
+  ['qos', 'qosRaw'],
+  ['pending_jobs', 'pendingJobsRaw'],
+  ['avg_wait_hours', 'avgWaitHoursRaw'],
+  ['util_pct', 'utilPctRaw'],
+];
+
 var NUMBER_RE = /^[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?$/;
 var SLURM_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/;
 var ISO_UTC_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(:(\d{2})(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/;
@@ -66,6 +92,9 @@ function refs() {
     clusters: {},
     partitions: {},
     labByAccount: {},
+    labs: {},
+    fundings: {},
+    clusterStates: {},
     gpuTypes: {},
     states: {},
     workloads: {},
@@ -78,6 +107,7 @@ function refs() {
     r.partitions[(p.cluster && p.cluster.id) + '|' + p.slurmPartition + '|' + p.qos] = p.id;
   });
   Lab.fetchObjStream({ include: 'id, slurmAccounts' }).each(function (l) {
+    r.labs[l.id] = true;
     String(l.slurmAccounts || '')
       .split(',')
       .forEach(function (a) {
@@ -95,6 +125,12 @@ function refs() {
   });
   WorkloadType.values().forEach(function (v) {
     r.workloads[String(v)] = true;
+  });
+  Allocation.Funding.values().forEach(function (v) {
+    r.fundings[String(v)] = true;
+  });
+  ComputeCluster.Status.values().forEach(function (v) {
+    r.clusterStates[String(v)] = true;
   });
   refCache = r;
   return r;
@@ -481,6 +517,136 @@ function telemetryToCanonical(src) {
     powerW: powerW,
     checkpointAgeMin: checkpointAgeMin,
     trainingLoss: trainingLoss,
+    feed: feed,
+    sourceFile: file,
+    rowKey: rowKey,
+    rejectionId: reason ? 'rej-' + feed + '-' + hash((file || '') + '|' + rawRow) : null,
+    rejectReason: reason,
+    rawRow: rawRow,
+  });
+}
+
+function allocationToCanonical(src) {
+  var r = refs();
+  var c = new Checker();
+  var feed = ALLOCATION_FEED;
+  var file = fileName(src);
+  var rawRow = rawJson(src, ALLOCATION_COLUMNS);
+
+  var id = text(src.allocationIdRaw);
+  if (id == null) {
+    c.fail('missing key allocation_id');
+  }
+  var rowKey = id || '? (' + (text(src.labIdRaw) || '?') + '/' + (text(src.resourceRaw) || '?') + ')';
+
+  var lab = text(src.labIdRaw);
+  if (lab == null) {
+    c.fail('missing lab_id');
+  } else if (!r.labs[lab]) {
+    c.fail("unknown lab '" + lab + "'");
+  }
+  var cluster = text(src.resourceRaw);
+  if (cluster == null) {
+    c.fail('missing resource');
+  } else if (!r.clusters[cluster]) {
+    c.fail("unknown cluster '" + cluster + "'");
+  }
+  var funding = text(src.fundingSourceRaw);
+  if (funding != null && !r.fundings[funding]) {
+    c.fail("funding_source '" + funding + "' not in Allocation.Funding");
+  }
+
+  var totalUnits = c.num('award_units', src.awardUnitsRaw);
+  c.nonNegative('award_units', totalUnits);
+  var usedUnits = c.num('used_units', src.usedUnitsRaw);
+  c.nonNegative('used_units', usedUnits);
+
+  var start = c.isoDate('start_date', src.startDateRaw);
+  var end = c.isoDate('end_date', src.endDateRaw);
+  if (start && end && end.ms < start.ms) {
+    c.fail('end_date ' + end.iso + ' before start_date ' + start.iso);
+  }
+
+  var reason = c.reason();
+  return CanonicalAllocationLedger.make({
+    allocationKey: id,
+    lab: lab,
+    cluster: cluster,
+    fundingSource: funding,
+    grantName: text(src.grantNameRaw),
+    totalUnits: totalUnits,
+    usedUnits: usedUnits,
+    unitName: text(src.unitRaw),
+    startDate: start && start.iso,
+    endDate: end && end.iso,
+    feed: feed,
+    sourceFile: file,
+    rowKey: rowKey,
+    rejectionId: reason ? 'rej-' + feed + '-' + hash((file || '') + '|' + rawRow) : null,
+    rejectReason: reason,
+    rawRow: rawRow,
+  });
+}
+
+function partitionStatusToCanonical(src) {
+  var r = refs();
+  var c = new Checker();
+  var feed = CLUSTER_STATUS_FEED;
+  var file = fileName(src);
+  var rawRow = rawJson(src, PARTITION_STATUS_COLUMNS);
+
+  var cluster = text(src.clusterRaw);
+  var slurmPartition = text(src.partitionRaw);
+  var qos = text(src.qosRaw);
+  var rowKey = (cluster || '?') + '/' + (slurmPartition || '?') + '/' + (qos || '?');
+
+  if (cluster == null) {
+    c.fail('missing key cluster');
+  } else if (!r.clusters[cluster]) {
+    c.fail("unknown cluster '" + cluster + "'");
+  }
+  var partition = null;
+  if (slurmPartition == null) {
+    c.fail('missing key partition');
+  } else if (cluster != null && r.clusters[cluster]) {
+    partition =
+      r.partitions[cluster + '|' + slurmPartition + '|' + qos] ||
+      r.partitions[cluster + '|' + slurmPartition + '|normal'] ||
+      null;
+    if (partition == null) {
+      c.fail("unknown partition '" + slurmPartition + "' (QOS '" + qos + "') on cluster '" + cluster + "'");
+    }
+  }
+
+  var stateText = text(src.clusterStateRaw);
+  var clusterStatus = stateText == null ? null : stateText.toUpperCase();
+  if (clusterStatus == null) {
+    c.fail('missing cluster_state');
+  } else if (!r.clusterStates[clusterStatus]) {
+    c.fail("cluster_state '" + stateText + "' not in ComputeCluster.Status");
+  }
+
+  if (text(src.snapshotTimeRaw) == null) {
+    c.fail('missing timestamp snapshot_time');
+  }
+  var snapshot = c.isoDate('snapshot_time', src.snapshotTimeRaw);
+
+  var pending = c.int('pending_jobs', src.pendingJobsRaw);
+  c.nonNegative('pending_jobs', pending);
+  var avgWait = c.num('avg_wait_hours', src.avgWaitHoursRaw);
+  c.nonNegative('avg_wait_hours', avgWait);
+  var util = c.num('util_pct', src.utilPctRaw);
+  c.range('util_pct', util, 0, 100);
+
+  var reason = c.reason();
+  return CanonicalPartitionStatus.make({
+    snapshotTime: snapshot && snapshot.iso,
+    cluster: cluster,
+    clusterStatus: clusterStatus,
+    partition: partition,
+    currentQueueDepth: pending,
+    avgWaitHours: avgWait,
+    utilizationPct: util,
     feed: feed,
     sourceFile: file,
     rowKey: rowKey,

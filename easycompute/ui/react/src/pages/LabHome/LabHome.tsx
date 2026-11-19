@@ -24,6 +24,7 @@ import {
   lineOption,
   toneColor,
   useThemeKey,
+  provenanceOf,
   type Column,
   type Tone,
 } from '@/components/app';
@@ -35,6 +36,7 @@ import { ACTION_LABEL, ALERT_TYPE_LABEL, whereLabel, formatShortDateTime, format
 import type { Alert, Job, SummaryAllocation, SummaryDeadline } from '@/features/lab/types';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
 import { alertModel, ModelProvenance } from '@/features/lab/models';
+import { LIVE_POLL_MS, LiveBadge, SimNote } from '@/features/lab/live';
 import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { formatDate, formatShortDate } from '@/lib/format';
@@ -70,11 +72,11 @@ const LabHome: React.FC = () => {
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const summary = useLoad(() => (labId ? getLabSummary(labId) : null), [labId], 30000);
+  const summary = useLoad(() => (labId ? getLabSummary(labId) : null), [labId], LIVE_POLL_MS);
   const live = useLoad(
     () => (labId ? Promise.all([fetchLiveJobs(labId), fetchOpenAlerts(labId), fetchLiveMetrics(labId), fetchLabActions(labId, 8), fetchMembers(labId)]) : null),
     [labId],
-    30000,
+    LIVE_POLL_MS,
   );
   const [jobs, alerts, metrics, actions, members] = live.data ?? [[], [], [], [], []];
   const s = summary.data;
@@ -156,7 +158,7 @@ const LabHome: React.FC = () => {
           <>
             {a.message}
             <span className="mt-1 block">
-              <ModelProvenance name={alertModel(a.alertType)} />
+              <ModelProvenance name={alertModel(a.alertType)} provenance={provenanceOf(a)} />
             </span>
           </>
         ),
@@ -221,7 +223,8 @@ const LabHome: React.FC = () => {
       title={lab?.name ?? 'Overview'}
       description={[lab?.piName && `PI ${lab.piName}`, members.length ? `${members.length} members` : null, clusterNames.join(' · ')].filter(Boolean).join(' · ') || 'Budget, deadlines and live runs'}
       actions={
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <LiveBadge updatedAt={live.updatedAt} />
           <Button variant="outline" appearance="secondary" leadingIcon={<FileText />} onClick={() => navigate('/context')}>
             Update lab context
           </Button>
@@ -376,6 +379,7 @@ const LabHome: React.FC = () => {
           )}
         </SectionCard>
       </div>
+      <SimNote />
     </PageFrame>
   );
 };

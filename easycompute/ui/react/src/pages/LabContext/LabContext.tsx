@@ -7,12 +7,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Save, Sparkles, Trash2 } from 'lucide-react';
 
-import { DataTable, EmptyState, ErrorState, LoadingState, PageFrame, SectionCard, ToneBadge, errorMessage, type Column, type Tone } from '@/components/app';
+import { DataTable, EmptyState, ErrorState, LoadingState, PageFrame, SectionCard, ToneBadge, errorMessage, provenanceOf, type Column, type Tone } from '@/components/app';
 import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import {
+  confirmConstraints,
   createLabPolicy,
   extractConstraints,
   fetchAllocations,
@@ -25,7 +26,7 @@ import {
   setPolicyActive,
 } from '@/features/lab/api';
 import { CheckRow, HeadNote, Mono, muted } from '@/features/lab/components';
-import { notYetRules, toCandidateRules } from '@/features/lab/constraints';
+import { notYetRules, toCandidateRules, withoutDismissed } from '@/features/lab/constraints';
 import { ModelComputing, ModelProvenance } from '@/features/lab/models';
 import { formatInt, titleCase } from '@/features/lab/format';
 import type { Allocation, ExtractedConstraint, LabConstraints, Project } from '@/features/lab/types';
@@ -138,11 +139,16 @@ const LabContext: React.FC = () => {
       rules.reload();
     });
 
+  /** LabContextExtractor confirmation: confirm the reviewed extraction, then enforce each item as a LAB rule. */
   const acceptAll = () =>
     act('add-all', async () => {
-      if (!labId) return;
+      if (!labId || !parsed) return;
+      const confirmed = await confirmConstraints(labId, withoutDismissed(parsed, dismissed)).catch((e: unknown) => {
+        throw new Error(`LabContextExtractor could not confirm: ${errorMessage(e)}`);
+      });
       for (const c of pending) await createLabPolicy(labId, c);
-      setNote(`${pending.length} rule${pending.length === 1 ? '' : 's'} added. The planner enforces them from the next check.`);
+      setParsed((p) => (p ? { ...p, status: confirmed?.status ?? 'CONFIRMED' } : p));
+      setNote(`Confirmed. ${pending.length} rule${pending.length === 1 ? '' : 's'} added; the planner enforces them from the next check.`);
       rules.reload();
     });
 
@@ -234,13 +240,18 @@ const LabContext: React.FC = () => {
                 <div className="mt-4 flex flex-col gap-3 border-t border-[var(--c3-style-basic-border-border)] pt-4">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">Evidence in your text</span>
+                    {parsed.status && <ToneBadge tone={parsed.status === 'CONFIRMED' ? 'good' : 'warn'}>{parsed.status === 'CONFIRMED' ? 'Confirmed' : 'Unconfirmed'}</ToneBadge>}
                     <ModelProvenance
                       name="LabContextExtractor"
+                      provenance={provenanceOf(parsed)}
                       support={parsed.source === 'llm' ? `LLM${parsed.cached ? ' (cached)' : ''} + rules validation` : 'rules parser (LLM unavailable)'}
                       extra={parsed.llmError}
                     />
                   </div>
                   {parsed.summary && <p className={cn('text-[13px]', muted)}>{parsed.summary}</p>}
+                  {parsed.validation && parsed.validation.valid === false && (
+                    <p className="text-[13px] text-[var(--c3-style-basic-fg-warning)]">{`Validation dropped ${parsed.validation.dropped?.length ?? 0} item(s): ${(parsed.validation.errors ?? []).slice(0, 3).join('; ')}`}</p>
+                  )}
                   <EvidenceText text={text} spans={pending.map((c) => c.sourceText ?? '')} />
                 </div>
               )}

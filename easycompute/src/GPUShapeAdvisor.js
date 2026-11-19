@@ -75,9 +75,9 @@ function advise(workloadType, modelParamsB, datasetGb, requestedGpus, requestedG
       if (minGpus > cap) {
         fit = 'NO_FIT';
         reason = 'Needs ' + minGpus + ' x ' + g.id + ' for ~' + round(need.gb, 0) + ' GB but the largest job on it is ' + cap + ' GPUs.';
-      } else if (need.gb > 0 && need.gb < mem * 0.25 && rel >= 2 && (wt == 'INFERENCE' || wt == 'INTERACTIVE' || wt == 'FINETUNE')) {
+      } else if (need.gb > 0 && need.gb < mem * 0.3 && rel >= 2 && (wt == 'INFERENCE' || wt == 'INTERACTIVE' || wt == 'FINETUNE')) {
         fit = 'POOR';
-        reason = g.id + ' is oversized: ~' + round(need.gb, 0) + ' GB uses under 25% of its ' + mem + ' GB; an A30/L40S/A100 slice costs less.';
+        reason = g.id + ' is oversized: ~' + round(need.gb, 0) + ' GB uses under 30% of its ' + mem + ' GB; an A30/L40S/A100 slice costs less.';
       } else if ((wt == 'TRAINING' || wt == 'FINETUNE') && rel < 0.6 && minGpus > 2) {
         fit = 'POOR';
         reason = g.id + ' (' + rel + 'x A100) would need ' + minGpus + ' GPUs for this model; a larger GPU trains it with less communication overhead.';

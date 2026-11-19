@@ -39,6 +39,11 @@ Response shapes and method contracts: `project/API.md`. Platform-name collisions
   creates AUTOPILOT PENDING_APPROVAL `ActionLogEntry`; never touches the JobAlert.
 - `DataLineage.graph()` (`DataLineage.js`): sources → pipelines (native FileSourceCollections when deployed) → entities →
   consumers with live row counts and freshness.
+- MODEL_MAP components (each a js-server type; every response carries `provenance`): `ClusterPolicyEngine` (rules in
+  RunRequest.js, version `rcac-2026-11-02`), `GPUShapeAdvisor`, `QuantileModel` (Anvil*Q50Q90 champions, port of
+  project/tools/ml/quantile_model.js; seed `data/QuantileModel/`), `LabFairShareAllocator`, `GPUUnderuseDetector`,
+  `GuardrailRuleEngine` (health rules + hysteresis; Job.evaluateHealth delegates), `AllocationBurnForecaster`,
+  `ClusterCapacityAggregator` (Insights.universityOverview delegates). native-ai's JobDurationModel is the challenger.
 - Tests: `test/js-rhino/test_{RunRequest,Job,Insights,UserAdmin}.js` (self-contained fixtures, need `testtools` in the manifest).
   Local runner without the platform: `node project/tools/backend-harness/run.js` (all methods on the seed) and
   `node project/tools/backend-harness/jasmine.js` (the Jasmine files on an in-memory mock).

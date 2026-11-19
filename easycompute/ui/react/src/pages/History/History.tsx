@@ -29,6 +29,7 @@ import {
   toneColor,
   useThemeKey,
   utilTone,
+  provenanceFor,
   type Column,
   type Tone,
 } from '@/components/app';
@@ -239,7 +240,16 @@ const History: React.FC = () => {
       key: 'e',
       header: 'Ends / runs out',
       render: (a) =>
-        a.runsOutBeforeEnd && a.projectedRunOut ? (
+        a.scenarios?.baseline?.runOut || a.scenarios?.high?.runOut ? (
+          <div className="flex flex-col items-start gap-0.5">
+            <ToneBadge tone={a.scenarios?.baseline?.runOut && a.endDate && a.scenarios.baseline.runOut < a.endDate ? 'bad' : 'warn'}>
+              {a.scenarios?.baseline?.runOut ? `Runs out ${formatShortDate(a.scenarios.baseline.runOut)}` : `Ends ${formatShortDate(a.endDate)}`}
+            </ToneBadge>
+            <span className={cn('text-[11px]', muted)}>
+              {`high ${a.scenarios?.high?.runOut ? formatShortDate(a.scenarios.high.runOut) : 'lasts'} · low ${a.scenarios?.low?.runOut ? formatShortDate(a.scenarios.low.runOut) : 'lasts'}`}
+            </span>
+          </div>
+        ) : a.runsOutBeforeEnd && a.projectedRunOut ? (
           <ToneBadge tone="bad">{`Runs out ${formatShortDate(a.projectedRunOut)}`}</ToneBadge>
         ) : (a.daysLeft ?? 999) <= 45 ? (
           <ToneBadge tone="warn">{formatDate(a.endDate)}</ToneBadge>
@@ -360,7 +370,7 @@ const History: React.FC = () => {
             ? `Run-out: baseline ${forecast.outLabel ?? 'beyond 16 weeks'} (${formatUsd(forecast.pace)}/wk) · high ${forecast.outHigh ?? 'beyond 16 weeks'} (${formatUsd(forecast.high)}/wk) · low ${forecast.outLow ?? 'beyond 16 weeks'} (${formatUsd(forecast.low)}/wk)`
             : 'Cumulative charged across all allocations'
         }
-        actions={<ModelProvenance name="AllocationBurnForecaster" support={`${s?.weekly?.length ?? 0} weeks of charges`} />}
+        actions={<ModelProvenance name="AllocationBurnForecaster" provenance={provenanceFor(s, 'AllocationBurnForecaster')} support={`${s?.weekly?.length ?? 0} weeks of charges`} />}
         option={forecast?.option ?? null}
         loading={!s && !summary.error}
         error={summary.error}

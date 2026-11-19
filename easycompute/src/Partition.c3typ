@@ -89,4 +89,19 @@ entity type Partition {
    * Value passed to `sbatch -p` (for example "ai", "a100-80gb").
    */
   slurmPartition: string
+
+  /**
+   * Seeded utilization the live drift reverts to.
+   */
+  baseUtilizationPct: double
+
+  /**
+   * Seeded queue depth the live drift reverts to.
+   */
+  baseQueueDepth: double
+
+  /**
+   * Seeded average wait the live drift reverts to.
+   */
+  baseAvgWaitHours: double
 }

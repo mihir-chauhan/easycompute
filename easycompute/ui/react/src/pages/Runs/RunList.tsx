@@ -28,9 +28,10 @@ import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { fetchLiveMetrics, fetchOpenAlerts, fetchRecentJobs, monitorTick } from '@/features/lab/api';
 import { AlertTypeBadge, CliHint, JobStateBadge, Mono, muted, Notice } from '@/features/lab/components';
-import { whereLabel, formatDuration, formatInt, formatPct100, formatRelative, formatUsd } from '@/features/lab/format';
+import { whereLabel, formatClock, formatDuration, formatInt, formatPct100, formatRelative, formatUsd } from '@/features/lab/format';
 import type { Alert, Job } from '@/features/lab/types';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
+import { LIVE_POLL_MS, LiveBadge, liveJob, mergeSnap, SimNote, useLiveSnapshot, useNow } from '@/features/lab/live';
 import { useLabRole } from '@/features/lab/useLabRole';
 import { useLoad } from '@/features/lab/useLoad';
 import { cn } from '@/lib/utils';
@@ -51,15 +52,20 @@ const RunList: React.FC = () => {
   const [tickError, setTickError] = useState<string | null>(null);
 
   // Live list: background refresh every 30 s while the page is open.
-  const data = useLoad(() => (labId ? Promise.all([fetchRecentJobs(labId), fetchOpenAlerts(labId), fetchLiveMetrics(labId)]) : null), [labId], 30000);
+  const data = useLoad(() => (labId ? Promise.all([fetchRecentJobs(labId), fetchOpenAlerts(labId), fetchLiveMetrics(labId)]) : null), [labId], LIVE_POLL_MS);
+  const now = useNow(1000);
+  const snap = useLiveSnapshot(labId);
   const [allJobs, alerts, metrics] = data.data ?? [[], [], []];
   const lr = useLabRole();
   const { clusterId } = useAppShell();
   const mineOnly = lr.isMember && Boolean(lr.user);
   const jobs = useMemo(
-    () => allJobs.filter((j) => (!clusterId || j.cluster?.id === clusterId) && (!mineOnly || lr.isOwn(j.user))),
+    () => allJobs.filter((j) => (!clusterId || j.cluster?.id === clusterId) && (!mineOnly || lr.isOwn(j.user))).map((j) => {
+        const m = mergeSnap(j, snap.byJob[j.id]);
+        return liveJob(m, snap.byJob[j.id] ? snap.updatedAt : data.updatedAt, now, m.progressPerRealSec);
+      }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allJobs, clusterId, mineOnly, lr.user],
+    [allJobs, clusterId, mineOnly, lr.user, now, data.updatedAt, snap],
   );
 
   const alertsByJob = useMemo(() => {
@@ -142,7 +148,10 @@ const RunList: React.FC = () => {
         </div>
       );
     }
-    if (j.state === 'PENDING') return <span className={muted}>{`Waiting · queued ${formatRelative(j.submitTime)}`}</span>;
+    if (j.state === 'PENDING') {
+      const q = j as Job & { queuePosition?: number | null; etaStartAt?: string | null };
+      return <span className={muted}>{`${q.queuePosition != null ? `Queue #${q.queuePosition}` : 'Waiting'}${q.etaStartAt ? ` · starts ~${formatClock(q.etaStartAt)}` : ` · queued ${formatRelative(j.submitTime)}`}`}</span>;
+    }
     const top = alertsByJob[j.id]?.[0];
     if (top) return <AlertTypeBadge type={top.alertType} severity={top.severity} />;
     return <span className={muted}>{formatDuration(j.elapsedHours)}</span>;
@@ -197,7 +206,8 @@ const RunList: React.FC = () => {
         </span>
       }
       actions={
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <LiveBadge updatedAt={snap.updatedAt ?? data.updatedAt} />
           <Button variant="outline" appearance="secondary" leadingIcon={<FastForward />} loading={ticking} onClick={simulate}>
             Simulate next 15 min
           </Button>
@@ -255,6 +265,7 @@ const RunList: React.FC = () => {
         />
       </SectionCard>
       <CliHint command={`easycompute runs list --lab ${labId ?? '<lab>'} --status running,queued --format table`} />
+      <SimNote />
     </PageFrame>
   );
 };

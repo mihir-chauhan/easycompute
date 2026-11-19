@@ -35,7 +35,11 @@ import {
   ecColor,
   lineOption,
   toneColor,
-  useC3Data,
+  LiveIndicator,
+  LiveNumber,
+  useAccrual,
+  useLivePoll,
+  useObservedRate,
   useThemeKey,
   utilTone,
   type Billing,
@@ -43,7 +47,7 @@ import {
   type Tone,
 } from '@/components/app';
 import { Button } from '@/components/ui/button';
-import { getUniversityOverview } from '@/features/admin/api';
+import { getLiveSnapshot, getUniversityOverview, mergeLiveClusters } from '@/features/admin/api';
 import { Eyebrow, SegmentBar, StatRow, compact, frac, hours, num, pct, usd } from '@/features/admin/components';
 import type { OverviewCluster, UniversityOverview } from '@/features/admin/types';
 
@@ -61,7 +65,23 @@ const weekLabel = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateStri
 export default function AdminOverview() {
   const navigate = useNavigate();
   const themeKey = useThemeKey();
-  const { data, loading, error, reload } = useC3Data<UniversityOverview>(getUniversityOverview, []);
+  // Live: Insights.universityOverview (+ RunMonitor.liveSnapshot when deployed) every 8 s, paused while hidden.
+  const { data, loading, error, reload, updatedAt, live } = useLivePoll<UniversityOverview>(
+    async () => {
+      const [ov, snap] = await Promise.all([getUniversityOverview(), getLiveSnapshot().catch(() => null)]);
+      if (!snap) return ov;
+      const kpis = { ...ov.kpis };
+      Object.entries(snap.kpis ?? {}).forEach(([key, v]) => {
+        if (typeof v === 'number' && key in kpis) (kpis as unknown as Record<string, number>)[key] = v;
+      });
+      return { ...ov, kpis, clusters: mergeLiveClusters(ov.clusters, snap) };
+    },
+    [],
+    { intervalMs: 8000 },
+  );
+  // Spend keeps accruing between polls at the rate observed across polls.
+  const costRate = useObservedRate(data?.kpis.totalCostUsd, updatedAt);
+  const liveCost = useAccrual(data?.kpis.totalCostUsd, costRate, updatedAt);
 
   const gpuClusters = useMemo(() => (data?.clusters ?? []).filter((c) => c.totalGpus > 0).sort((a, b) => b.gpuUtilizationPct - a.gpuUtilizationPct), [data]);
 
@@ -161,9 +181,12 @@ export default function AdminOverview() {
         )
       }
       actions={
-        <Button variant="outline" appearance="secondary" size="sm" leadingIcon={<RotateCw />} onClick={reload}>
-          Refresh
-        </Button>
+        <>
+          <LiveIndicator updatedAt={updatedAt} live={live} />
+          <Button variant="outline" appearance="secondary" size="sm" leadingIcon={<RotateCw />} onClick={reload}>
+            Refresh
+          </Button>
+        </>
       }
     >
       {error && !data ? <ErrorState message={`Could not load the university overview: ${error}`} onRetry={reload} /> : null}
@@ -174,7 +197,7 @@ export default function AdminOverview() {
         <KpiRow>
           <KpiTile
             label="GPU utilization"
-            value={k.gpuUtilizationPct}
+            value={<LiveNumber value={k.gpuUtilizationPct} format={(v) => v.toFixed(1)} />}
             unit="%"
             tone={utilTone(k.gpuUtilizationPct)}
             caption={`${num(k.busyGpus)} of ${num(k.totalGpus)} GPUs busy right now`}
@@ -189,13 +212,13 @@ export default function AdminOverview() {
           />
           <KpiTile
             label="Spend to date"
-            value={usd(k.totalCostUsd)}
+            value={<LiveNumber value={liveCost} format={(v) => usd(v)} />}
             caption={`${compact(k.totalGpuHours)} GPU-hours · ${frac(k.totalGpuHours ? k.wastedGpuHours / k.totalGpuHours : 0)} wasted`}
             help="Shadow-priced cost of all jobs: in-house node shares, ACCESS SUs and third-party cloud, in USD."
           />
           <KpiTile
             label="Open alerts"
-            value={num(k.openAlerts)}
+            value={<LiveNumber value={k.openAlerts} />}
             tone={k.criticalAlerts > 0 ? 'bad' : k.openAlerts > 0 ? 'warn' : 'good'}
             caption={`${num(k.criticalAlerts)} critical · ${num(k.runningJobs)} running, ${num(k.pendingJobs)} pending jobs`}
             onClick={() => navigate('/admin/labs')}
@@ -211,6 +234,7 @@ export default function AdminOverview() {
           loading={loading && !data}
           empty={Boolean(data) && gpuClusters.length === 0}
           ariaLabel="Horizontal bar chart of GPU utilization by cluster"
+          live
           model="ClusterCapacityAggregator"
           provenance={provenanceFor(data, 'ClusterCapacityAggregator')}
           onItemClick={(name) => {
@@ -337,6 +361,7 @@ export default function AdminOverview() {
           option={demandOption}
           loading={loading && !data}
           ariaLabel="Line chart of weekly GPU-hours with a 4-week forecast"
+          live
           model="ClusterCapacityAggregator"
           provenance={provenanceFor(data, 'ClusterCapacityAggregator')}
           legend={[

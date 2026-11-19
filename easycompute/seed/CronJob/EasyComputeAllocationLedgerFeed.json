@@ -1,0 +1,8 @@
+{
+  "id": "EasyComputeAllocationLedgerFeed",
+  "name": "EasyCompute AllocationLedgerFeed ingestion (hourly at :05)",
+  "description": "Processes any new allocation ledger CSV files in the AllocationLedgerFeed inbox into Allocation / IngestRejection.",
+  "action": { "typeName": "FileSourceCollection", "actionName": "process" },
+  "inputs": { "this": { "type": "FileSourceCollection", "name": "AllocationLedgerFeed" }, "spec": { "process": true } },
+  "scheduleDef": { "cronExpression": "0 5 * * * ?" }
+}

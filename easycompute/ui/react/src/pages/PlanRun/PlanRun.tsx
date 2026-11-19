@@ -4,10 +4,10 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Check, ChevronRight, Copy, Pencil, RotateCcw, Rocket } from 'lucide-react';
 
-import { ErrorState, LoadingState, PageFrame, SectionCard, StatusBadge, ToneBadge, errorMessage, type Tone } from '@/components/app';
+import { ErrorState, LoadingState, PageFrame, SectionCard, StatusBadge, ToneBadge, errorMessage, provenanceFor, type Tone } from '@/components/app';
 import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,6 +17,9 @@ import {
   fetchGpuTypes,
   fetchProjects,
   getRunRequestStatus,
+  getRunRequest,
+  fetchChecks,
+  fetchPlans,
   predictDuration,
   type DurationPrediction,
   recommendPlans,
@@ -34,7 +37,7 @@ import { formatDateTime, formatShortDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 import DescribeStep from './DescribeStep';
-import { EMPTY_FORM, type PlanForm, toRunRequest } from './planForm';
+import { EMPTY_FORM, type PlanForm, toLocalInput, toRunRequest } from './planForm';
 
 const STEPS = ['Describe', 'Check rules', 'Choose configuration', 'Submit'] as const;
 
@@ -116,37 +119,55 @@ function PlanCard({ plan, selected, deadlineLabel, pred, fairShare, onSelect }: 
               'Runtime',
               <span key="rt" className="flex flex-col gap-1">
                 <span>
-                  {pred?.estDurationHours != null && pred?.p90DurationHours != null
-                    ? `P50 ${formatDuration(pred.estDurationHours)} · P90 ${formatDuration(pred.p90DurationHours as number)}`
-                    : `${formatDuration(plan.estDurationHours)} predicted`}
+                  {plan.estDurationP90Hours != null
+                    ? `P50 ${formatDuration(plan.estDurationHours)} · P90 ${formatDuration(plan.estDurationP90Hours)}`
+                    : pred?.estDurationHours != null && pred?.p90DurationHours != null
+                      ? `P50 ${formatDuration(pred.estDurationHours)} · P90 ${formatDuration(pred.p90DurationHours as number)}`
+                      : `${formatDuration(plan.estDurationHours)} predicted`}
                 </span>
-                <ModelProvenance name="AnvilRuntimeQ50Q90" support={pred?.sampleSize != null ? `${formatInt(pred.sampleSize as number)} jobs` : undefined} extra={typeof pred?.explanation === 'string' ? pred.explanation : undefined} />
+                <ModelProvenance
+                  name="AnvilRuntimeQ50Q90"
+                  provenance={provenanceFor(plan, 'AnvilRuntimeQ50Q90')}
+                  support={pred?.sampleSize != null ? `${formatInt(pred.sampleSize as number)} jobs` : undefined}
+                  extra={typeof pred?.explanation === 'string' ? pred.explanation : undefined}
+                />
               </span>,
             ],
             [
               'Queue wait',
               <span key="w" className="flex flex-col gap-1">
                 <span>
-                  {`~${formatDuration(plan.estWaitHours)}`}
-                  {plan.waitBucket ? <span className={muted}>{` (P50-P90 ${WAIT_RANGE[plan.waitBucket] ?? plan.waitBucket})`}</span> : null}
+                  {plan.estWaitP90Hours != null ? `P50 ${formatDuration(plan.estWaitHours)} · P90 ${formatDuration(plan.estWaitP90Hours)}` : `~${formatDuration(plan.estWaitHours)}`}
+                  {plan.estWaitP90Hours == null && plan.waitBucket ? <span className={muted}>{` (P50-P90 ${WAIT_RANGE[plan.waitBucket] ?? plan.waitBucket})`}</span> : null}
                 </span>
-                <ModelProvenance name="AnvilQueueWaitQ50Q90" confidence="low" extra={plan.waitReason} />
+                <ModelProvenance name="AnvilQueueWaitQ50Q90" provenance={provenanceFor(plan, 'AnvilQueueWaitQ50Q90')} confidence="low" extra={plan.waitReason} />
               </span>,
             ],
             [
               'GPU shape',
               <span key="g" className="flex flex-col gap-1">
-                <span>{plan.gpuMemNeedGb ? `Needs ~${formatInt(plan.gpuMemNeedGb)} GB VRAM · fits ${plan.gpuType?.id ?? ''}` : `${plan.gpus ?? 0} × ${plan.gpuType?.id ?? 'CPU'}`}</span>
-                <ModelProvenance name="GPUShapeAdvisor" />
+                <span title={plan.shapeReason}>{plan.gpuMemNeedGb ? `Needs ~${formatInt(plan.gpuMemNeedGb)} GB VRAM · fits ${plan.gpuType?.id ?? ''}` : `${plan.gpus ?? 0} × ${plan.gpuType?.id ?? 'CPU'}`}</span>
+                <ModelProvenance name="GPUShapeAdvisor" provenance={provenanceFor(plan, 'GPUShapeAdvisor')} extra={plan.shapeReason} />
               </span>,
             ],
+            ...(plan.memRequestGb
+              ? ([
+                  [
+                    'Host memory',
+                    <span key="hm" className="flex flex-col gap-1">
+                      <span>{`--mem ${formatInt(plan.memRequestGb)} GB (P90 of similar jobs)`}</span>
+                      <ModelProvenance name="AnvilHostMemoryQ50Q90" provenance={provenanceFor(plan, 'AnvilHostMemoryQ50Q90')} />
+                    </span>,
+                  ],
+                ] as [React.ReactNode, React.ReactNode][])
+              : []),
             ...(fairShare
               ? ([
                   [
                     'Fair share',
                     <span key="fs" className="flex flex-col gap-1">
                       <span className={fairShare.outcome === 'PASS' ? undefined : 'text-[var(--c3-style-basic-fg-warning)]'}>{fairShare.outcome === 'PASS' ? 'Within the lab’s share' : 'Lab above share: lower launch priority'}</span>
-                      <ModelProvenance name="LabFairShareAllocator" extra={fairShare.message} />
+                      <ModelProvenance name="LabFairShareAllocator" provenance={provenanceFor(plan, 'LabFairShareAllocator')} extra={fairShare.message} />
                     </span>,
                   ],
                 ] as [React.ReactNode, React.ReactNode][])
@@ -199,6 +220,44 @@ const PlanRun: React.FC = () => {
   const project = projects.find((p) => p.id === form.projectId);
   const plan = plans?.find((p) => p.id === selected) ?? null;
   const reached = plan ? 3 : plans ? 2 : request ? 1 : 0;
+
+  // Deep link from the advisor / elsewhere: /plan?runRequest=<id>&plan=<planId> opens that saved request at step 3.
+  const [params] = useSearchParams();
+  const linkedRequest = params.get('runRequest');
+  const linkedPlan = params.get('plan');
+  const loadedLink = useRef<string | null>(null);
+  useEffect(() => {
+    if (!linkedRequest || loadedLink.current === linkedRequest) return;
+    loadedLink.current = linkedRequest;
+    guard('check', async () => {
+      const rr = await getRunRequest(linkedRequest);
+      if (!rr) throw new Error(`Run request ${linkedRequest} was not found.`);
+      const [cs, ps] = await Promise.all([fetchChecks(rr.id), fetchPlans(rr.id)]);
+      setRequest(rr);
+      setStatus(rr.status ?? 'DRAFT');
+      setForm({
+        ...EMPTY_FORM,
+        description: rr.description ?? '',
+        name: rr.name ?? '',
+        projectId: rr.project?.id ?? null,
+        workloadType: rr.workloadType ?? EMPTY_FORM.workloadType,
+        modelParamsB: rr.modelParamsB != null ? String(rr.modelParamsB) : '',
+        datasetGb: rr.datasetGb != null ? String(rr.datasetGb) : '',
+        estGpuHours: rr.estGpuHours != null ? String(rr.estGpuHours) : '',
+        gpuTypeId: rr.requestedGpuType?.id ?? null,
+        gpus: rr.requestedGpus != null ? String(rr.requestedGpus) : '',
+        walltimeHours: rr.requestedWalltimeHours != null ? String(rr.requestedWalltimeHours) : '',
+        clusterId: rr.requestedCluster?.id ?? null,
+        deadline: toLocalInput(rr.deadline),
+      });
+      setChecks(cs);
+      setPlans(ps);
+      const sel = ps.find((p) => p.id === linkedPlan) ?? ps.find((p) => p.label === 'Balanced') ?? ps[0];
+      setSelected(sel?.id ?? null);
+      setStep(sel && linkedPlan ? 3 : ps.length ? 2 : 1);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedRequest, linkedPlan]);
 
   useEffect(() => {
     if (step === 2) plansRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -371,7 +430,7 @@ const PlanRun: React.FC = () => {
             >
               {checks.length > 0 && (
                 <div className="mb-3">
-                  <ModelProvenance name="ClusterPolicyEngine" support={`${checks.length} rules checked`} />
+                  <ModelProvenance name="ClusterPolicyEngine" provenance={provenanceFor(checks[0], 'ClusterPolicyEngine')} support={`${checks.length} rules checked`} />
                 </div>
               )}
               <ul className="flex flex-col">

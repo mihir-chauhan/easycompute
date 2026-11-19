@@ -1,0 +1,8 @@
+{
+  "id": "JobMetricForeignKeys",
+  "name": "JobMetricForeignKeys",
+  "description": "Every JobMetric.job points at an existing Job.",
+  "targetType": "JobMetric",
+  "kind": "FOREIGN_KEY",
+  "typeIdent": "FKEY"
+}

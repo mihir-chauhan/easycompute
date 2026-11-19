@@ -1,0 +1,54 @@
+{
+  "id": "44e011c7-8f6b-414c-8c94-528d355d94c7",
+  "name": "JobMetricRanges",
+  "description": "JobMetric percentages (gpuUtilPct, gpuMemPct, cpuUtilPct, memPct) must be within 0-100 and powerW >= 0 when set. Guards telemetry loaded by JobTelemetryFeed.",
+  "targetType": "JobMetric",
+  "kind": "LAMBDA",
+  "language": "Python",
+  "typeIdent": "LMAPR",
+  "userCode": "def summarize(run):\n    a = run.args or {}\n    T = c3.JobMetric\n    bad = '(exists(gpuUtilPct) && (gpuUtilPct < 0 || gpuUtilPct > 100)) || (exists(gpuMemPct) && (gpuMemPct < 0 || gpuMemPct > 100)) || (exists(cpuUtilPct) && (cpuUtilPct < 0 || cpuUtilPct > 100)) || (exists(memPct) && (memPct < 0 || memPct > 100)) || (exists(powerW) && powerW < 0)'\n    if a.get('scope'):\n        bad = '(%s) && (%s)' % (bad, a.get('scope'))\n    n = T.fetchCount({'filter': bad})\n    limit = int(a.get('sampleSize') or 100)\n    sample = T.fetch({'filter': bad, 'include': 'id,job,ts,gpuUtilPct,gpuMemPct,cpuUtilPct,memPct,powerW', 'limit': limit}).objs or []\n    def s(v):\n        if v is None:\n            return 'none'\n        return v.isoformat() if hasattr(v, 'isoformat') else str(v)\n    rows = [{'id': s(getattr(o, 'id', None)), 'gpuUtilPct': s(getattr(o, 'gpuUtilPct', None)), 'gpuMemPct': s(getattr(o, 'gpuMemPct', None)), 'cpuUtilPct': s(getattr(o, 'cpuUtilPct', None)), 'memPct': s(getattr(o, 'memPct', None)), 'powerW': s(getattr(o, 'powerW', None))} for o in sample]\n    S = c3.DataValidation.Status\n    return c3.DataValidation.Rule.SummaryResult(status=S.FAILED_CRITICAL if n else S.PASSED, details=rows)",
+  "args": {
+    "sampleSize": 100
+  },
+  "enableUserNotifications": false,
+  "detailsType": {
+    "named": true,
+    "fieldTypes": [
+      {
+        "name": "id",
+        "index": 0,
+        "valueType": "string"
+      },
+      {
+        "name": "gpuUtilPct",
+        "index": 1,
+        "valueType": "string"
+      },
+      {
+        "name": "gpuMemPct",
+        "index": 2,
+        "valueType": "string"
+      },
+      {
+        "name": "cpuUtilPct",
+        "index": 3,
+        "valueType": "string"
+      },
+      {
+        "name": "memPct",
+        "index": 4,
+        "valueType": "string"
+      },
+      {
+        "name": "powerW",
+        "index": 5,
+        "valueType": "string"
+      }
+    ]
+  },
+  "summarize": {
+    "type": "Lambda<function(run: any): any>",
+    "language": "Python",
+    "implementation": "def summarize(run):\n    a = run.args or {}\n    T = c3.JobMetric\n    bad = '(exists(gpuUtilPct) && (gpuUtilPct < 0 || gpuUtilPct > 100)) || (exists(gpuMemPct) && (gpuMemPct < 0 || gpuMemPct > 100)) || (exists(cpuUtilPct) && (cpuUtilPct < 0 || cpuUtilPct > 100)) || (exists(memPct) && (memPct < 0 || memPct > 100)) || (exists(powerW) && powerW < 0)'\n    if a.get('scope'):\n        bad = '(%s) && (%s)' % (bad, a.get('scope'))\n    n = T.fetchCount({'filter': bad})\n    limit = int(a.get('sampleSize') or 100)\n    sample = T.fetch({'filter': bad, 'include': 'id,job,ts,gpuUtilPct,gpuMemPct,cpuUtilPct,memPct,powerW', 'limit': limit}).objs or []\n    def s(v):\n        if v is None:\n            return 'none'\n        return v.isoformat() if hasattr(v, 'isoformat') else str(v)\n    rows = [{'id': s(getattr(o, 'id', None)), 'gpuUtilPct': s(getattr(o, 'gpuUtilPct', None)), 'gpuMemPct': s(getattr(o, 'gpuMemPct', None)), 'cpuUtilPct': s(getattr(o, 'cpuUtilPct', None)), 'memPct': s(getattr(o, 'memPct', None)), 'powerW': s(getattr(o, 'powerW', None))} for o in sample]\n    S = c3.DataValidation.Status\n    return c3.DataValidation.Rule.SummaryResult(status=S.FAILED_CRITICAL if n else S.PASSED, details=rows)"
+  }
+}

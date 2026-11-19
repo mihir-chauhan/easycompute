@@ -23,10 +23,11 @@ import { ArrowLeftRight, Bell, Building2, Check, ChevronDown, Lock, Search, Sett
 
 import { DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { c3Call } from '@/c3Action';
-import { getLabSummary, getUniversityOverview, setDemoUser } from '@/features/admin/api';
+import { getLabSummary, getLiveSnapshot, getUniversityOverview, setDemoUser } from '@/features/admin/api';
 import type { LabSummaryLite, UniversityOverview } from '@/features/admin/types';
 import { cn } from '@/lib/utils';
 
+import { LiveNumber, useLivePoll } from './live';
 import { ProgressBar } from './ProgressBar';
 import { ROLE_LABEL, ROLE_SHORT, roleCan, type EcRole, type Permission } from './roles';
 import { burnTone, type Tone } from './tone';
@@ -469,8 +470,6 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
   const navigate = useNavigate();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [bannerHidden, setBannerHidden] = useState(() => readStored(BANNER_KEY) === '1');
-  const [overview, setOverview] = useState<UniversityOverview | null>(null);
-  const [summary, setSummary] = useState<LabSummaryLite | null>(null);
 
   // Dark only, by design; load Fira Mono for code/ids/times (the template ships Inter only).
   useEffect(() => {
@@ -484,26 +483,19 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
     }
   }, []);
 
-  // Shell data: cluster health + scope list (university overview), lab budget + meters (lab summary).
-  useEffect(() => {
-    let cancelled = false;
-    getUniversityOverview()
-      .then((o) => !cancelled && setOverview(o))
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  useEffect(() => {
-    if (!labId) return undefined;
-    let cancelled = false;
-    getLabSummary(labId)
-      .then((s) => !cancelled && setSummary(s))
-      .catch(() => !cancelled && setSummary(null));
-    return () => {
-      cancelled = true;
-    };
-  }, [labId, location.pathname]);
+  // Live shell data (paused while the tab is hidden): cluster health + scope list every 20 s, lab budget, live-run
+  // count and allocation meters every 10 s (RunMonitor.liveSnapshot lab counts overlay when deployed).
+  const { data: overview } = useLivePoll<UniversityOverview>(getUniversityOverview, [], { intervalMs: 20000 });
+  const { data: summary } = useLivePoll<LabSummaryLite | null>(
+    async () => {
+      if (!labId) return null;
+      const [s, snap] = await Promise.all([getLabSummary(labId), getLiveSnapshot(labId).catch(() => null)]);
+      const live = snap?.labs?.find((l) => l.labId === labId);
+      return live ? { ...s, kpis: { ...s.kpis, liveJobs: live.liveJobs ?? s.kpis.liveJobs, openAlerts: live.openAlerts ?? s.kpis.openAlerts } } : s;
+    },
+    [labId],
+    { intervalMs: 10000 },
+  );
 
   // ⌘K / Ctrl+K opens the palette.
   useEffect(() => {
@@ -574,6 +566,10 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
     [labNav, adminNav, labs, overview, navigate, setLabId, role],
   );
 
+  // Live badge: items with badgeTone 'live' show the lab's current live-run count.
+  const liveRuns = summary?.kpis.liveJobs;
+  const badgeOf = (item: ShellNavItem) => (item.badgeTone === 'live' && liveRuns != null ? (liveRuns > 0 ? `${liveRuns} live` : null) : item.badge);
+
   const navLink = (item: ShellNavItem, target: string = item.path) => {
     const on = item.path === active;
     return (
@@ -589,9 +585,9 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
       >
         <item.icon className={cn('size-4 shrink-0', on ? 'text-[var(--ec-accent-hi)]' : 'text-[var(--ec-fg-2)]')} aria-hidden />
         <span className="truncate">{item.label}</span>
-        {item.badge != null && item.badge !== 0 ? (
-          typeof item.badge === 'number' ? (
-            <span className="ml-auto rounded-full bg-[var(--ec-crit-bg)] px-[7px] text-[11px] leading-[18px] text-[var(--ec-crit-fg)]">{item.badge}</span>
+        {badgeOf(item) != null && badgeOf(item) !== 0 ? (
+          typeof badgeOf(item) === 'number' ? (
+            <span className="ml-auto rounded-full bg-[var(--ec-crit-bg)] px-[7px] text-[11px] leading-[18px] text-[var(--ec-crit-fg)]">{badgeOf(item)}</span>
           ) : (
             <span
               className={cn(
@@ -599,7 +595,7 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
                 item.badgeTone === 'live' ? 'border border-[var(--ec-accent-line)] bg-[var(--ec-accent-bg)] text-[var(--ec-accent-text)]' : 'bg-[var(--ec-blue-bg)] text-[var(--ec-blue)]',
               )}
             >
-              {item.badge}
+              {badgeOf(item)}
             </span>
           )
         ) : null}
@@ -660,7 +656,7 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
               <Wallet className="size-4" aria-hidden />
               <span className="hidden sm:inline">Budget</span>
               <span className="rounded-full bg-[var(--ec-card-2)] px-2 text-xs leading-5 tabular-nums">
-                {budgetUsd != null ? budgetUsd.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }) : '—'}
+                <LiveNumber value={budgetUsd} format={(v) => v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })} />
               </span>
             </button>
           ) : null}
@@ -712,6 +708,10 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
         </nav>
         <main className="min-w-0 flex-1 overflow-auto bg-[var(--ec-bg)]">
           {view === 'admin' && role !== 'UNIVERSITY_ADMIN' ? <AccessNotice role={role} onSwitch={() => setRole('UNIVERSITY_ADMIN')} /> : children}
+          <footer className="mx-4 mb-8 flex max-w-[1180px] flex-wrap items-center gap-x-5 gap-y-1 border-t border-[var(--ec-line)] pt-4 text-xs text-[var(--ec-fg-2)] md:mx-8">
+            <span>EasyCompute for Purdue research computing</span>
+            <span className="text-[var(--ec-fg-3)]">Simulated telemetry for demo · history is pseudonymized Anvil accounting + seed data</span>
+          </footer>
         </main>
       </div>
 

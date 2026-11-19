@@ -1,0 +1,67 @@
+/**
+ * One raw row of the daily allocation ledger CSV delivered to the `AllocationLedgerFeed`
+ * {@link FileSourceCollection}. Every column is kept as text so a malformed value never fails the file;
+ * {@link EasyComputeIngest#allocationToCanonical} parses and validates it into a {@link CanonicalAllocationLedger}.
+ */
+type SourceAllocationLedger mixes Source {
+
+  /**
+   * Allocation id ({@link Allocation} id).
+   */
+  @ser(name="allocation_id")
+  allocationIdRaw: string
+
+  /**
+   * {@link Lab} id.
+   */
+  @ser(name="lab_id")
+  labIdRaw: string
+
+  /**
+   * {@link ComputeCluster} id the allocation is on.
+   */
+  @ser(name="resource")
+  resourceRaw: string
+
+  /**
+   * Funding source, an {@link Allocation.Funding} value.
+   */
+  @ser(name="funding_source")
+  fundingSourceRaw: string
+
+  /**
+   * Grant or share name.
+   */
+  @ser(name="grant_name")
+  grantNameRaw: string
+
+  /**
+   * Units awarded.
+   */
+  @ser(name="award_units")
+  awardUnitsRaw: string
+
+  /**
+   * Units used so far.
+   */
+  @ser(name="used_units")
+  usedUnitsRaw: string
+
+  /**
+   * Allocation unit ("SU", "GPU-hour", "USD").
+   */
+  @ser(name="unit")
+  unitRaw: string
+
+  /**
+   * Start of the allocation period, ISO-8601 UTC.
+   */
+  @ser(name="start_date")
+  startDateRaw: string
+
+  /**
+   * End of the allocation period, ISO-8601 UTC.
+   */
+  @ser(name="end_date")
+  endDateRaw: string
+}

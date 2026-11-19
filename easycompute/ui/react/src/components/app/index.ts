@@ -30,3 +30,5 @@ export { nativeToolUrl, NATIVE_TOOL_LABEL } from './nativeTools';
 export type { NativeTool } from './nativeTools';
 export { PERMISSIONS, ROLE_LABEL, roleCan, roleFromMember } from './roles';
 export type { EcRole, Permission } from './roles';
+export { LiveIndicator, LiveNumber, SimulatedTelemetryNote, seededNoise, useAccrual, useAnimatedNumber, useLivePoll, useNow, useObservedRate, usePageVisible, useStreamingSeries } from './live';
+export type { LivePoll, SeriesPoint } from './live';

@@ -10,7 +10,8 @@ import { ArrowRight, Check, Plus, Rocket } from 'lucide-react';
 import { BrandMark, errorMessage, ROLE_LABEL, useAppShell, type EcRole } from '@/components/app';
 import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { checkRules, createRunRequest, extractConstraints, fetchProjects, getLabSummary, recommendPlans, submitPlan } from '@/features/lab/api';
+import { checkRules, createRunRequest, extractConstraints, fetchJobMetrics, fetchProjects, getJob, getLabSummary, recommendPlans, submitPlan } from '@/features/lab/api';
+import { LiveBadge, liveJob, mergeSnap, SimNote, useLiveSnapshot, useNow } from '@/features/lab/live';
 import { formatDuration, formatInt, formatUsd, WORKLOAD_LABEL } from '@/features/lab/format';
 import { ModelComputing, ModelProvenance, type ModelName } from '@/features/lab/models';
 import { costPhrase, doneBy, fixesOf, pickPlan, PREFERENCE_LABEL, preferenceFrom, settingsOf, type Preference } from '@/features/lab/oneBox';
@@ -64,6 +65,14 @@ const Home: React.FC = () => {
   const budgetLeft = summary.data?.kpis.allocationRemainingUsd;
 
   const picked = useMemo(() => pickPlan(plans, pref), [plans, pref]);
+  // After launch: follow the job live (queue → node placement → metrics).
+  const follow = useLoad(() => (launched ? Promise.all([getJob(launched.id), fetchJobMetrics(launched.id)]) : null), [launched?.id], 5000);
+  const now = useNow(1000);
+  const snap = useLiveSnapshot(launched ? labId : null);
+  const sj = launched ? snap.byJob[launched.id] : undefined;
+  const base = follow.data?.[0] ? mergeSnap(follow.data[0], sj) : launched;
+  const lj = base ? liveJob(base, sj ? snap.updatedAt : follow.updatedAt, now, sj?.progressPerRealSec) : null;
+  const lastMetric = sj?.latest ?? follow.data?.[1]?.at(-1);
   const plan = picked.plan;
   const busy = stage !== null;
 
@@ -308,7 +317,7 @@ const Home: React.FC = () => {
                   {failing ? 'Ready: every blocking rule is routed around' : 'Ready to launch'}
                 </div>
                 <p className="m-0 text-2xl leading-8 font-medium tracking-[-0.01em] text-balance text-[var(--c3-style-basic-fg-primary)]">
-                  {`${plan.cluster?.name ?? plan.cluster?.id}${plan.qos && plan.qos !== 'normal' ? ` ${plan.qos}` : ''}, ${plan.gpus ?? 0} ${plan.gpuType?.id?.split('-')[0] ?? ''} GPUs. `}
+                  {`${plan.cluster?.name ?? plan.cluster?.id}${plan.qos && plan.qos !== 'normal' ? ` ${plan.qos}` : ''}, ${plan.gpus ?? 0} ${plan.gpuType?.id?.split('-')[0] ?? ''} GPU${plan.gpus === 1 ? '' : 's'}. `}
                   <span className="text-[var(--c3-style-basic-fg-secondary)]">
                     <b className="font-medium whitespace-nowrap">{`Done ${doneBy(plan)}`}</b>
                     {days != null && days >= 0 ? ` (${days === 0 ? 'today' : `${days} day${days === 1 ? '' : 's'}`})` : ''}
@@ -405,11 +414,26 @@ const Home: React.FC = () => {
               <div className={cn(GLASS, 'flex flex-col gap-4 p-[22px]')}>
                 <div className="flex items-center justify-center gap-2 text-[13px] text-[var(--c3-style-basic-fg-secondary)]">
                   <span className={DOT} />
-                  {`Launched on ${launched.cluster?.name ?? launched.cluster?.id ?? plan?.cluster?.name ?? ''}`}
+                  {`${lj?.state === 'RUNNING' ? 'Running' : 'Launched'} on ${launched.cluster?.name ?? launched.cluster?.id ?? plan?.cluster?.name ?? ''}`}
                 </div>
                 <p className="m-0 text-2xl leading-8 font-medium text-balance text-[var(--c3-style-basic-fg-primary)]">
-                  {`${launched.state === 'RUNNING' ? 'Running now' : `Starts in about ${formatDuration(plan?.estWaitHours)}`} as job ${launched.slurmJobId ?? launched.id}. EasyCompute will only message you if something needs you.`}
+                  {lj?.state === 'RUNNING'
+                    ? `Running on ${lj.nodeList ?? 'its node'} as job ${lj.slurmJobId ?? lj.id}.`
+                    : lj?.state === 'PENDING'
+                      ? `Queued as job ${lj.slurmJobId ?? lj.id}. Starts in about ${formatDuration(Math.max(0, (plan?.estWaitHours ?? 0) - (lj.submitTime ? (now - new Date(lj.submitTime).getTime()) / 3600000 : 0)))}.`
+                      : `Job ${lj?.slurmJobId ?? lj?.id} is ${String(lj?.state ?? '').toLowerCase()}.`}{' '}
+                  <span className="text-[var(--c3-style-basic-fg-secondary)]">EasyCompute will only message you if something needs you.</span>
                 </p>
+                {lj?.state === 'RUNNING' && (
+                  <div className="flex flex-wrap justify-center gap-1.5 text-xs">
+                    <span className="rounded-md bg-[color-mix(in_srgb,white_6%,transparent)] px-2 leading-6 tabular-nums">{`Elapsed ${formatDuration(lj.elapsedHours)} of ${formatDuration(lj.timelimitHours)}`}</span>
+                    {lastMetric?.gpuUtilPct != null && <span className="rounded-md bg-[color-mix(in_srgb,white_6%,transparent)] px-2 leading-6 tabular-nums">{`GPU util ${Math.round(lastMetric.gpuUtilPct)}%`}</span>}
+                    <span className="rounded-md bg-[color-mix(in_srgb,white_6%,transparent)] px-2 leading-6 tabular-nums">{`${formatUsd(lj.costUsd)} so far`}</span>
+                  </div>
+                )}
+                <div className="flex justify-center">
+                  <LiveBadge updatedAt={snap.updatedAt ?? follow.updatedAt} />
+                </div>
                 <div className="flex flex-wrap justify-center gap-2.5">
                   <button type="button" className={BTN_PRI} onClick={() => navigate(`/runs/${encodeURIComponent(launched.id)}`)}>
                     Watch it live
@@ -423,6 +447,7 @@ const Home: React.FC = () => {
           </div>
         </div>
       </section>
+      <SimNote />
       <p className="px-4 pb-8 text-center text-xs text-[var(--c3-style-basic-fg-secondary)]">
         {summary.data ? `${lab?.name ?? ''} · ${formatInt(summary.data.kpis.liveJobs)} live runs · plans use your lab's real rules, allocations and history` : 'Plans use your lab’s real rules, allocations and history.'}
       </p>

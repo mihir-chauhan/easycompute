@@ -1,0 +1,75 @@
+/**
+ * Parsed, validated partition status row: the ingestion contract between {@link SourcePartitionStatus} and the
+ * live-state fields of {@link Partition} and {@link ComputeCluster}. Produced by
+ * {@link EasyComputeIngest#partitionStatusToCanonical}. Valid rows merge ONLY
+ * {@link Partition#currentQueueDepth}, {@link Partition#avgWaitHours} and {@link Partition#utilizationPct}
+ * (transform `CanonicalPartitionStatus-Partition`) and ONLY {@link ComputeCluster#status}
+ * (`CanonicalPartitionStatus-ComputeCluster`); rejected rows go to {@link IngestRejection}.
+ */
+type CanonicalPartitionStatus mixes Canonical<CanonicalPartitionStatus> {
+
+  /**
+   * Snapshot time (UTC).
+   */
+  snapshotTime: datetime
+
+  /**
+   * {@link ComputeCluster} id.
+   */
+  cluster: string
+
+  /**
+   * {@link ComputeCluster.Status} value (cluster_state).
+   */
+  clusterStatus: string
+
+  /**
+   * {@link Partition} id resolved from cluster + Slurm partition + QOS (falling back to QOS "normal").
+   */
+  partition: string
+
+  /**
+   * Jobs pending (pending_jobs).
+   */
+  currentQueueDepth: int
+
+  /**
+   * Average queue wait in hours (avg_wait_hours).
+   */
+  avgWaitHours: double
+
+  /**
+   * Utilization 0-100 (util_pct).
+   */
+  utilizationPct: double
+
+  /**
+   * Feed name written to {@link IngestRejection#feed} ("ClusterStatusFeed").
+   */
+  feed: string
+
+  /**
+   * File name the row came from.
+   */
+  sourceFile: string
+
+  /**
+   * Human-readable row key, `<cluster>/<partition>/<qos>`.
+   */
+  rowKey: string
+
+  /**
+   * Deterministic {@link IngestRejection} id (feed + file + row hash).
+   */
+  rejectionId: string
+
+  /**
+   * Every validation failure, "; "-separated; null when the row is valid.
+   */
+  rejectReason: string
+
+  /**
+   * The original row as JSON keyed by the CSV header.
+   */
+  rawRow: string
+}

@@ -4,9 +4,16 @@
 type RunMonitor {
 
   /**
-   * Advances every live job by 15 simulated minutes (new metric sample, elapsed time, cost and allocation
-   * usage, start and finish transitions), evaluates job health and applies each lab's {@link AutopilotPolicy}.
-   * Returns a summary of what changed. Also run by the `EasyComputeMonitorTick` CronJob.
+   * Advances the live cluster by the real time elapsed since the last tick (job progress at
+   * {@link RunSimulatorSettings#demoTimeScale}, plus `fastForwardMinutes` of progress for the "Simulate next 15 min" button):
+   * telemetry samples, job lifecycle, partition / cluster drift, allocation charges, guardrails and autopilot. Run every
+   * minute by the `EasyComputeMonitorTick` CronJob; does nothing when the simulator is disabled.
    */
-  tick: function(): json js-server
+  tick: function(fastForwardMinutes: int): json js-server
+
+  /**
+   * Cheap snapshot for live views (poll every 5-10 s): live jobs with their latest sample and alerts, partition and
+   * cluster live stats, the lab's allocation usage and the simulator clock.
+   */
+  liveSnapshot: function(labId: string): json js-server
 }

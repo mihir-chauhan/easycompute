@@ -304,3 +304,90 @@ export const anvilTrainingRows = async (): Promise<number | null> => {
     return null;
   }
 };
+
+/* ---------------------------------------------------------------- live snapshot ---------------------------------------------------------------- */
+/*
+ * RunMonitor.liveSnapshot (SPEC "LIVE CLUSTER SIMULATION"; contract in API.md once published). Parsed leniently: any of
+ * the fields below may be present. Returns null while the method is not deployed, and pages fall back to re-polling
+ * Insights.universityOverview / labSummary (which already reflect the simulator's writes).
+ */
+
+export interface LiveClusterRow {
+  id: string;
+  gpuUtilizationPct?: number;
+  busyGpus?: number;
+  idleGpus?: number;
+  totalGpus?: number;
+  queueDepth?: number;
+  avgWaitHours?: number;
+  costUsd?: number;
+  costUsdPerHour?: number;
+  status?: string;
+  liveJobs?: number;
+}
+
+export interface LivePartitionRow {
+  id: string;
+  clusterId?: string;
+  utilizationPct?: number;
+  currentQueueDepth?: number;
+  queueDepth?: number;
+  avgWaitHours?: number;
+}
+
+export interface LiveSnapshot {
+  asOf?: string;
+  clusters?: LiveClusterRow[];
+  partitions?: LivePartitionRow[];
+  kpis?: Record<string, number>;
+  labs?: Array<{ labId: string; liveJobs?: number; runningJobs?: number; pendingJobs?: number; openAlerts?: number; remainingUsd?: number }>;
+  [key: string]: unknown;
+}
+
+let liveSnapshotDeployed: boolean | null = null;
+let liveSnapshotMissingAt = 0;
+
+export async function getLiveSnapshot(labId?: string | null): Promise<LiveSnapshot | null> {
+  // Not deployed: re-probe every 2 min so a backend pull is picked up without a reload.
+  if (liveSnapshotDeployed === false && Date.now() - liveSnapshotMissingAt < 120000) return null;
+  try {
+    const r = unbox<LiveSnapshot>(await adminCall('RunMonitor', 'liveSnapshot', null, labId ? [labId] : []));
+    liveSnapshotDeployed = true;
+    return r ?? null;
+  } catch (e) {
+    if (e instanceof Error && /Missing|not found|no implementation|Unknown method|is not a function/i.test(e.message)) {
+      liveSnapshotDeployed = false;
+      liveSnapshotMissingAt = Date.now();
+      return null;
+    }
+    throw e;
+  }
+}
+
+/** Overlay live cluster numbers from the snapshot onto the overview's cluster rows. */
+export function mergeLiveClusters<T extends { id: string }>(rows: T[], snap: LiveSnapshot | null): T[] {
+  if (!snap?.clusters?.length) return rows;
+  const by = new Map(snap.clusters.map((c) => [c.id, c]));
+  return rows.map((r) => {
+    const l = by.get(r.id);
+    if (!l) return r;
+    const patch = Object.fromEntries(Object.entries(l).filter(([k, v]) => k !== 'id' && v != null && k in r));
+    return { ...r, ...patch };
+  });
+}
+
+/** Overlay live partition numbers (utilization, queue depth, wait) onto partition rows. */
+export function mergeLivePartitions(rows: Partition[], snap: LiveSnapshot | null): Partition[] {
+  if (!snap?.partitions?.length) return rows;
+  const by = new Map(snap.partitions.map((p) => [p.id, p]));
+  return rows.map((r) => {
+    const l = by.get(r.id);
+    if (!l) return r;
+    return {
+      ...r,
+      utilizationPct: l.utilizationPct ?? r.utilizationPct,
+      currentQueueDepth: l.currentQueueDepth ?? l.queueDepth ?? r.currentQueueDepth,
+      avgWaitHours: l.avgWaitHours ?? r.avgWaitHours,
+    };
+  });
+}

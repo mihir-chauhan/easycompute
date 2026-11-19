@@ -1,6 +1,7 @@
 /**
  * Parsing and validation for the EasyCompute file feeds. Called from the Source-to-Canonical transforms
- * (`SourceSlurmSacct-CanonicalSlurmJob`, `SourceJobTelemetry-CanonicalJobTelemetry`). Never throws for bad data:
+ * (`SourceSlurmSacct-CanonicalSlurmJob`, `SourceJobTelemetry-CanonicalJobTelemetry`,
+ * `SourceAllocationLedger-CanonicalAllocationLedger`, `SourcePartitionStatus-CanonicalPartitionStatus`). Never throws for bad data:
  * every problem is collected into the canonical's `rejectReason`, which routes the row to {@link IngestRejection}.
  */
 type EasyComputeIngest {
@@ -17,4 +18,18 @@ type EasyComputeIngest {
    * exists, and records every validation failure in {@link CanonicalJobTelemetry#rejectReason}.
    */
   telemetryToCanonical: function(src: !SourceJobTelemetry): !CanonicalJobTelemetry js-server
+
+  /**
+   * Parses one {@link SourceAllocationLedger} row into a {@link CanonicalAllocationLedger}: checks the lab, cluster
+   * (resource) and {@link Allocation.Funding} value exist, parses units and ISO dates, and rejects negative used
+   * units or an end date before the start date.
+   */
+  allocationToCanonical: function(src: !SourceAllocationLedger): !CanonicalAllocationLedger js-server
+
+  /**
+   * Parses one {@link SourcePartitionStatus} row into a {@link CanonicalPartitionStatus}: resolves the partition like
+   * the sacct feed (cluster + Slurm partition + QOS, else QOS "normal"), checks the {@link ComputeCluster.Status}
+   * value, and rejects negative counts or a utilization outside 0-100.
+   */
+  partitionStatusToCanonical: function(src: !SourcePartitionStatus): !CanonicalPartitionStatus js-server
 }

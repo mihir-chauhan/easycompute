@@ -1,0 +1,8 @@
+{
+  "id": "JobForeignKeys",
+  "name": "JobForeignKeys",
+  "description": "Every Job reference (lab, project, runRequest, cluster, partition, gpuType) points at an existing row.",
+  "targetType": "Job",
+  "kind": "FOREIGN_KEY",
+  "typeIdent": "FKEY"
+}

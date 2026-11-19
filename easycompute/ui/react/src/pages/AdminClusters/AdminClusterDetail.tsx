@@ -19,19 +19,20 @@ import {
   PageFrame,
   ProgressBar,
   SectionCard,
-  SeverityBadge,
   StatusBadge,
   ToneBadge,
+  useC3Data,
   barOption,
   toneColor,
-  useC3Data,
+  LiveIndicator,
+  useLivePoll,
   useThemeKey,
   utilTone,
   type Column,
   type Tone,
 } from '@/components/app';
 import { Button } from '@/components/ui/button';
-import { getClusterDetail, getUniversityOverview, listPolicies } from '@/features/admin/api';
+import { getClusterDetail, getLiveSnapshot, getUniversityOverview, listPolicies, mergeLiveClusters, mergeLivePartitions } from '@/features/admin/api';
 import { compact, hours, num, pct, unitPrice, usd } from '@/features/admin/components';
 import type { ComputeCluster, JobLite, OverviewCluster, Partition, Policy } from '@/features/admin/types';
 
@@ -50,14 +51,25 @@ export default function AdminClusterDetail() {
   const navigate = useNavigate();
   const themeKey = useThemeKey();
 
-  const { data, loading, error, reload } = useC3Data<Detail>(async () => {
-    const [detail, overview, policies] = await Promise.all([getClusterDetail(id), getUniversityOverview(), listPolicies()]);
-    return {
-      ...detail,
-      live: overview.clusters.find((c) => c.id === id),
-      policies: policies.filter((p) => p.cluster?.id === id || detail.partitions.some((x) => x.id === p.partition?.id)),
-    };
-  }, [id]);
+  // Live: partitions (queue, wait, utilization), live jobs and cluster load every 8 s; policies are static.
+  const { data: policyRows } = useC3Data(listPolicies, []);
+  const { data, loading, error, reload, updatedAt, live: polling } = useLivePoll<Detail>(
+    async () => {
+      const [detail, overview, snap] = await Promise.all([getClusterDetail(id), getUniversityOverview(), getLiveSnapshot().catch(() => null)]);
+      return {
+        ...detail,
+        partitions: mergeLivePartitions(detail.partitions, snap),
+        live: mergeLiveClusters(overview.clusters, snap).find((c) => c.id === id),
+        policies: [],
+      };
+    },
+    [id],
+    { intervalMs: 8000 },
+  );
+  const policies = useMemo(
+    () => (policyRows ?? []).filter((p) => p.cluster?.id === id || (data?.partitions ?? []).some((x) => x.id === p.partition?.id)),
+    [policyRows, data, id],
+  );
 
   const c = data?.cluster;
   const live = data?.live;
@@ -82,7 +94,7 @@ export default function AdminClusterDetail() {
       header: 'Partition',
       render: (p) => (
         <span className="flex flex-col">
-          <span className="font-medium">{p.name}</span>
+          <span className="font-medium">{c?.name && p.name.startsWith(`${c.name} `) ? p.name.slice(c.name.length + 1) : p.name}</span>
           <span className="font-mono text-xs text-[var(--c3-style-basic-fg-secondary)]">-p {p.slurmPartition ?? p.name}{p.qos && p.qos !== 'normal' ? ` --qos=${p.qos}` : ''}</span>
         </span>
       ),
@@ -95,7 +107,7 @@ export default function AdminClusterDetail() {
       align: 'right',
       render: (p) => `${p.nodeCount != null ? num(p.nodeCount) : '—'} × ${p.gpusPerNode ?? 0}`,
       sortValue: (p) => (p.nodeCount ?? 0) * (p.gpusPerNode ?? 0),
-      hideBelow: 'md',
+      hideBelow: 'xl',
     },
     { key: 'wall', header: 'Max walltime', align: 'right', render: (p) => hours(p.maxWalltimeHours), sortValue: (p) => p.maxWalltimeHours },
     {
@@ -107,7 +119,7 @@ export default function AdminClusterDetail() {
         </span>
       ),
       sortValue: (p) => p.maxGpusPerJob,
-      hideBelow: 'lg',
+      hideBelow: 'xl',
     },
     {
       key: 'charge',
@@ -165,7 +177,7 @@ export default function AdminClusterDetail() {
   return (
     <PageFrame
       title={c?.name ?? (loading ? 'Cluster' : id)}
-      description={c ? `${c.operator ?? ''}${c.description ? ` · ${c.description}` : ''}` : undefined}
+      description={c ? <span className="line-clamp-2" title={c.description}>{`${c.operator ?? ''}${c.description ? ` · ${c.description}` : ''}`}</span> : undefined}
       breadcrumbs={[{ label: 'Research Computing', href: '#/admin' }, { label: 'Clusters', href: '#/admin/clusters' }, { label: c?.name ?? id }]}
       badges={
         c ? (
@@ -176,9 +188,12 @@ export default function AdminClusterDetail() {
         ) : undefined
       }
       actions={
-        <Button variant="outline" appearance="secondary" size="sm" leadingIcon={<ArrowLeft />} onClick={() => navigate('/admin/clusters')}>
-          All clusters
-        </Button>
+        <>
+          <LiveIndicator updatedAt={updatedAt} live={polling} />
+          <Button variant="outline" appearance="secondary" size="sm" leadingIcon={<ArrowLeft />} onClick={() => navigate('/admin/clusters')}>
+            All clusters
+          </Button>
+        </>
       }
     >
       {error ? <ErrorState message={`Could not load cluster ${id}: ${error}`} onRetry={reload} /> : null}
@@ -240,16 +255,16 @@ export default function AdminClusterDetail() {
               ]}
             />
             <SectionCard flush title="Rules on this cluster" subtitle="Cluster and partition policies checked before every run">
-              {(data?.policies ?? []).length === 0 && data ? (
+              {policies.length === 0 && data ? (
                 <EmptyState title="No cluster-specific rules" hint="University-wide rules still apply." />
               ) : (
                 <ul className="divide-y divide-[var(--c3-style-basic-border-border)]">
-                  {(data?.policies ?? []).slice(0, 8).map((p) => (
+                  {policies.slice(0, 8).map((p) => (
                     <li key={p.id}>
                       <button type="button" onClick={() => navigate(`/admin/policies?rule=${encodeURIComponent(p.id)}`)} className="flex w-full items-center gap-3 px-5 py-2.5 text-left hover:bg-[var(--c3-style-basic-bg-hover)]">
                         <span className="w-16 shrink-0 font-mono text-xs text-[var(--c3-style-basic-fg-secondary)]">{p.id}</span>
                         <span className="min-w-0 flex-1 truncate text-sm">{p.title}</span>
-                        <SeverityBadge value={p.severity} />
+                        <StatusBadge kind="ruleSeverity" value={p.severity} />
                       </button>
                     </li>
                   ))}

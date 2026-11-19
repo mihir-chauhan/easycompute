@@ -23,7 +23,7 @@ export interface Column<T> {
   /** Extra classes for the cells (width, truncate). */
   className?: string;
   /** Hide below this breakpoint to avoid horizontal scroll on phones. */
-  hideBelow?: 'sm' | 'md' | 'lg';
+  hideBelow?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
 interface DataTableProps<T> {
@@ -46,6 +46,7 @@ const HIDE: Record<NonNullable<Column<unknown>['hideBelow']>, string> = {
   sm: 'hidden sm:table-cell',
   md: 'hidden md:table-cell',
   lg: 'hidden lg:table-cell',
+  xl: 'hidden xl:table-cell',
 };
 
 /** 40px rows, single-line cells, right-aligned tabular numbers, row click opens detail. Put it in `<SectionCard flush>`. */

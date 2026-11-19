@@ -1,0 +1,8 @@
+{
+  "id": "EasyComputeClusterStatusFeed",
+  "name": "EasyCompute ClusterStatusFeed ingestion (hourly at :05)",
+  "description": "Processes any new partition status snapshot CSV files in the ClusterStatusFeed inbox into Partition / ComputeCluster live-state fields and IngestRejection.",
+  "action": { "typeName": "FileSourceCollection", "actionName": "process" },
+  "inputs": { "this": { "type": "FileSourceCollection", "name": "ClusterStatusFeed" }, "spec": { "process": true } },
+  "scheduleDef": { "cronExpression": "0 5 * * * ?" }
+}

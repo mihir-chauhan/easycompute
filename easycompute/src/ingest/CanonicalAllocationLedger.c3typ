@@ -1,0 +1,89 @@
+/**
+ * Parsed, validated allocation ledger row: the ingestion contract between {@link SourceAllocationLedger} and
+ * {@link Allocation}. Produced by {@link EasyComputeIngest#allocationToCanonical}. When
+ * {@link CanonicalAllocationLedger#rejectReason} is empty the row upserts into {@link Allocation} (transform
+ * `CanonicalAllocationLedger-Allocation`); otherwise it goes to {@link IngestRejection}
+ * (`CanonicalAllocationLedger-IngestRejection`) and never to {@link Allocation}.
+ */
+type CanonicalAllocationLedger mixes Canonical<CanonicalAllocationLedger> {
+
+  /**
+   * {@link Allocation} id (allocation_id).
+   */
+  allocationKey: string
+
+  /**
+   * {@link Lab} id.
+   */
+  lab: string
+
+  /**
+   * {@link ComputeCluster} id (resource).
+   */
+  cluster: string
+
+  /**
+   * {@link Allocation.Funding} value (funding_source).
+   */
+  fundingSource: string
+
+  /**
+   * Grant or share name.
+   */
+  grantName: string
+
+  /**
+   * Units awarded (award_units).
+   */
+  totalUnits: double
+
+  /**
+   * Units used (used_units).
+   */
+  usedUnits: double
+
+  /**
+   * Allocation unit name (unit).
+   */
+  unitName: string
+
+  /**
+   * Period start (UTC).
+   */
+  startDate: datetime
+
+  /**
+   * Period end (UTC).
+   */
+  endDate: datetime
+
+  /**
+   * Feed name written to {@link IngestRejection#feed} ("AllocationLedgerFeed").
+   */
+  feed: string
+
+  /**
+   * File name the row came from.
+   */
+  sourceFile: string
+
+  /**
+   * Human-readable row key: the allocation id, or a best-effort key when it is missing.
+   */
+  rowKey: string
+
+  /**
+   * Deterministic {@link IngestRejection} id (feed + file + row hash).
+   */
+  rejectionId: string
+
+  /**
+   * Every validation failure, "; "-separated; null when the row is valid.
+   */
+  rejectReason: string
+
+  /**
+   * The original row as JSON keyed by the CSV header.
+   */
+  rawRow: string
+}

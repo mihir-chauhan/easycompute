@@ -14,6 +14,7 @@ import type {
   ExtractedConstraint,
   FetchResult,
   LabConstraints,
+  LiveSnapshot,
   Job,
   JobMetric,
   Lab,
@@ -165,7 +166,7 @@ export const fetchHistoryJobs = (labId: string, limit = 2000) =>
 
 export const getJob = (id: string) =>
   labCall<Job | null>('Job', 'get', { id }, [
-    `this, ${JOB_LIST_INCLUDE}, lab.id, lab.name, runRequest.id, gpuType.memoryGb`,
+    `this, ${JOB_LIST_INCLUDE}, lab.id, lab.name, runRequest.id, gpuType.memoryGb, partition.avgWaitHours, partition.currentQueueDepth`,
   ]);
 
 /** Recent metric samples for the lab's live jobs (newest first), for list sparklines. */
@@ -190,7 +191,7 @@ export const fetchJobMetrics = async (jobId: string) =>
 
 export const fetchOpenAlerts = (labId: string) =>
   fetchObjs<Alert>('JobAlert', {
-    include: 'id, job.id, job.jobName, job.user, alertType, severity, status, detectedAt, message, recommendedAction, autoActionTaken',
+    include: 'id, job.id, job.jobName, job.user, alertType, severity, status, detectedAt, message, recommendedAction, autoActionTaken, firedRule, evidence, provenance',
     filter: `${eq('lab.id', labId)} && (status == 'OPEN' || status == 'ACKED')`,
     order: 'descending(detectedAt)',
     limit: 200,
@@ -198,7 +199,7 @@ export const fetchOpenAlerts = (labId: string) =>
 
 export const fetchJobAlerts = (jobId: string) =>
   fetchObjs<Alert>('JobAlert', {
-    include: 'id, alertType, severity, status, detectedAt, message, recommendedAction, autoActionTaken',
+    include: 'id, alertType, severity, status, detectedAt, message, recommendedAction, autoActionTaken, firedRule, evidence, provenance',
     filter: eq('job.id', jobId),
     order: 'descending(detectedAt)',
     limit: 100,
@@ -225,6 +226,9 @@ export const applyJobAction = (jobId: string, actionType: ActionType, actor: 'US
 
 export const ackAlert = (id: string) => labCall<Alert>('JobAlert', 'merge', { id, status: 'ACKED' });
 
+/** Cheap live state for polling (RunMonitor.liveSnapshot). */
+export const liveSnapshot = async (labId: string | null) => unbox<LiveSnapshot>(await labCall('RunMonitor', 'liveSnapshot', null, labId ? [labId] : []));
+
 export const monitorTick = async () => unbox<TickSummary>(await labCall('RunMonitor', 'tick', null, []));
 
 /* ---------- Plan a run ---------- */
@@ -248,16 +252,40 @@ export const checkRules = async (runRequestId: string): Promise<RuleCheck[]> =>
 export const getRunRequestStatus = async (id: string) =>
   (await labCall<RunRequest | null>('RunRequest', 'get', { id }, ['id, status']))?.status;
 
-export const recommendPlans = async (runRequestId: string): Promise<RunPlan[]> => {
-  await labCall('RunRequest', 'recommendPlans', { id: runRequestId }, []);
-  return fetchObjs<RunPlan>('RunPlan', {
-    include:
-      'this, cluster.id, cluster.name, partition.id, partition.name, gpuType.id, gpuType.name',
+/** Existing plans of a request (ranked), with names for display. */
+export const fetchPlans = (runRequestId: string) =>
+  fetchObjs<RunPlan>('RunPlan', {
+    include: 'this, cluster.id, cluster.name, partition.id, partition.name, gpuType.id, gpuType.name',
     filter: eq('runRequest.id', runRequestId),
     order: 'ascending(rank)',
     limit: 3,
   });
+
+export const recommendPlans = async (runRequestId: string): Promise<RunPlan[]> => {
+  await labCall('RunRequest', 'recommendPlans', { id: runRequestId }, []);
+  return fetchPlans(runRequestId);
 };
+
+/** Existing rule checks of a request (FAIL, WARN, PASS order applied client-side). */
+export const fetchChecks = async (runRequestId: string) => {
+  const rank: Record<string, number> = { FAIL: 0, WARN: 1, PASS: 2 };
+  const rows = await fetchObjs<RuleCheck>('RuleCheck', {
+    include: 'this, policy.id, policy.title, policy.scope, policy.severity',
+    filter: eq('runRequest.id', runRequestId),
+    limit: 300,
+  });
+  return rows.sort((a, b) => (rank[a.outcome] ?? 3) - (rank[b.outcome] ?? 3));
+};
+
+/** A saved request (deep links from the advisor: `/plan?runRequest=<id>&plan=<planId>`). */
+export const getRunRequest = (id: string) =>
+  labCall<RunRequest | null>('RunRequest', 'get', { id }, [
+    'this, project.id, project.name, requestedGpuType.id, requestedCluster.id, lab.id',
+  ]);
+
+/** LabContextExtractor: confirm the (optionally edited) extraction; status becomes CONFIRMED. */
+export const confirmConstraints = (labId: string, edited: LabConstraints | null) =>
+  labCall<LabConstraints>('Advisor', 'confirmConstraints', null, [labId, edited ? JSON.stringify(edited) : null]);
 
 export interface DurationPrediction {
   gpuHours?: number;

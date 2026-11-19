@@ -197,4 +197,29 @@ entity type Job mixes MlSubject {
    * requeue to standby, checkpoint, scale down, notify PI, hold), resolves the alerts it addresses and logs it.
    */
   applyAction: member function(actionType: !string, actor: !string): ActionLogEntry js-server
+
+  /**
+   * Live-simulation scenario: HEALTHY, IDLE_GPU, LOW_UTIL, OOM_CREEP, WALLTIME_RISK, STALE_CHECKPOINT, HUNG or NODE_FAILURE.
+   */
+  simScenario: string
+
+  /**
+   * When a pending live job is expected to start (demo-compressed queue wait).
+   */
+  etaStartAt: datetime
+
+  /**
+   * Position among pending jobs on the same partition.
+   */
+  queuePosition: int
+
+  /**
+   * Latest JobMetric values and timestamp, updated every simulator tick (cheap reads for live views).
+   */
+  latestSample: json
+
+  /**
+   * Real time the simulator last advanced this job.
+   */
+  lastSimAt: datetime
 }

@@ -107,11 +107,23 @@ export const ALERT_RULE: Record<AlertType, string> = {
   STALE_CHECKPOINT: 'Non-preemptible run with checkpoint older than 120 min',
 };
 
-/** Tooltip trigger text wrapper re-exported for pages that show a "why" line. */
-export const WhyFired = ({ type }: { type: AlertType }) => (
-  <span className="text-[12px] text-[var(--c3-style-basic-fg-secondary)]">
-    <span className="font-medium">Why it fired: </span>
-    {ALERT_RULE[type]}
-  </span>
-);
+const fmtEvidence = (e: unknown): string | null => {
+  if (!e || typeof e !== 'object') return typeof e === 'string' ? e : null;
+  const parts = Object.entries(e as Record<string, unknown>)
+    .filter(([, v]) => v != null && (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean'))
+    .slice(0, 5)
+    .map(([k, v]) => `${k.replace(/([A-Z])/g, ' $1').toLowerCase()} ${typeof v === 'number' ? Math.round(v * 100) / 100 : String(v)}`);
+  return parts.length ? parts.join(' · ') : null;
+};
 
+/** "Why it fired": the GuardrailRuleEngine rule / transition (backend `firedRule`) plus its evidence values. */
+export const WhyFired = ({ type, firedRule, evidence }: { type: AlertType; firedRule?: string; evidence?: unknown }) => {
+  const ev = fmtEvidence(evidence);
+  return (
+    <span className="text-[12px] text-[var(--c3-style-basic-fg-secondary)]">
+      <span className="font-medium">Why it fired: </span>
+      {firedRule || ALERT_RULE[type]}
+      {ev ? <span className="font-mono text-[11.5px]">{` · ${ev}`}</span> : null}
+    </span>
+  );
+};

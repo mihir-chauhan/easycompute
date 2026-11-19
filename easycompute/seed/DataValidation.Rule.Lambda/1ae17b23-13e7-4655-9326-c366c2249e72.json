@@ -1,0 +1,44 @@
+{
+  "id": "1ae17b23-13e7-4655-9326-c366c2249e72",
+  "name": "JobTimeOrder",
+  "description": "Job times must be ordered when set: startTime >= submitTime, endTime >= startTime, endTime >= submitTime. Guards jobs loaded by SlurmSacctFeed.",
+  "targetType": "Job",
+  "kind": "LAMBDA",
+  "language": "Python",
+  "typeIdent": "LMAPR",
+  "userCode": "def summarize(run):\n    a = run.args or {}\n    T = c3.Job\n    bad = '(exists(submitTime) && exists(startTime) && startTime < submitTime) || (exists(startTime) && exists(endTime) && endTime < startTime) || (exists(submitTime) && exists(endTime) && endTime < submitTime)'\n    if a.get('scope'):\n        bad = '(%s) && (%s)' % (bad, a.get('scope'))\n    n = T.fetchCount({'filter': bad})\n    limit = int(a.get('sampleSize') or 100)\n    sample = T.fetch({'filter': bad, 'include': 'id,submitTime,startTime,endTime', 'limit': limit}).objs or []\n    def s(v):\n        if v is None:\n            return 'none'\n        return v.isoformat() if hasattr(v, 'isoformat') else str(v)\n    rows = [{'id': s(getattr(o, 'id', None)), 'submitTime': s(getattr(o, 'submitTime', None)), 'startTime': s(getattr(o, 'startTime', None)), 'endTime': s(getattr(o, 'endTime', None))} for o in sample]\n    S = c3.DataValidation.Status\n    return c3.DataValidation.Rule.SummaryResult(status=S.FAILED_CRITICAL if n else S.PASSED, details=rows)",
+  "args": {
+    "sampleSize": 100
+  },
+  "enableUserNotifications": false,
+  "detailsType": {
+    "named": true,
+    "fieldTypes": [
+      {
+        "name": "id",
+        "index": 0,
+        "valueType": "string"
+      },
+      {
+        "name": "submitTime",
+        "index": 1,
+        "valueType": "string"
+      },
+      {
+        "name": "startTime",
+        "index": 2,
+        "valueType": "string"
+      },
+      {
+        "name": "endTime",
+        "index": 3,
+        "valueType": "string"
+      }
+    ]
+  },
+  "summarize": {
+    "type": "Lambda<function(run: any): any>",
+    "language": "Python",
+    "implementation": "def summarize(run):\n    a = run.args or {}\n    T = c3.Job\n    bad = '(exists(submitTime) && exists(startTime) && startTime < submitTime) || (exists(startTime) && exists(endTime) && endTime < startTime) || (exists(submitTime) && exists(endTime) && endTime < submitTime)'\n    if a.get('scope'):\n        bad = '(%s) && (%s)' % (bad, a.get('scope'))\n    n = T.fetchCount({'filter': bad})\n    limit = int(a.get('sampleSize') or 100)\n    sample = T.fetch({'filter': bad, 'include': 'id,submitTime,startTime,endTime', 'limit': limit}).objs or []\n    def s(v):\n        if v is None:\n            return 'none'\n        return v.isoformat() if hasattr(v, 'isoformat') else str(v)\n    rows = [{'id': s(getattr(o, 'id', None)), 'submitTime': s(getattr(o, 'submitTime', None)), 'startTime': s(getattr(o, 'startTime', None)), 'endTime': s(getattr(o, 'endTime', None))} for o in sample]\n    S = c3.DataValidation.Status\n    return c3.DataValidation.Rule.SummaryResult(status=S.FAILED_CRITICAL if n else S.PASSED, details=rows)"
+  }
+}

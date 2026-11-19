@@ -220,6 +220,16 @@ export interface RunPlan {
   finishBy?: string;
   deadlineSlackHours?: number | null;
   ruleWarnings?: number;
+  /** AnvilRuntimeQ50Q90 P90 (estDurationHours is the P50). */
+  estDurationP90Hours?: number;
+  /** AnvilQueueWaitQ50Q90 P90 (estWaitHours is the P50). */
+  estWaitP90Hours?: number;
+  /** AnvilHostMemoryQ50Q90 sized --mem. */
+  memRequestGb?: number;
+  cpuEvidence?: unknown;
+  /** GPUShapeAdvisor explanation. */
+  shapeReason?: string;
+  provenance?: unknown;
 }
 
 export interface Job {
@@ -285,6 +295,11 @@ export interface Alert {
   message?: string;
   recommendedAction?: ActionType;
   autoActionTaken?: boolean;
+  /** GuardrailRuleEngine: the rule / transition that fired. */
+  firedRule?: string;
+  /** Metric values, enter/exit thresholds, window. */
+  evidence?: unknown;
+  provenance?: unknown;
 }
 
 export interface ActionLog {
@@ -324,6 +339,8 @@ export interface SummaryAllocation {
   burnPerDay?: number;
   projectedRunOut?: string | null;
   runsOutBeforeEnd?: boolean;
+  /** AllocationBurnForecaster scenarios. */
+  scenarios?: Partial<Record<'baseline' | 'low' | 'high', { perDay?: number; runOut?: string | null }>>;
 }
 
 export interface SummaryDeadline {
@@ -386,6 +403,7 @@ export interface LabSummary {
   efficiency?: { avgCpuEfficiency?: number; avgMemEfficiency?: number; avgGpuUtil?: number; timeEfficiency?: number };
   weekly?: { week: string; jobs: number; gpuHours: number; costUsd: number }[];
   recommendations?: Recommendation[];
+  provenance?: unknown;
 }
 
 /** `RunMonitor.tick()` summary. */
@@ -407,6 +425,11 @@ export type EvidenceSpan = string | { quote: string; start?: number; end?: numbe
 
 /** `Advisor.extractConstraints(labId, text)` (advisor agent; see pages/Assistant/types.ts `LabConstraints`). */
 export interface LabConstraints {
+  component?: string;
+  version?: string;
+  status?: 'UNCONFIRMED' | 'CONFIRMED' | string;
+  validation?: { valid?: boolean; errors?: string[]; dropped?: unknown[] };
+  provenance?: unknown;
   source: string;
   cached?: boolean;
   llmError?: string;
@@ -438,4 +461,45 @@ export interface ExtractedConstraint {
   limitValue?: number | null;
   limitText?: string | null;
   sourceText?: string;
+}
+
+/** One live job in `RunMonitor.liveSnapshot`. */
+export interface SnapJob {
+  id: string;
+  jobName?: string;
+  user?: string;
+  labId?: string;
+  clusterId?: string;
+  partitionId?: string;
+  qos?: string;
+  state?: JobState;
+  gpus?: number;
+  gpuTypeId?: string;
+  nodeList?: string;
+  submitTime?: string;
+  startTime?: string;
+  endTime?: string;
+  etaStartAt?: string | null;
+  queuePosition?: number | null;
+  elapsedHours?: number;
+  timelimitHours?: number;
+  remainingHours?: number;
+  costUnits?: number;
+  costUsd?: number;
+  /** elapsedHours gained per real second (demo time scale). */
+  progressPerRealSec?: number;
+  latest?: Omit<JobMetric, 'id'> | null;
+  alerts?: { id: string; alertType: AlertType; severity: AlertSeverity; status: AlertStatus }[];
+}
+
+/** `RunMonitor.liveSnapshot(labId)`: cheap live state, polled every 5-10 s. */
+export interface LiveSnapshot {
+  serverTime?: string;
+  simulator?: { enabled?: boolean; demoTimeScale?: number; queueWaitCompression?: number; lastTickAt?: string; nextTickInSec?: number };
+  counts?: { running?: number; pending?: number; openAlerts?: number; criticalAlerts?: number; awaitingConfirmation?: number };
+  jobs?: SnapJob[];
+  partitions?: { id: string; clusterId?: string; utilizationPct?: number; currentQueueDepth?: number; avgWaitHours?: number }[];
+  clusters?: { id: string; status?: string; healthPct?: number; liveUtilizationPct?: number }[];
+  allocations?: { id: string; clusterId?: string; usedUnits?: number; totalUnits?: number; unitName?: string }[];
+  provenance?: unknown;
 }

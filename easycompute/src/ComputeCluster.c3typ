@@ -69,4 +69,14 @@ entity type ComputeCluster {
    * Partitions (Slurm partition + QOS combinations) of this cluster.
    */
   partitions: [Partition](cluster)
+
+  /**
+   * Live node health (share of nodes up), drifting between 96 and 100.
+   */
+  healthPct: double
+
+  /**
+   * Live GPU (or CPU) utilization across the cluster, updated by the simulator.
+   */
+  liveUtilizationPct: double
 }
