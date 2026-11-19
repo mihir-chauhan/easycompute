@@ -7,7 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Check, ChevronRight, Copy, Pencil, RotateCcw, Rocket } from 'lucide-react';
 
-import { ErrorState, LoadingState, PageFrame, SectionCard, StatusBadge, ToneBadge, errorMessage, provenanceFor, type Tone } from '@/components/app';
+import { ErrorState, LoadingState, PageFrame, SectionCard, StatusBadge, ToneBadge, errorMessage, provenanceFor, useAppShell, type Tone } from '@/components/app';
 import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import {
@@ -23,7 +23,7 @@ import {
   predictDuration,
   type DurationPrediction,
   recommendPlans,
-  submitPlan,
+  submitWithApproval,
   updateRunRequest,
 } from '@/features/lab/api';
 import { CheckRow, HeadNote, KV, muted, ScriptBlock } from '@/features/lab/components';
@@ -199,6 +199,7 @@ const PlanRun: React.FC = () => {
   const { reportError } = useErrorBoundary();
   const { lab, labId, error: labError } = useCurrentLab();
   const lr = useLabRole();
+  const shell = useAppShell();
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<PlanForm>(EMPTY_FORM);
   const [request, setRequest] = useState<RunRequest | null>(null);
@@ -232,6 +233,8 @@ const PlanRun: React.FC = () => {
     guard('check', async () => {
       const rr = await getRunRequest(linkedRequest);
       if (!rr) throw new Error(`Run request ${linkedRequest} was not found.`);
+      // A request from another lab (e.g. an advisor link): switch the demo lab so names, rules and budgets match it.
+      if (rr.lab?.id && rr.lab.id !== labId) shell.setLabId(rr.lab.id);
       const [cs, ps] = await Promise.all([fetchChecks(rr.id), fetchPlans(rr.id)]);
       setRequest(rr);
       setStatus(rr.status ?? 'DRAFT');
@@ -313,7 +316,7 @@ const PlanRun: React.FC = () => {
   const submit = () =>
     guard('submit', async () => {
       if (!request || !selected) return;
-      const job = await submitPlan(request.id, selected);
+      const job = await submitWithApproval(request.id, selected, lr.canApprove);
       navigate(job?.id ? `/runs/${encodeURIComponent(job.id)}` : '/runs');
     });
 

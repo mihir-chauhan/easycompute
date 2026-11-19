@@ -41,7 +41,7 @@ import {
   toneColor,
   useThemeKey,
   utilTone,
-  provenanceOf,
+  provenanceFor,
   type ChartSeries,
   type ChartThreshold,
 } from '@/components/app';
@@ -49,7 +49,7 @@ import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, ModalSubtitle, ModalTitle } from '@/components/ui/modal';
-import { ackAlert, applyJobAction, fetchJobActions, fetchJobAlerts, fetchJobMetrics, getJob, monitorTick } from '@/features/lab/api';
+import { ackAlert, applyJobAction, decideApproval, fetchJobActions, fetchJobAlerts, fetchJobMetrics, getJob, monitorTick, pendingApprovals } from '@/features/lab/api';
 import { ActivityRow, AlertTypeBadge, HeadNote, JobStateBadge, muted, Notice } from '@/features/lab/components';
 import { ACTION_LABEL, ALERT_TYPE_LABEL, formatShortDateTime, formatClock, formatDuration, formatInt, formatPct100, formatRelative, formatUsd, walltimeLeft } from '@/features/lab/format';
 import type { ActionType, Alert, JobMetric } from '@/features/lab/types';
@@ -108,6 +108,8 @@ const RunDetail: React.FC = () => {
 
   const [fetchedMetrics, alerts, log] = detail.data ?? [[], [], []];
   const snap = useLiveSnapshot(job.data?.lab?.id ?? null);
+  const approvals = useLoad(() => (job.data?.lab?.id ? pendingApprovals(job.data.lab.id) : null), [job.data?.lab?.id], LIVE_POLL_MS);
+  const proposals = (approvals.data?.items ?? []).filter((i) => i.jobId === id && i.status === 'PENDING');
   const metrics = useMemo(() => withLatest(fetchedMetrics, snap.byJob[id]?.latest), [fetchedMetrics, snap, id]);
   const sj = snap.byJob[id];
   const merged = job.data ? mergeSnap(job.data, sj) : null;
@@ -169,6 +171,22 @@ const RunDetail: React.FC = () => {
     try {
       await ackAlert(a.id);
       detail.reload();
+    } catch (err) {
+      setActionError(errorMessage(err));
+      reportError(err);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const decide = async (approvalId: string, ok: boolean) => {
+    setBusy(`${approvalId}:${ok ? 'yes' : 'no'}`);
+    setActionError(null);
+    try {
+      await decideApproval(approvalId, ok);
+      setNote(ok ? 'Confirmed: the action is running and is logged on this run.' : 'Declined: nothing changes on the run.');
+      approvals.reload();
+      reloadAll();
     } catch (err) {
       setActionError(errorMessage(err));
       reportError(err);
@@ -278,6 +296,29 @@ const RunDetail: React.FC = () => {
       }
     >
       {actionError && <ErrorState message={actionError} />}
+      {proposals.map((p) => (
+        <div key={p.id} role="alert" className="flex flex-wrap items-center gap-4 rounded-[var(--ec-card-radius,8px)] border border-[var(--c3-style-basic-border-warning)] bg-[var(--c3-style-basic-bg-warning)] px-5 py-4">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">{p.title ?? `${p.actor === 'AUTOPILOT' ? 'Autopilot proposes' : 'Requested'}: ${p.actionType ? ACTION_LABEL[p.actionType] : p.kind}`}</div>
+            {p.detail && <div className={`mt-0.5 text-[13px] ${muted}`}>{p.detail}</div>}
+            <div className="mt-1.5">
+              <ModelProvenance name="GuardrailRuleEngine" extra="Consequential actions wait for the run owner or PI to confirm." />
+            </div>
+          </div>
+          {canAct || lr.canApprove ? (
+            <div className="flex shrink-0 gap-2">
+              <Button variant="outline" appearance="secondary" size="sm" loading={busy === `${p.id}:no`} onClick={() => decide(p.id, false)}>
+                Decline
+              </Button>
+              <Button size="sm" loading={busy === `${p.id}:yes`} onClick={() => decide(p.id, true)}>
+                {p.kind === 'ACTION_CONFIRMATION' ? 'Confirm' : 'Approve'}
+              </Button>
+            </div>
+          ) : (
+            <ToneBadge tone="warn">Waiting for the run owner or PI</ToneBadge>
+          )}
+        </div>
+      ))}
       {j.state === 'PENDING' && (
         <div role="status" className="flex flex-wrap items-center gap-4 rounded-[var(--ec-card-radius,8px)] border border-[var(--c3-style-basic-border-info,var(--c3-style-basic-border-border))] bg-[var(--c3-style-basic-bg-info,var(--c3-style-basic-bg-secondary))] px-5 py-4">
           <span aria-hidden className="ec-pulse inline-block size-2.5 rounded-full bg-[var(--c3-style-basic-fg-info)]" />
@@ -308,7 +349,7 @@ const RunDetail: React.FC = () => {
             <div className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">{`${ALERT_TYPE_LABEL[banner.alertType] ?? banner.alertType} · ${formatClock(banner.detectedAt)}`}</div>
             <div className={`mt-0.5 text-[13px] ${muted}`}>{banner.message}</div>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
-              <ModelProvenance name={alertModel(banner.alertType)} provenance={provenanceOf(banner)} />
+              <ModelProvenance name={alertModel(banner.alertType)} provenance={provenanceFor(banner, alertModel(banner.alertType))} />
               <WhyFired type={banner.alertType} firedRule={banner.firedRule} evidence={banner.evidence} />
             </div>
           </div>
@@ -385,7 +426,7 @@ const RunDetail: React.FC = () => {
                           <WhyFired type={a.alertType} firedRule={a.firedRule} evidence={a.evidence} />
                         </div>
                         <div className="mt-1">
-                          <ModelProvenance name={alertModel(a.alertType)} provenance={provenanceOf(a)} />
+                          <ModelProvenance name={alertModel(a.alertType)} provenance={provenanceFor(a, alertModel(a.alertType))} />
                         </div>
                         <div className={`mt-0.5 text-[12px] ${muted}`}>
                           {a.status === 'OPEN' || a.status === 'ACKED'
@@ -429,7 +470,7 @@ const RunDetail: React.FC = () => {
                       </span>
                       <span className="text-[13px] text-[var(--c3-style-basic-fg-primary)]">{a.message}</span>
                       <span className="flex flex-wrap items-center gap-2">
-                        <ModelProvenance name={alertModel(a.alertType)} provenance={provenanceOf(a)} />
+                        <ModelProvenance name={alertModel(a.alertType)} provenance={provenanceFor(a, alertModel(a.alertType))} />
                         <WhyFired type={a.alertType} firedRule={a.firedRule} evidence={a.evidence} />
                       </span>
                     </div>

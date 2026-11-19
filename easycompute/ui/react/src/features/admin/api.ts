@@ -312,36 +312,45 @@ export const anvilTrainingRows = async (): Promise<number | null> => {
  * Insights.universityOverview / labSummary (which already reflect the simulator's writes).
  */
 
-export interface LiveClusterRow {
+/** RunMonitor.liveSnapshot (API.md section 8). */
+export interface LiveJob {
   id: string;
-  gpuUtilizationPct?: number;
-  busyGpus?: number;
-  idleGpus?: number;
-  totalGpus?: number;
-  queueDepth?: number;
-  avgWaitHours?: number;
-  costUsd?: number;
-  costUsdPerHour?: number;
-  status?: string;
-  liveJobs?: number;
-}
-
-export interface LivePartitionRow {
-  id: string;
+  jobName?: string;
+  user?: string;
+  labId?: string;
   clusterId?: string;
-  utilizationPct?: number;
-  currentQueueDepth?: number;
-  queueDepth?: number;
-  avgWaitHours?: number;
+  partitionId?: string;
+  qos?: string;
+  state: string;
+  workloadType?: string;
+  gpus?: number;
+  gpuTypeId?: string;
+  nodeList?: string | null;
+  submitTime?: string;
+  startTime?: string | null;
+  endTime?: string | null;
+  etaStartAt?: string | null;
+  queuePosition?: number | null;
+  elapsedHours?: number;
+  timelimitHours?: number;
+  remainingHours?: number;
+  costUnits?: number;
+  costUsd?: number;
+  /** elapsedHours gained per real second (demoTimeScale). */
+  progressPerRealSec?: number;
+  latest?: { ts?: string; gpuUtilPct?: number; gpuMemPct?: number; cpuUtilPct?: number; memPct?: number; ioReadMBps?: number; ioWriteMBps?: number; powerW?: number; checkpointAgeMin?: number; trainingLoss?: number } | null;
+  alerts?: Array<{ id: string; alertType: string; severity: string; status: string }>;
 }
 
 export interface LiveSnapshot {
-  asOf?: string;
-  clusters?: LiveClusterRow[];
-  partitions?: LivePartitionRow[];
-  kpis?: Record<string, number>;
-  labs?: Array<{ labId: string; liveJobs?: number; runningJobs?: number; pendingJobs?: number; openAlerts?: number; remainingUsd?: number }>;
-  [key: string]: unknown;
+  serverTime?: string;
+  simulator?: { enabled?: boolean; demoTimeScale?: number; queueWaitCompression?: number; lastTickAt?: string | null; nextTickInSec?: number };
+  counts?: { running?: number; pending?: number; openAlerts?: number; criticalAlerts?: number; awaitingConfirmation?: number };
+  jobs?: LiveJob[];
+  partitions?: Array<{ id: string; clusterId?: string; utilizationPct?: number; currentQueueDepth?: number; avgWaitHours?: number }>;
+  clusters?: Array<{ id: string; status?: string; healthPct?: number; liveUtilizationPct?: number }>;
+  allocations?: Array<{ id: string; clusterId?: string; usedUnits?: number; totalUnits?: number; unitName?: string }>;
+  provenance?: unknown;
 }
 
 let liveSnapshotDeployed: boolean | null = null;
@@ -364,15 +373,34 @@ export async function getLiveSnapshot(labId?: string | null): Promise<LiveSnapsh
   }
 }
 
-/** Overlay live cluster numbers from the snapshot onto the overview's cluster rows. */
-export function mergeLiveClusters<T extends { id: string }>(rows: T[], snap: LiveSnapshot | null): T[] {
+/** Overlay live cluster utilization / status from the snapshot onto overview cluster rows (busy/idle GPUs recomputed). */
+export function mergeLiveClusters<T extends { id: string; gpuUtilizationPct?: number; busyGpus?: number; idleGpus?: number; totalGpus?: number; status?: string; liveJobs?: number; queueDepth?: number; avgWaitHours?: number }>(
+  rows: T[],
+  snap: LiveSnapshot | null,
+): T[] {
   if (!snap?.clusters?.length) return rows;
   const by = new Map(snap.clusters.map((c) => [c.id, c]));
+  const liveByCluster = new Map<string, number>();
+  (snap.jobs ?? []).forEach((j) => j.clusterId && (j.state === 'RUNNING' || j.state === 'PENDING') && liveByCluster.set(j.clusterId, (liveByCluster.get(j.clusterId) ?? 0) + 1));
   return rows.map((r) => {
     const l = by.get(r.id);
     if (!l) return r;
-    const patch = Object.fromEntries(Object.entries(l).filter(([k, v]) => k !== 'id' && v != null && k in r));
-    return { ...r, ...patch };
+    const parts = (snap.partitions ?? []).filter((p) => p.clusterId === r.id);
+    const queue = parts.length ? parts.reduce((a, p) => a + (p.currentQueueDepth ?? 0), 0) : r.queueDepth;
+    const wait = parts.length ? parts.reduce((a, p) => a + (p.avgWaitHours ?? 0), 0) / parts.length : r.avgWaitHours;
+    const util = l.liveUtilizationPct ?? r.gpuUtilizationPct;
+    const total = r.totalGpus ?? 0;
+    const busy = util != null && total ? Math.round((total * util) / 100) : r.busyGpus;
+    return {
+      ...r,
+      gpuUtilizationPct: util,
+      busyGpus: busy,
+      idleGpus: busy != null && total ? total - busy : r.idleGpus,
+      status: l.status ?? r.status,
+      liveJobs: liveByCluster.get(r.id) ?? r.liveJobs,
+      ...(r.queueDepth !== undefined ? { queueDepth: queue } : {}),
+      ...(r.avgWaitHours !== undefined ? { avgWaitHours: wait } : {}),
+    };
   });
 }
 
@@ -386,7 +414,7 @@ export function mergeLivePartitions(rows: Partition[], snap: LiveSnapshot | null
     return {
       ...r,
       utilizationPct: l.utilizationPct ?? r.utilizationPct,
-      currentQueueDepth: l.currentQueueDepth ?? l.queueDepth ?? r.currentQueueDepth,
+      currentQueueDepth: l.currentQueueDepth ?? r.currentQueueDepth,
       avgWaitHours: l.avgWaitHours ?? r.avgWaitHours,
     };
   });

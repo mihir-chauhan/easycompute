@@ -7,6 +7,8 @@ var log = Logger.for('UserAdmin');
 
 var DAY_MS = 24 * 3600 * 1000;
 var ROLES = ['UNIVERSITY_ADMIN', 'PI', 'STUDENT', 'STAFF'];
+/** Demo default (owner): Aniket Bera's IDEAS Lab; without a demo identity the app acts as that lab's PI. */
+var DEFAULT_LAB_ID = 'lab-cv';
 /** Research Computing staff created with the user directory (fictional people). */
 var ADMINS = [
   { id: 'admin-rcac-1', name: 'Dana Whitfield', username: 'dwhitfield', email: 'dwhitfield@example.edu' },
@@ -148,15 +150,22 @@ function actor() {
     u = list(AppUser.fetch({ filter: Filter.eq('username', pid).or().eq('email', pid), limit: 1 }).objs)[0] || null;
   }
   var names = labNames();
+  var defaulted = false;
   if (u == null) {
-    return { user: { id: 'app-owner', name: 'App owner', email: null, username: pid, role: 'UNIVERSITY_ADMIN', status: 'ACTIVE', labId: null, labName: null }, isDemo: false, platformUser: pid };
+    // demo default: the PI of the default lab (else any active member of it)
+    u = list(AppUser.fetch({ filter: Filter.eq('lab.id', DEFAULT_LAB_ID).and().eq('role', 'PI').and().eq('status', 'ACTIVE'), limit: 1 }).objs)[0] ||
+      list(AppUser.fetch({ filter: Filter.eq('lab.id', DEFAULT_LAB_ID).and().eq('status', 'ACTIVE'), limit: 1 }).objs)[0] || null;
+    defaulted = u != null;
   }
-  return { user: row(u, names, null), isDemo: isDemo, platformUser: pid };
+  if (u == null) {
+    return { user: { id: 'app-owner', name: 'App owner', email: null, username: pid, role: 'UNIVERSITY_ADMIN', status: 'ACTIVE', labId: null, labName: null }, isDemo: false, isDefault: true, defaultLabId: DEFAULT_LAB_ID, platformUser: pid };
+  }
+  return { user: row(u, names, null), isDemo: isDemo, isDefault: defaulted, defaultLabId: DEFAULT_LAB_ID, platformUser: pid };
 }
 
 function requireManager(me, labId) {
   var r = me.user.role;
-  if (r == 'UNIVERSITY_ADMIN') return;
+  if (r == 'UNIVERSITY_ADMIN' || me.isDefault) return;
   if (r == 'PI' && labId != null && labId == me.user.labId) return;
   throw new Error(me.user.name + ' (' + r + ') may not manage ' + (labId ? 'lab ' + labId : 'users outside a lab') + '; only Research Computing admins and the lab PI can.');
 }
@@ -172,7 +181,8 @@ function getUser(id) {
 
 function whoAmI() {
   var me = actor();
-  me.can = capabilities(me.user.role);
+  // the default context (no demo identity chosen) shows the default lab's PI but is not lab-restricted
+  me.can = capabilities(me.isDefault ? 'UNIVERSITY_ADMIN' : me.user.role);
   return me;
 }
 
@@ -192,7 +202,8 @@ function setDemoUser(appUserId) {
 function listUsers(labId) {
   var me = actor();
   var scope = labId || null;
-  if (me.user.role != 'UNIVERSITY_ADMIN') {
+  if (me.isDefault) scope = scope || DEFAULT_LAB_ID;
+  else if (me.user.role != 'UNIVERSITY_ADMIN') {
     if (scope != null && scope != me.user.labId) throw new Error(me.user.name + ' can only list users of their own lab');
     scope = me.user.labId;
   }
@@ -231,7 +242,7 @@ function inviteUser(email, name, role, labId) {
   if (ROLES.indexOf(r) < 0) throw new Error('Unknown role ' + role + '; use one of ' + ROLES.join(', '));
   var lab = labId || (r == 'UNIVERSITY_ADMIN' ? null : me.user.labId);
   if (r == 'UNIVERSITY_ADMIN') {
-    if (me.user.role != 'UNIVERSITY_ADMIN') throw new Error('Only Research Computing admins can invite admins');
+    if (me.user.role != 'UNIVERSITY_ADMIN' && !me.isDefault) throw new Error('Only Research Computing admins can invite admins');
     lab = null;
   } else {
     if (lab == null) throw new Error('labId is required for role ' + r);
@@ -254,9 +265,9 @@ function setRole(userId, role) {
   if (ROLES.indexOf(r) < 0) throw new Error('Unknown role ' + role + '; use one of ' + ROLES.join(', '));
   var u = getUser(userId);
   var labId = u.lab ? String(u.lab.id) : null;
-  if (r == 'UNIVERSITY_ADMIN' && me.user.role != 'UNIVERSITY_ADMIN') throw new Error('Only Research Computing admins can grant UNIVERSITY_ADMIN');
+  if (r == 'UNIVERSITY_ADMIN' && me.user.role != 'UNIVERSITY_ADMIN' && !me.isDefault) throw new Error('Only Research Computing admins can grant UNIVERSITY_ADMIN');
   requireManager(me, labId);
-  if (u.id == me.user.id && me.user.role == 'PI' && r != 'PI') throw new Error('A PI cannot demote themselves; ask Research Computing');
+  if (u.id == me.user.id && me.user.role == 'PI' && r != 'PI' && !me.isDefault) throw new Error('A PI cannot demote themselves; ask Research Computing');
   AppUser.make({ id: u.id, role: r }).merge();
   return row(AppUser.make({ id: u.id }).get('this'), labNames(), null);
 }
@@ -320,7 +331,8 @@ function runItem(r, names) {
 function pendingApprovals(labId) {
   var me = actor();
   var scope = labId || null;
-  if (me.user.role != 'UNIVERSITY_ADMIN') {
+  if (me.isDefault) scope = scope || DEFAULT_LAB_ID;
+  else if (me.user.role != 'UNIVERSITY_ADMIN') {
     if (scope != null && scope != me.user.labId) throw new Error(me.user.name + ' can only see approvals of their own lab');
     scope = me.user.labId;
   }
@@ -364,7 +376,7 @@ function decide(id, note, approve) {
     if (ownJob && String(e.actionType) != 'EXTEND_WALLTIME') {
       // the job owner confirms (or declines) an action proposed for their own job
     } else {
-      if (!capabilities(me.user.role).approve) throw new Error(me.user.name + ' (' + me.user.role + ') cannot approve or reject; ask the lab PI.');
+      if (!me.isDefault && !capabilities(me.user.role).approve) throw new Error(me.user.name + ' (' + me.user.role + ') cannot approve or reject; ask the lab PI.');
       requireManager(me, e.lab ? String(e.lab.id) : null);
     }
     if (approve && e.job && String(e.actionType) != 'EXTEND_WALLTIME') {
@@ -380,7 +392,7 @@ function decide(id, note, approve) {
     return walltimeItem(ActionLogEntry.make({ id: e.id }).get('this, job.user, job.jobName'), names);
   }
   if (kind == 'RR') {
-    if (!capabilities(me.user.role).approve) throw new Error(me.user.name + ' (' + me.user.role + ') cannot approve or reject; ask the lab PI.');
+    if (!me.isDefault && !capabilities(me.user.role).approve) throw new Error(me.user.name + ' (' + me.user.role + ') cannot approve or reject; ask the lab PI.');
     var r = RunRequest.make({ id: key }).get('this, submittedBy.name');
     if (r == null) throw new Error('Approval ' + id + ' not found');
     if (r.approvalStatus != 'PENDING') throw new Error('Approval ' + id + ' is not pending');

@@ -5,12 +5,12 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRight, Check, Plus, Rocket } from 'lucide-react';
+import { ArrowRight, Check, File, FileCode, FileCog, FileJson, FileSpreadsheet, FileText, Plus, Rocket, X } from 'lucide-react';
 
 import { BrandMark, errorMessage, ROLE_LABEL, useAppShell, type EcRole } from '@/components/app';
 import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { checkRules, createRunRequest, extractConstraints, fetchJobMetrics, fetchProjects, getJob, getLabSummary, recommendPlans, submitPlan } from '@/features/lab/api';
+import { checkRules, createRunRequest, extractConstraints, fetchJobMetrics, fetchProjects, getJob, getLabSummary, recommendPlans, submitWithApproval } from '@/features/lab/api';
 import { LiveBadge, liveJob, mergeSnap, SimNote, useLiveSnapshot, useNow } from '@/features/lab/live';
 import { formatDuration, formatInt, formatUsd, WORKLOAD_LABEL } from '@/features/lab/format';
 import { ModelComputing, ModelProvenance, type ModelName } from '@/features/lab/models';
@@ -31,7 +31,19 @@ const BTN_PRI = `${BTN} border-[var(--ec-accent-hi,var(--c3-style-basic-bg-accen
 const BTN_SEC = `${BTN} border-[var(--c3-style-basic-border-border)] bg-transparent text-[var(--c3-style-basic-fg-primary)] hover:bg-[var(--c3-style-basic-bg-secondary)]`;
 const DOT = 'inline-block size-[7px] shrink-0 rounded-full bg-[var(--ec-accent-hi,var(--c3-style-basic-fg-success))]';
 
-const EXAMPLE = 'Fine-tune Llama-3-8B with LoRA on our 40 GB dataset, done before the next deadline. Use free compute if there is any.';
+const EXAMPLE =
+  'Fine-tune Llama-3-8B with LoRA on our 40 MB dataset, done before the RSS deadline of Jan 2nd. Use free compute if there is any, and then the cost-based compute';
+
+/** Icon for an attached file chip, by extension (demo only: files are never uploaded). */
+const fileIcon = (name: string) => {
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  if (ext === 'py' || ext === 'ipynb' || ext === 'sh') return FileCode;
+  if (ext === 'yaml' || ext === 'yml' || ext === 'toml') return FileCog;
+  if (ext === 'json') return FileJson;
+  if (ext === 'csv' || ext === 'tsv' || ext === 'xlsx') return FileSpreadsheet;
+  if (ext === 'pdf' || ext === 'md' || ext === 'txt') return FileText;
+  return File;
+};
 
 /** Days until an ISO date, for the "Done by" phrase. */
 const daysTo = (iso?: string) => (iso ? Math.round((new Date(iso).getTime() - Date.now()) / 86400000) : null);
@@ -44,7 +56,7 @@ const Home: React.FC = () => {
   const ribbon = useRef<RibbonHandle>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const [text, setText] = useState('');
+  const [text, setText] = useState(EXAMPLE);
   const [files, setFiles] = useState<string[]>([]);
   const [drag, setDrag] = useState(false);
   const [stage, setStage] = useState<Stage | null>(null);
@@ -91,8 +103,9 @@ const Home: React.FC = () => {
     setPlans([]);
     setChecks([]);
     try {
-      const full = files.length ? `${description}\n\nAttached: ${files.join(', ')}` : description;
-      setStage({ model: 'LabContextExtractor', text: files.length ? `is reading your ${files.length} file${files.length > 1 ? 's' : ''} and lab context…` : 'is reading your request and lab context…' });
+      // Attached files are demo-only chips: they are never uploaded or sent to the backend.
+      const full = description;
+      setStage({ model: 'LabContextExtractor', text: 'is reading your request and lab context…' });
       const ctx = await Promise.race<LabConstraints | null>([
         extractConstraints(labId, full).catch(() => null),
         new Promise<null>((r) => window.setTimeout(() => r(null), 12000)),
@@ -101,7 +114,8 @@ const Home: React.FC = () => {
       const now = Date.now();
       const textDeadline = ctx?.deadlines?.map((d) => d.date).filter((d) => d && new Date(d).getTime() > now).sort()[0];
       const project = (projects.data ?? []).find((p) => p.id === parsed.projectId) ?? (projects.data ?? []).filter((p) => p.deadline && new Date(p.deadline).getTime() > now).sort((a, b) => (a.deadline ?? '').localeCompare(b.deadline ?? ''))[0];
-      const deadline = textDeadline ?? (parsed.deadline ? new Date(parsed.deadline).toISOString() : project?.deadline);
+      // An explicit date in the request wins, then one the extractor found, then the matched project's deadline.
+      const deadline = (parsed.deadline ? new Date(parsed.deadline).toISOString() : null) ?? textDeadline ?? project?.deadline;
       const num = (v?: string) => (v && !Number.isNaN(Number(v)) ? Number(v) : undefined);
       const rr = await createRunRequest({
         lab: { id: labId },
@@ -140,7 +154,7 @@ const Home: React.FC = () => {
     setError(null);
     ribbon.current?.surge(2600);
     try {
-      setLaunched(await submitPlan(request.id, plan.id));
+      setLaunched(await submitWithApproval(request.id, plan.id, shell.can('approve_requests')));
     } catch (err) {
       setError(errorMessage(err));
       reportError(err);
@@ -180,6 +194,8 @@ const Home: React.FC = () => {
   const settings = plan ? settingsOf(plan, allocations) : [];
   const fixes = plan ? fixesOf(plan, checks) : [];
   const days = daysTo(plan?.finishBy);
+  const named = /\b([A-Z][\w-]*(?:\s+[A-Z0-9][\w-]*)?)\s+deadline\b/.exec(request?.description ?? '');
+  const deadlineName = named ? `the ${named[1]} deadline` : 'your deadline';
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-[var(--c3-style-basic-bg-page)] text-[var(--c3-style-basic-fg-primary)]">
@@ -276,18 +292,26 @@ const Home: React.FC = () => {
                 >
                   <Plus className="size-4" />
                 </button>
-                {files.map((f, i) => (
-                  <button
-                    key={`${f}-${i}`}
-                    type="button"
-                    title="Remove"
-                    onClick={() => setFiles((xs) => xs.filter((_, k) => k !== i))}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,white_7%,transparent)] px-2.5 text-xs leading-[26px]"
-                  >
-                    {f}
-                  </button>
-                ))}
-                {!text && !files.length && (
+                {files.map((f, i) => {
+                  const Icon = fileIcon(f);
+                  return (
+                    <span key={`${f}-${i}`} className="inline-flex max-w-56 items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,white_7%,transparent)] pr-1 pl-2.5 text-xs leading-[26px]">
+                      <Icon className="size-3.5 shrink-0 text-[var(--c3-style-basic-fg-secondary)]" aria-hidden />
+                      <span className="truncate" title={f}>
+                        {f}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${f}`}
+                        onClick={() => setFiles((xs) => xs.filter((_, k) => k !== i))}
+                        className="grid size-5 place-items-center rounded-full text-[var(--c3-style-basic-fg-secondary)] hover:bg-[color-mix(in_srgb,white_10%,transparent)] hover:text-[var(--c3-style-basic-fg-primary)]"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  );
+                })}
+                {text !== EXAMPLE && (
                   <button type="button" className="text-xs text-[var(--c3-style-basic-fg-secondary)] underline underline-offset-2" onClick={() => setText(EXAMPLE)}>
                     Try an example
                   </button>
@@ -321,7 +345,7 @@ const Home: React.FC = () => {
                   <span className="text-[var(--c3-style-basic-fg-secondary)]">
                     <b className="font-medium whitespace-nowrap">{`Done ${doneBy(plan)}`}</b>
                     {days != null && days >= 0 ? ` (${days === 0 ? 'today' : `${days} day${days === 1 ? '' : 's'}`})` : ''}
-                    {plan.deadlineSlackHours != null ? (plan.deadlineSlackHours >= 0 ? `, ${formatDuration(plan.deadlineSlackHours)} before your deadline.` : ', after your deadline.') : '.'}
+                    {plan.deadlineSlackHours != null ? (plan.deadlineSlackHours >= 0 ? `, ${formatDuration(plan.deadlineSlackHours)} before ${deadlineName}.` : `, after ${deadlineName}.`) : '.'}
                   </span>{' '}
                   {costPhrase(plan, allocations)}
                 </p>

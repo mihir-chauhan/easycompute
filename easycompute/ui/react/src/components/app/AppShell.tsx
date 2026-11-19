@@ -69,9 +69,12 @@ export interface ShellUser {
 }
 
 const AppShellContext = createContext<AppShellContextValue | null>(null);
-const LAB_KEY = 'easycompute.labId';
+/** Demo default lab (owner: Aniket Bera's IDEAS Lab). Used on first load, after a reset, and when returning to the lab view. */
+export const DEFAULT_LAB_ID = 'lab-cv';
+// v2: bumped once so browsers that remembered another lab open on DEFAULT_LAB_ID.
+const LAB_KEY = 'easycompute.labId.v2';
 const BANNER_KEY = 'easycompute.banner.dismissed';
-const ROLE_KEY = 'easycompute.role';
+const ROLE_KEY = 'easycompute.role.v2';
 const RCAC_USER: ShellUser = { id: 'rcac-admin', name: 'RCAC staff (demo)', username: 'rcac-admin', memberRole: 'RCAC' };
 
 const readStored = (key: string): string | null => {
@@ -90,7 +93,7 @@ const writeStored = (key: string, value: string) => {
 };
 
 /** Holds the demo "logged-in" lab (persisted per browser), the cluster scope, and derives the view from the route. */
-export function AppShellProvider({ labs, defaultLabId, children }: { labs: ShellLab[]; defaultLabId?: string; children: ReactNode }) {
+export function AppShellProvider({ labs, defaultLabId = DEFAULT_LAB_ID, children }: { labs: ShellLab[]; defaultLabId?: string; children: ReactNode }) {
   const location = useLocation();
   const [labId, setLabIdState] = useState<string | null>(() => readStored(LAB_KEY) ?? defaultLabId ?? null);
   const [clusterId, setClusterId] = useState<string | null>(null);
@@ -98,6 +101,15 @@ export function AppShellProvider({ labs, defaultLabId, children }: { labs: Shell
     const r = readStored(ROLE_KEY);
     return r === 'PI' || r === 'MEMBER' || r === 'UNIVERSITY_ADMIN' ? r : 'UNIVERSITY_ADMIN';
   });
+  // One-time reset: forget pre-v2 selections so the demo opens on the default lab.
+  useEffect(() => {
+    try {
+      window.localStorage.removeItem('easycompute.labId');
+      window.localStorage.removeItem('easycompute.role');
+    } catch {
+      // storage unavailable
+    }
+  }, []);
   const [members, setMembers] = useState<Array<{ id: string; name: string; username: string; role: string }>>([]);
   const setRole = useCallback((r: EcRole) => {
     setRoleState(r);
@@ -118,7 +130,7 @@ export function AppShellProvider({ labs, defaultLabId, children }: { labs: Shell
 
   useEffect(() => {
     if (labs.length === 0) return;
-    if (!labId || !labs.some((l) => l.id === labId)) setLabIdState(defaultLabId && labs.some((l) => l.id === defaultLabId) ? defaultLabId : labs[0].id);
+    if (!labId || !labs.some((l) => l.id === labId)) setLabIdState(labs.some((l) => l.id === defaultLabId) ? defaultLabId : labs[0].id);
   }, [labs, labId, defaultLabId]);
 
   const setLabId = useCallback((id: string) => {
@@ -247,7 +259,7 @@ function WorkspaceSwitcher() {
           ) : (
             <Avatar text={initials(lab?.name)} />
           )}
-          <span className="min-w-0 truncate text-[15px] font-medium text-[var(--ec-fg-hi)] md:text-base">{name}</span>
+          <span className="max-w-[9rem] min-w-0 truncate text-[15px] font-medium text-[var(--ec-fg-hi)] sm:max-w-[16rem] md:text-base xl:max-w-[24rem]" title={name}>{name}</span>
           <span
             className={cn(
               'hidden rounded-full px-2 text-xs leading-[18px] whitespace-nowrap sm:inline',
@@ -280,7 +292,10 @@ function WorkspaceSwitcher() {
         label={view === 'admin' ? 'Back to lab view' : 'Research Computing view'}
         subLabel={view === 'admin' ? undefined : 'University-wide clusters, cost, fairness'}
         leftIcon={<ArrowLeftRight />}
-        onSelect={() => navigate(view === 'admin' ? '/' : '/admin')}
+        onSelect={() => {
+          if (view === 'admin') setLabId(DEFAULT_LAB_ID);
+          navigate(view === 'admin' ? '/' : '/admin');
+        }}
       />
       ) : null}
     </DropdownMenu>
@@ -386,6 +401,7 @@ const ROLE_AVATAR: Record<EcRole, string> = { UNIVERSITY_ADMIN: 'R', PI: 'P', ME
 /** Avatar menu with the demo role switcher (University Admin / PI / Student). */
 function RoleMenu({ role, setRole, userName }: { role: EcRole; setRole: (r: EcRole) => void; userName?: string }) {
   const navigate = useNavigate();
+  const { setLabId } = useAppShell();
   return (
     <DropdownMenu align="end">
       <DropdownMenuTrigger>
@@ -404,6 +420,8 @@ function RoleMenu({ role, setRole, userName }: { role: EcRole; setRole: (r: EcRo
           trailingIcon={r === role ? <Check /> : undefined}
           onSelect={() => {
             setRole(r);
+            // PI / Student demo identities come from the default lab (its PI or a student).
+            if (r !== 'UNIVERSITY_ADMIN') setLabId(DEFAULT_LAB_ID);
             if (r !== 'UNIVERSITY_ADMIN' && window.location.hash.startsWith('#/admin')) navigate('/');
           }}
         />
@@ -490,8 +508,14 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
     async () => {
       if (!labId) return null;
       const [s, snap] = await Promise.all([getLabSummary(labId), getLiveSnapshot(labId).catch(() => null)]);
-      const live = snap?.labs?.find((l) => l.labId === labId);
-      return live ? { ...s, kpis: { ...s.kpis, liveJobs: live.liveJobs ?? s.kpis.liveJobs, openAlerts: live.openAlerts ?? s.kpis.openAlerts } } : s;
+      if (!snap) return s;
+      const c = snap.counts ?? {};
+      const usedBy = new Map((snap.allocations ?? []).map((a) => [a.id, a.usedUnits]));
+      return {
+        ...s,
+        kpis: { ...s.kpis, liveJobs: c.running != null && c.pending != null ? c.running + c.pending : s.kpis.liveJobs, openAlerts: c.openAlerts ?? s.kpis.openAlerts },
+        allocations: (s.allocations ?? []).map((a) => (usedBy.get(a.id) != null ? { ...a, usedUnits: usedBy.get(a.id) as number } : a)),
+      };
     },
     [labId],
     { intervalMs: 10000 },
@@ -570,13 +594,16 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
   const liveRuns = summary?.kpis.liveJobs;
   const badgeOf = (item: ShellNavItem) => (item.badgeTone === 'live' && liveRuns != null ? (liveRuns > 0 ? `${liveRuns} live` : null) : item.badge);
 
-  const navLink = (item: ShellNavItem, target: string = item.path) => {
+  const navLink = (item: ShellNavItem, target: string = item.path, before?: () => void) => {
     const on = item.path === active;
     return (
       <button
         key={item.path}
         type="button"
-        onClick={() => navigate(target)}
+        onClick={() => {
+          before?.();
+          navigate(target);
+        }}
         aria-current={on ? 'page' : undefined}
         className={cn(
           'flex h-9 shrink-0 items-center gap-3 rounded-md px-2 text-left text-sm font-medium whitespace-nowrap',
@@ -688,6 +715,7 @@ export default function AppShell({ labNav, adminNav, banner = DEFAULT_BANNER, ch
               {navLink(
                 { path: '__switch', label: view === 'admin' ? 'Back to lab view' : 'Research Computing', icon: view === 'admin' ? ArrowLeftRight : Building2 },
                 view === 'admin' ? '/' : '/admin',
+                view === 'admin' ? () => setLabId(DEFAULT_LAB_ID) : undefined,
               )}
             </>
           ) : null}

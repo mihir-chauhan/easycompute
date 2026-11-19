@@ -174,6 +174,9 @@ export interface RunRequest {
   deadline?: string;
   status?: RunRequestStatus;
   createdAt?: string;
+  /** PI approval gate (policy e.g. > 500 GPU-hours): NOT_REQUIRED | PENDING | APPROVED | REJECTED. */
+  approvalStatus?: string;
+  approvalReason?: string;
 }
 
 export interface RuleCheck {

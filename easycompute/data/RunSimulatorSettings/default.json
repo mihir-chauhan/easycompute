@@ -1,0 +1,11 @@
+{
+  "id": "default",
+  "name": "Live cluster simulator",
+  "enabled": true,
+  "demoTimeScale": 10,
+  "queueWaitCompression": 60,
+  "sampleIntervalSec": 20,
+  "maxCatchUpMin": 10,
+  "maxSamplesPerJob": 360,
+  "respawnScriptedJobs": true
+}

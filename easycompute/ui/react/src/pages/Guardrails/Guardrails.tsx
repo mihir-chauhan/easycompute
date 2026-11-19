@@ -10,7 +10,8 @@ import { EmptyState, ErrorState, KpiRow, KpiRowSkeleton, KpiTile, PageFrame, Sec
 import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { applyJobAction, fetchLabActions, getAutopilot, saveAutopilot } from '@/features/lab/api';
+import { decideApproval, fetchLabActions, getAutopilot, pendingApprovals, saveAutopilot, type ApprovalItem } from '@/features/lab/api';
+import { LIVE_POLL_MS } from '@/features/lab/live';
 import { Button } from '@/components/ui/button';
 import { ActivityRow, HeadNote, Mono, muted } from '@/features/lab/components';
 import { ACTION_LABEL, formatInt, formatShortDateTime } from '@/features/lab/format';
@@ -122,18 +123,17 @@ const Guardrails: React.FC = () => {
   const auto = log.filter((a) => a.actor === 'AUTOPILOT');
   const checkpoints = log.filter((a) => a.actionType === 'CHECKPOINT_NOW' && a.outcome === 'DONE').length;
   const released = log.filter((a) => (a.actionType === 'CANCEL' || a.actionType === 'SCALE_DOWN') && a.outcome === 'DONE').length;
-  /** Pending requests not yet followed by a DONE action of the same type on the same job. */
-  const pending = log.filter(
-    (a) => a.outcome === 'PENDING_APPROVAL' && !log.some((b) => b.job?.id === a.job?.id && b.actionType === a.actionType && b.outcome === 'DONE' && b.actedAt > a.actedAt),
-  );
+  // Approval queue (UserAdmin.pendingApprovals): autopilot action confirmations, walltime extensions, PI run approvals.
+  const approvals = useLoad(() => (labId ? pendingApprovals(labId) : null), [labId], LIVE_POLL_MS);
+  const pending = (approvals.data?.items ?? []).filter((i) => i.status === 'PENDING');
   const pendingApproval = pending.length;
   const [approving, setApproving] = useState<string | null>(null);
-  const approve = async (e: (typeof log)[number]) => {
-    if (!e.job) return;
-    setApproving(e.id);
+  const decide = async (item: ApprovalItem, ok: boolean) => {
+    setApproving(`${item.id}:${ok}`);
     setErr(null);
     try {
-      await applyJobAction(e.job.id, e.actionType, lr.actor === 'ADMIN' ? 'ADMIN' : 'USER');
+      await decideApproval(item.id, ok);
+      approvals.reload();
       acts.reload();
     } catch (x) {
       setErr(errorMessage(x));
@@ -185,29 +185,43 @@ const Guardrails: React.FC = () => {
           <KpiTile label="Actions taken" value={formatInt(log.length)} caption={`${formatInt(auto.length)} automatic · ${formatInt(log.length - auto.length)} by people`} />
           <KpiTile label="Checkpoints forced" value={formatInt(checkpoints)} caption="Before walltime, preemption or OOM" tone="good" />
           <KpiTile label="GPU jobs released or scaled" value={formatInt(released)} caption="Idle or oversized GPUs given back" />
-          <KpiTile label="Waiting for approval" value={formatInt(pendingApproval)} tone={pendingApproval ? 'warn' : undefined} caption="Need a PI (or RCAC for walltime)" />
+          <KpiTile label="Waiting for approval" value={formatInt(pendingApproval)} tone={pendingApproval ? 'warn' : undefined} caption="Confirmations, extensions, large runs" />
         </KpiRow>
       )}
 
       {pending.length > 0 && (
-        <SectionCard title="Waiting for approval" actions={<HeadNote>{lr.canApprove ? 'You can approve these' : 'Your PI approves these'}</HeadNote>}>
+        <SectionCard title="Waiting for approval" actions={<HeadNote>{lr.canApprove ? 'You decide these' : 'Your PI decides; you can confirm actions on your own runs'}</HeadNote>}>
           <ul className="flex flex-col">
-            {pending.map((e) => (
-              <li key={e.id} className="flex flex-wrap items-center gap-3 border-b border-[var(--c3-style-basic-border-border)] py-3 first:pt-0 last:border-b-0 last:pb-0">
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">{`${ACTION_LABEL[e.actionType] ?? e.actionType} · ${e.job?.jobName ?? e.job?.id ?? ''}`}</div>
-                  {e.detail && <div className={cn('text-[13px]', muted)}>{e.detail}</div>}
-                </div>
-                <span className={cn('font-mono text-[11.5px]', muted)}>{formatShortDateTime(e.actedAt)}</span>
-                {lr.canApprove ? (
-                  <Button size="sm" loading={approving === e.id} onClick={() => approve(e)}>
-                    Approve
-                  </Button>
-                ) : (
-                  <ToneBadge tone="warn">Needs PI</ToneBadge>
-                )}
-              </li>
-            ))}
+            {pending.map((e) => {
+              const mayDecide = lr.canApprove || e.kind === 'ACTION_CONFIRMATION';
+              return (
+                <li key={e.id} className="flex flex-wrap items-center gap-3 border-b border-[var(--c3-style-basic-border-border)] py-3 first:pt-0 last:border-b-0 last:pb-0">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">
+                      {e.title ?? (e.actionType ? ACTION_LABEL[e.actionType] : e.kind)}
+                      <ToneBadge tone={e.kind === 'ACTION_CONFIRMATION' ? 'accent' : 'warn'}>
+                        {e.kind === 'ACTION_CONFIRMATION' ? `${e.actor === 'AUTOPILOT' ? 'Autopilot' : 'Action'} proposes` : e.kind === 'WALLTIME_EXTENSION' ? 'Walltime extension' : 'Run approval'}
+                      </ToneBadge>
+                    </div>
+                    {e.detail && <div className={cn('text-[13px]', muted)}>{e.detail}</div>}
+                    <div className={cn('text-xs', muted)}>{`${e.requestedBy ?? ''}${e.amount != null ? ` · ${formatInt(e.amount)} ${e.unit ?? ''}` : ''}`}</div>
+                  </div>
+                  <span className={cn('font-mono text-[11.5px]', muted)}>{formatShortDateTime(e.requestedAt)}</span>
+                  {mayDecide ? (
+                    <span className="flex gap-2">
+                      <Button size="sm" variant="outline" appearance="secondary" loading={approving === `${e.id}:false`} onClick={() => decide(e, false)}>
+                        Decline
+                      </Button>
+                      <Button size="sm" loading={approving === `${e.id}:true`} onClick={() => decide(e, true)}>
+                        {e.kind === 'ACTION_CONFIRMATION' ? 'Confirm' : 'Approve'}
+                      </Button>
+                    </span>
+                  ) : (
+                    <ToneBadge tone="warn">Needs PI</ToneBadge>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </SectionCard>
       )}

@@ -70,11 +70,22 @@ export default function AdminOverview() {
     async () => {
       const [ov, snap] = await Promise.all([getUniversityOverview(), getLiveSnapshot().catch(() => null)]);
       if (!snap) return ov;
-      const kpis = { ...ov.kpis };
-      Object.entries(snap.kpis ?? {}).forEach(([key, v]) => {
-        if (typeof v === 'number' && key in kpis) (kpis as unknown as Record<string, number>)[key] = v;
-      });
-      return { ...ov, kpis, clusters: mergeLiveClusters(ov.clusters, snap) };
+      const c = snap.counts ?? {};
+      const clusters = mergeLiveClusters(ov.clusters, snap);
+      const busy = clusters.reduce((a, x) => a + (x.busyGpus ?? 0), 0);
+      const total = clusters.reduce((a, x) => a + (x.totalGpus ?? 0), 0) || ov.kpis.totalGpus;
+      const kpis = {
+        ...ov.kpis,
+        runningJobs: c.running ?? ov.kpis.runningJobs,
+        pendingJobs: c.pending ?? ov.kpis.pendingJobs,
+        liveJobs: c.running != null && c.pending != null ? c.running + c.pending : ov.kpis.liveJobs,
+        openAlerts: c.openAlerts ?? ov.kpis.openAlerts,
+        criticalAlerts: c.criticalAlerts ?? ov.kpis.criticalAlerts,
+        busyGpus: busy || ov.kpis.busyGpus,
+        idleGpus: busy ? total - busy : ov.kpis.idleGpus,
+        gpuUtilizationPct: busy && total ? (busy / total) * 100 : ov.kpis.gpuUtilizationPct,
+      };
+      return { ...ov, kpis, clusters };
     },
     [],
     { intervalMs: 8000 },

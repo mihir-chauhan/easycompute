@@ -1,7 +1,7 @@
 /*
  * EasyCompute shared app components. Import from '@/components/app'. Docs: ./README.md
  */
-export { default as AppShell, AppShellProvider, BrandMark, useAppShell } from './AppShell';
+export { default as AppShell, AppShellProvider, BrandMark, DEFAULT_LAB_ID, useAppShell } from './AppShell';
 export { AttentionItem, CheckRow, Chips, CodeBlock, EventRow, KeyValue, Note, SectionHeading, Toggle, highlightShell } from './Blocks';
 export type { ShellLab, ShellNavItem, ShellView } from './AppShell';
 export { BillingTag, ClusterTag } from './ClusterTag';

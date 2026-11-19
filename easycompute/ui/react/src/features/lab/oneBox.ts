@@ -42,7 +42,7 @@ export function pickPlan(plans: RunPlan[], pref: Preference): { plan: RunPlan | 
   if (pref === 'free') {
     const free = plans.filter(isFree);
     if (free.length) return { plan: [...free].sort(by((p) => p.estCostUsd ?? Infinity))[0] };
-    return { plan: [...plans].sort(by((p) => p.estCostUsd ?? Infinity))[0], note: 'No free option passed every rule, so this is the cheapest that does.' };
+    return { plan: [...plans].sort(by((p) => p.estCostUsd ?? Infinity))[0], note: 'No free or ACCESS option passed every rule, so EasyCompute fell back to the cheapest paid option.' };
   }
   return { plan: plans.find((p) => p.label === 'Balanced') ?? [...plans].sort(by((p) => p.rank ?? 9))[0] };
 }

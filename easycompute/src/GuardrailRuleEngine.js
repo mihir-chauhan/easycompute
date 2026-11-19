@@ -11,6 +11,13 @@ var HOUR_MS = 60 * MIN_MS;
 var SEVERITY_RANK = { CRITICAL: 0, WARNING: 1, INFO: 2 };
 var CHECKPOINTING = ['TRAINING', 'FINETUNE', 'SIMULATION'];
 
+/**
+ * Job columns read by core actions. Explicit (never `this`) so a column added later and not yet migrated in a workspace
+ * database cannot break cancel / checkpoint / health evaluation.
+ */
+var JOB_CORE_FIELDS =
+  'id, slurmJobId, lab.id, lab.name, lab.piName, lab.piEmail, project.id, user, cluster.id, cluster.name, cluster.unitName, cluster.usdPerUnit, partition.id, partition.name, partition.cluster, partition.gpuType, partition.slurmPartition, partition.qos, partition.preemptible, partition.utilizationPct, partition.chargeFactor, partition.gpusPerNode, partition.maxWalltimeHours, account, qos, jobName, workloadType, state, submitTime, startTime, endTime, timelimitHours, elapsedHours, allocCpus, allocNodes, allocGpus, gpuType.id, gpuType.costPerGpuHourUsd, reqMemGb, maxRssGb, cpuEfficiency, memEfficiency, gpuUtilAvg, costUnits, costUsd, exitCode, nodeList, isLive, runRequest.chosenPlan.estDurationHours';
+
 function ms(v) {
   return v == null ? null : Date.parse(String(v));
 }
@@ -243,7 +250,7 @@ function detect(job, samples, ap, alloc, burnPerDay, estimate, active, under) {
 }
 
 function loadJob(id) {
-  var job = Job.make({ id: id }).get('this, lab.this, cluster.this, partition.this, gpuType.this, runRequest.chosenPlan.estDurationHours');
+  var job = Job.make({ id: id }).get(JOB_CORE_FIELDS);
   if (job == null) throw new Error('Job ' + id + ' not found');
   return job;
 }

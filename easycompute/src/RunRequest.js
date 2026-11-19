@@ -8,6 +8,14 @@ var log = Logger.for('RunRequest');
 var HOUR_MS = 3600 * 1000;
 /** Workloads that checkpoint, so a run longer than the walltime limit can be split into chained jobs. */
 var CHECKPOINTABLE = ['TRAINING', 'FINETUNE', 'SIMULATION'];
+/** Chained runs: at most this many jobs, only on partitions whose limit is at least this long. */
+var MAX_CHAINED_JOBS = 6;
+var MIN_CHAIN_WALLTIME_HOURS = 4;
+
+/** Debug / test / interactive queues (Anvil debug, gpu-debug, ...): for short tests only, never for chained production runs. */
+function isShortQueue(p) {
+  return /debug|test|interactive/i.test(String(p.slurmPartition || '') + ' ' + String(p.name || '') + ' ' + String(p.id || '') + ' ' + String(p.qos || ''));
+}
 var SEVERITY_ORDER = { FAIL: 0, WARN: 1, PASS: 2 };
 /** ClusterPolicyEngine rule-set version: the latest RCAC policy change encoded (Gautschi-AI QOS, 2026-11-02). */
 var POLICY_VERSION = 'rcac-2026-11-02';
@@ -351,8 +359,12 @@ function modelCandidate(ctx, p, gpus, q) {
   var walltime = req.requestedWalltimeHours ? Number(req.requestedWalltimeHours) : Math.min(needed, maxWall);
   var chained = 1;
   if (!req.requestedWalltimeHours && needed > maxWall) {
+    // chaining only where an RCAC user would: checkpointable work, a production partition with a long enough limit,
+    // and a handful of jobs (a 2-day run is not 100 debug-queue jobs)
     if (CHECKPOINTABLE.indexOf(String(req.workloadType)) < 0) return null;
+    if (isShortQueue(p) || partitionQos(p) == 'standby' || maxWall < MIN_CHAIN_WALLTIME_HOURS) return null;
     chained = Math.ceil(needed / maxWall);
+    if (chained > MAX_CHAINED_JOBS) return null;
     walltime = maxWall;
   }
   var memFit = !isGpu || ctx.memNeedGb <= 0 || ctx.memNeedGb <= gpus * num(gpuType.memoryGb, 40) * 0.9;
@@ -1321,5 +1333,7 @@ function submit(planId) {
     outcome: 'DONE',
   }).create();
   log.info('submit {}: plan {} -> job {}', req.id, plan.id, jobId);
-  return Job.make({ id: jobId }).get('this');
+  return Job.make({ id: jobId }).get(
+    'id, slurmJobId, lab.id, project.id, runRequest.id, user, cluster.id, partition.id, account, qos, jobName, workloadType, state, submitTime, timelimitHours, elapsedHours, allocCpus, allocNodes, allocGpus, gpuType.id, reqMemGb, costUnits, costUsd, isLive, etaStartAt, queuePosition, simScenario'
+  );
 }

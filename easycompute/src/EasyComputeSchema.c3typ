@@ -1,0 +1,24 @@
+/**
+ * Database schema checks for the EasyCompute package. A C3 Code workspace syncs `.c3typ` changes without a deployment, so
+ * columns for fields added later may be missing until the type's collection is upserted (the DDL provisioning normally
+ * runs). {@link #ensure} performs that DDL for every package entity; {@link #verify} probes every field added after the
+ * first live push with a 1-row fetch.
+ */
+type EasyComputeSchema {
+
+  /**
+   * Fields added after the first live push, per type (the columns to verify).
+   */
+  addedFields: function(): json js-server
+
+  /**
+   * Probes each added field with a 1-row fetch; returns `{ok, missing:[{type, field, error}], checked}`.
+   */
+  verify: function(): json js-server
+
+  /**
+   * Runs `upsertCollection(false)` for every EasyCompute entity type (adds missing tables and columns), then
+   * {@link #verify}. Idempotent; admin only.
+   */
+  ensure: function(): json js-server
+}

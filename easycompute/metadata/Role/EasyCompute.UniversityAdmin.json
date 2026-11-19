@@ -24,7 +24,8 @@
     "allow:DataLineage::*",
     "allow:Insights::*",
     "allow:RunMonitor::*",
-    "allow:Advisor::*"
+    "allow:Advisor::*",
+    "allow:EasyComputeSchema::*"
   ],
   "nestedRoles": [
     "EasyCompute.LabPI"

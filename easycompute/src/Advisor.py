@@ -17,6 +17,8 @@ LLM_CLIENT_NAME = "default-completions"
 EXTRACT_CLIENT_NAMES = ["default-completions", "claude-sonnet-4.6"]
 # Platform-provided Kv session store (seeded by genaiPlatform) that holds conversation checkpoints by session id.
 SESSION_STORE_ID = "langchain_agent_session_store"
+# Demo default lab (owner): Aniket Bera's IDEAS Lab, used when a call has no labId.
+DEFAULT_LAB_ID = "lab-cv"
 # Read-only tool methods on Advisor and their parameters (a tool whose schema no longer matches is recreated).
 CUSTOM_TOOLS = {
     "retrieveSources": ["query", "labId", "clusterId", "limit"],
@@ -274,6 +276,7 @@ def _context_line(labId):
 
 
 def ask(cls, question, sessionId=None, labId=None, mode=None):
+    labId = labId or DEFAULT_LAB_ID
     started = time.time()
     since = c3.Advisor.beginTurn()
     session_id = sessionId or ("advisor-" + uuid.uuid4().hex)
@@ -305,6 +308,11 @@ def ask(cls, question, sessionId=None, labId=None, mode=None):
         used_mode, status, run_id = "offline", "completed", None
         answer = c3.Advisor.offlineAnswer(question, labId)
     trace = json.loads(c3.Advisor.turnTrace(since))
+    if labId and not any(c.get("id") == labId for c in trace.get("citations", [])):
+        # [labId] cites the [Lab facts] line (allocations, deadlines, live jobs) added to every query.
+        trace.setdefault("citations", []).insert(
+            0, {"id": labId, "kind": "LAB", "title": "Lab facts: allocations, deadlines, live jobs", "url": "/context"}
+        )
     return c3.Advisor.Reply(
         answer=answer,
         sessionId=session_id,
@@ -379,6 +387,7 @@ def _merge(base, llm):
 def extractConstraints(cls, labId=None, text=None):
     """LabContextExtractor: confirmed set for the current text, else cached LLM extraction, else a new LLM extraction
     (validated against the schema and the text), else the rules-based extraction. Status UNCONFIRMED unless confirmed."""
+    labId = labId or DEFAULT_LAB_ID
     if labId and not text:
         try:
             confirmed = c3.Advisor.confirmedConstraints(labId)
@@ -396,8 +405,10 @@ def extractConstraints(cls, labId=None, text=None):
             ).objs
             if cached and cached[0].textHash == h and cached[0].result:
                 res = json.loads(cached[0].result)
-                res.update({"cached": True, "status": "UNCONFIRMED", "textHash": h, "labId": labId})
-                return res
+                # Reuse only results of the current extractor version (older ones lack evidence spans / validation).
+                if res.get("component") == base.get("component") and res.get("version") == base.get("version"):
+                    res.update({"cached": True, "status": "UNCONFIRMED", "textHash": h, "labId": labId})
+                    return res
         except Exception:  # noqa: BLE001 - cache is an optimisation only
             pass
     if not src.strip():
@@ -413,7 +424,8 @@ def extractConstraints(cls, labId=None, text=None):
                     {"role": "system", "content": EXTRACT_PROMPT},
                     {"role": "user", "content": "TODAY: " + today.strftime("%A %Y-%m-%d") + "\n\nLAB CONTEXT:\n" + src[:12000]},
                 ],
-                options={"returnJson": True, "temperature": 0, "max_tokens": 2500},
+                # No temperature: Bedrock Claude Sonnet 5 (default-completions) accepts only temperature=1 (verified live).
+                options={"returnJson": True, "max_tokens": 2500},
             )
             merged = _merge(base, _json_from(_completion_text(resp)))
             merged["model"] = client_name
@@ -424,6 +436,8 @@ def extractConstraints(cls, labId=None, text=None):
     if res is None:
         res = base
         res["llmError"] = "; ".join(errors)
+    elif errors:
+        res["llmAttempts"] = errors  # clients that failed before the one that answered
     res.update({"cached": False, "status": "UNCONFIRMED", "textHash": h, "labId": labId})
     # Only LLM results are cached, so a temporary LLM outage is retried on the next call; previews (text) are not cached.
     if labId and not text and res.get("source") == "llm":

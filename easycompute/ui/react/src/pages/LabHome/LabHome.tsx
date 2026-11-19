@@ -24,7 +24,7 @@ import {
   lineOption,
   toneColor,
   useThemeKey,
-  provenanceOf,
+  provenanceFor,
   type Column,
   type Tone,
 } from '@/components/app';
@@ -158,7 +158,7 @@ const LabHome: React.FC = () => {
           <>
             {a.message}
             <span className="mt-1 block">
-              <ModelProvenance name={alertModel(a.alertType)} provenance={provenanceOf(a)} />
+              <ModelProvenance name={alertModel(a.alertType)} provenance={provenanceFor(a, alertModel(a.alertType))} />
             </span>
           </>
         ),

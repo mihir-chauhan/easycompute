@@ -185,7 +185,7 @@ export const fetchJobMetrics = async (jobId: string) =>
         'id, ts, gpuUtilPct, gpuMemPct, cpuUtilPct, memPct, ioReadMBps, ioWriteMBps, powerW, checkpointAgeMin, trainingLoss',
       filter: eq('job.id', jobId),
       order: 'descending(ts)',
-      limit: 500,
+      limit: 120,
     })
   ).reverse();
 
@@ -226,10 +226,34 @@ export const applyJobAction = (jobId: string, actionType: ActionType, actor: 'US
 
 export const ackAlert = (id: string) => labCall<Alert>('JobAlert', 'merge', { id, status: 'ACKED' });
 
+/** Approval queue item (`UserAdmin.pendingApprovals`): walltime extensions, PI run approvals, autopilot action confirmations. */
+export interface ApprovalItem {
+  id: string;
+  kind: 'WALLTIME_EXTENSION' | 'RUN_APPROVAL' | 'ACTION_CONFIRMATION' | string;
+  actionType?: ActionType;
+  actor?: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | string;
+  labId?: string;
+  jobId?: string;
+  runRequestId?: string;
+  requestedBy?: string;
+  requestedAt?: string;
+  title?: string;
+  detail?: string;
+  amount?: number;
+  unit?: string;
+}
+
+export const pendingApprovals = async (labId: string) =>
+  unbox<{ items: ApprovalItem[]; counts?: Record<string, number> }>(await labCall('UserAdmin', 'pendingApprovals', null, [labId]));
+
+export const decideApproval = async (id: string, approve: boolean, note?: string) =>
+  unbox<ApprovalItem>(await labCall('UserAdmin', approve ? 'approve' : 'reject', null, note ? [id, note] : [id]));
+
 /** Cheap live state for polling (RunMonitor.liveSnapshot). */
 export const liveSnapshot = async (labId: string | null) => unbox<LiveSnapshot>(await labCall('RunMonitor', 'liveSnapshot', null, labId ? [labId] : []));
 
-export const monitorTick = async () => unbox<TickSummary>(await labCall('RunMonitor', 'tick', null, []));
+export const monitorTick = async () => unbox<TickSummary>(await labCall('RunMonitor', 'tick', null, [15]));
 
 /* ---------- Plan a run ---------- */
 
@@ -286,6 +310,24 @@ export const getRunRequest = (id: string) =>
 /** LabContextExtractor: confirm the (optionally edited) extraction; status becomes CONFIRMED. */
 export const confirmConstraints = (labId: string, edited: LabConstraints | null) =>
   labCall<LabConstraints>('Advisor', 'confirmConstraints', null, [labId, edited ? JSON.stringify(edited) : null]);
+
+/**
+ * Submit a plan. When the request needs PI approval (a policy such as > 500 GPU-hours), a PI / RCAC user approves it
+ * in the same step (`UserAdmin.approve('RR:<id>')`); members get a clear "waiting for PI approval" error.
+ */
+export async function submitWithApproval(runRequestId: string, planId: string, canApprove: boolean): Promise<Job> {
+  try {
+    return await submitPlan(runRequestId, planId);
+  } catch (err) {
+    const rr = await getRunRequest(runRequestId).catch(() => null);
+    if (rr?.approvalStatus !== 'PENDING') throw err;
+    if (!canApprove) {
+      throw new Error(`This run needs PI approval${rr.approvalReason ? ` (${rr.approvalReason})` : ''}. It is waiting in your PI's approval queue; you will be able to launch it once approved.`);
+    }
+    await decideApproval(`RR:${runRequestId}`, true, 'Approved by the PI at launch');
+    return submitPlan(runRequestId, planId);
+  }
+}
 
 export interface DurationPrediction {
   gpuHours?: number;

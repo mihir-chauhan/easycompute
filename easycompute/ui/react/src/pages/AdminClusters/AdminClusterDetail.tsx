@@ -56,8 +56,28 @@ export default function AdminClusterDetail() {
   const { data, loading, error, reload, updatedAt, live: polling } = useLivePoll<Detail>(
     async () => {
       const [detail, overview, snap] = await Promise.all([getClusterDetail(id), getUniversityOverview(), getLiveSnapshot().catch(() => null)]);
+      // Live jobs straight from the snapshot (state, nodes, elapsed, latest GPU util) when it is available.
+      const names = new Map(detail.liveJobs.map((j) => [j.id, j]));
+      const partName = new Map(detail.partitions.map((p) => [p.id, p.name]));
+      const liveJobs = snap?.jobs
+        ? snap.jobs
+            .filter((j) => j.clusterId === id)
+            .map((j) => ({
+              id: j.id,
+              jobName: j.jobName,
+              user: j.user,
+              lab: names.get(j.id)?.lab ?? (j.labId ? { id: j.labId } : undefined),
+              partition: { id: j.partitionId ?? '', name: (j.partitionId && partName.get(j.partitionId)) || j.partitionId },
+              state: j.state,
+              allocGpus: j.gpus,
+              gpuUtilAvg: j.latest?.gpuUtilPct ?? undefined,
+              elapsedHours: j.elapsedHours,
+              timelimitHours: j.timelimitHours,
+            }))
+        : detail.liveJobs;
       return {
         ...detail,
+        liveJobs,
         partitions: mergeLivePartitions(detail.partitions, snap),
         live: mergeLiveClusters(overview.clusters, snap).find((c) => c.id === id),
         policies: [],

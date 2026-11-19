@@ -168,9 +168,11 @@ function cite(kind, id, title, url, extra) {
   return c;
 }
 
+/** Demo default lab (owner): Aniket Bera's IDEAS Lab, used when a call has no labId. */
+var DEFAULT_LAB_ID = 'lab-cv';
+
 function requireLab(labId) {
-  var id = str(labId);
-  if (!id) throw new Error('labId is required. Known labs: ' + knownLabs());
+  var id = str(labId) || DEFAULT_LAB_ID;
   var found = Lab.fetch({
     filter: Filter.eq('id', id),
     include: 'id, name, piName, piEmail, department, researchArea, contextDump, slurmAccounts, fairShareTarget, preferredClusters, notes',
@@ -872,8 +874,10 @@ function constraintsFor(lab) {
     }
     if (c && c.textHash === h && c.result) {
       var cached = JSON.parse(c.result);
-      cached.status = 'UNCONFIRMED';
-      return cached;
+      if (cached.component === EXTRACTOR.component && cached.version === EXTRACTOR.version) {
+        cached.status = 'UNCONFIRMED';
+        return cached;
+      }
     }
   } catch (e) {
     log.warn('constraint cache read failed: {}', e);
@@ -1483,6 +1487,16 @@ function jobRow(j, metric, alerts) {
   };
 }
 
+/** Citations for a job and each of its open alerts (alert ids are cited too), all linking to the run page. */
+function jobCitations(r) {
+  var url = '/runs/' + encodeURIComponent(r.jobId);
+  return [cite('JOB', r.jobId, r.name + ' live metrics', url)].concat(
+    r.alerts.map(function (a) {
+      return cite('JOB', a.alertId, a.severity + ' ' + a.alertType + ' on ' + r.jobId, url);
+    })
+  );
+}
+
 /** "Open run" deep link for a job; the suggested action is applied (and confirmed) on the run page, never here. */
 function runLink(r) {
   var actions = r.alerts
@@ -1537,11 +1551,9 @@ function liveJobs(labId, state) {
             return r.alerts.length > 0;
           })
           .slice(0, 8)
-          .map(function (r) {
-            return cite('JOB', r.jobId, r.name + ' (' + r.alerts.map(function (a) {
-              return a.alertType;
-            }).join(', ') + ')', '/runs/' + encodeURIComponent(r.jobId));
-          }),
+          .reduce(function (acc, r) {
+            return acc.concat(jobCitations(r));
+          }, []),
         _links: rows
           .filter(function (r) {
             return r.alerts.length > 0;
@@ -1611,7 +1623,7 @@ function jobHealth(jobId) {
         job: row,
         window: { samples: metrics.length, gpuUtilPct: stat('gpuUtilPct'), gpuMemPct: stat('gpuMemPct'), cpuUtilPct: stat('cpuUtilPct'), memPct: stat('memPct'), checkpointAgeMin: stat('checkpointAgeMin'), trainingLoss: stat('trainingLoss') },
         recentActions: actions,
-        citations: [cite('JOB', row.jobId, row.name + ' live metrics', '/runs/' + encodeURIComponent(row.jobId))],
+        citations: jobCitations(row),
         _links: [runLink(row)],
         suggestedActions: row.alerts
           .map(function (a) {
