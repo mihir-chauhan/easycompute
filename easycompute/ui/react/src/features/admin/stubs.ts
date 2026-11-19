@@ -38,14 +38,14 @@ const PARTITIONS: Partition[] = [
 ];
 
 const LABS: Lab[] = [
-  { id: 'lab-chen', name: 'Chen Vision Lab', piName: 'Wei Chen', department: 'Computer Science', fairShareTarget: 0.18 },
-  { id: 'lab-okafor', name: 'Okafor Climate Modeling', piName: 'Ngozi Okafor', department: 'Earth, Atmospheric & Planetary Sci.', fairShareTarget: 0.14 },
-  { id: 'lab-ramirez', name: 'Ramirez NLP Group', piName: 'Elena Ramirez', department: 'Computer Science', fairShareTarget: 0.16 },
-  { id: 'lab-patel', name: 'Patel Computational Biology', piName: 'Anjali Patel', department: 'Biological Sciences', fairShareTarget: 0.12 },
-  { id: 'lab-nguyen', name: 'Nguyen Robotics', piName: 'Minh Nguyen', department: 'Mechanical Engineering', fairShareTarget: 0.1 },
-  { id: 'lab-schmidt', name: 'Schmidt Materials', piName: 'Lukas Schmidt', department: 'Materials Engineering', fairShareTarget: 0.1 },
-  { id: 'lab-kim', name: 'Kim Quantum Chemistry', piName: 'Soo-ah Kim', department: 'Chemistry', fairShareTarget: 0.1 },
-  { id: 'lab-brooks', name: 'Brooks Health Analytics', piName: 'Dana Brooks', department: 'Public Health', fairShareTarget: 0.1 },
+  { id: 'lab-nlp', name: 'Ramirez Clinical NLP Lab', piName: 'Dr. Elena Ramirez', department: 'Computer Science', fairShareTarget: 0.16 },
+  { id: 'lab-cv', name: 'Okafor Visual Computing Lab', piName: 'Dr. Chinedu Okafor', department: 'Electrical and Computer Engineering', fairShareTarget: 0.14 },
+  { id: 'lab-chem', name: 'Lindqvist Computational Chemistry Group', piName: 'Dr. Astrid Lindqvist', department: 'Chemistry', fairShareTarget: 0.14 },
+  { id: 'lab-bio', name: 'Patel Structural Genomics Lab', piName: 'Dr. Anjali Patel', department: 'Biological Sciences', fairShareTarget: 0.1 },
+  { id: 'lab-robotics', name: 'Haddad Robot Learning Lab', piName: 'Dr. Omar Haddad', department: 'Mechanical Engineering', fairShareTarget: 0.1 },
+  { id: 'lab-climate', name: 'Nguyen Regional Climate Modeling Group', piName: 'Dr. Linh Nguyen', department: 'Earth, Atmospheric, and Planetary Sciences', fairShareTarget: 0.12 },
+  { id: 'lab-ag', name: 'Kowalski Digital Agriculture Lab', piName: 'Dr. Marta Kowalski', department: 'Agricultural and Biological Engineering', fairShareTarget: 0.06 },
+  { id: 'lab-physics', name: 'Adeyemi Quantum Materials ML Lab', piName: 'Dr. Tunde Adeyemi', department: 'Physics and Astronomy', fairShareTarget: 0.18 },
 ];
 
 const USAGE = [0.27, 0.09, 0.21, 0.13, 0.06, 0.08, 0.11, 0.05];
@@ -104,15 +104,15 @@ function overview(): UniversityOverview {
         return { partitionId: x.id, name: x.name, clusterId: x.cluster?.id ?? '', gpuTypeId: x.gpuType?.id, gpus, idleGpus: Math.round(gpus * (1 - (x.utilizationPct ?? 0) / 100)), utilizationPct: x.utilizationPct ?? 0 };
       }),
       topWasteLabs: [
-        { labId: 'lab-chen', name: 'Chen Vision Lab', wastedGpuHours: 12900, wastePct: 0.2 },
-        { labId: 'lab-kim', name: 'Kim Quantum Chemistry', wastedGpuHours: 8100, wastePct: 0.31 },
-        { labId: 'lab-ramirez', name: 'Ramirez NLP Group', wastedGpuHours: 6400, wastePct: 0.13 },
-        { labId: 'lab-nguyen', name: 'Nguyen Robotics', wastedGpuHours: 4200, wastePct: 0.29 },
-        { labId: 'lab-patel', name: 'Patel Computational Biology', wastedGpuHours: 3500, wastePct: 0.11 },
+        { labId: 'lab-cv', name: 'Okafor Visual Computing Lab', wastedGpuHours: 12900, wastePct: 0.2 },
+        { labId: 'lab-chem', name: 'Lindqvist Computational Chemistry Group', wastedGpuHours: 8100, wastePct: 0.31 },
+        { labId: 'lab-nlp', name: 'Ramirez Clinical NLP Lab', wastedGpuHours: 6400, wastePct: 0.13 },
+        { labId: 'lab-robotics', name: 'Haddad Robot Learning Lab', wastedGpuHours: 4200, wastePct: 0.29 },
+        { labId: 'lab-bio', name: 'Patel Structural Genomics Lab', wastedGpuHours: 3500, wastePct: 0.11 },
       ],
       idleLiveJobs: [
-        { jobId: 'gilbreth-8812731', labId: 'lab-kim', user: 'user_214', gpus: 4, gpuUtilPct: 2, idleMinutes: 95 },
-        { jobId: 'gautschi-512094', labId: 'lab-chen', user: 'user_031', gpus: 8, gpuUtilPct: 4, idleMinutes: 40 },
+        { jobId: 'gilbreth-8812731', labId: 'lab-chem', user: 'user_214', gpus: 4, gpuUtilPct: 2, idleMinutes: 95 },
+        { jobId: 'gautschi-512094', labId: 'lab-cv', user: 'user_031', gpus: 8, gpuUtilPct: 4, idleMinutes: 40 },
       ],
     },
     demand: {
@@ -139,15 +139,16 @@ function overview(): UniversityOverview {
 }
 
 const POLICIES: Policy[] = [
-  { id: 'U-01', scope: 'UNIVERSITY', kind: 'MIN_GPU_UTIL', severity: 'WARN', title: 'GPUs must be used', description: 'RCAC samples GPU power, memory and utilization every 10 s and flags jobs that hold GPUs below 20% utilization.', limitValue: 20, limitText: '20% average GPU utilization', active: true, sourceUrl: 'https://www.rcac.purdue.edu/' },
+  { id: 'U-01', scope: 'UNIVERSITY', kind: 'MIN_GPU_UTIL', severity: 'WARN', title: 'GPUs must be used', description: 'RCAC samples GPU power, memory and utilization every 10 s and flags jobs that hold GPUs below 20% utilization.', limitValue: 20, active: true, sourceUrl: 'https://docs.rcac.purdue.edu/userguides/gautschi/run_jobs/gpu_util/' },
+  { id: 'P-GA-01', scope: 'PARTITION', kind: 'MAX_WALLTIME', severity: 'BLOCK', title: 'ai normal QOS walltime', description: 'Charged 1 GPU-hr per GPU-hr', cluster: { id: 'gautschi', name: 'Gautschi' }, partition: { id: 'gautschi-ai', name: 'ai' }, limitValue: 96, active: true, sourceUrl: 'https://docs.rcac.purdue.edu/userguides/gautschi/run_jobs/queues/' },
   { id: 'U-02', scope: 'UNIVERSITY', kind: 'EXPORT_CONTROL', severity: 'BLOCK', title: 'Export-controlled data only on approved clusters', description: 'CUI / ITAR data must run on Rossmann or Weber.', active: true },
   { id: 'U-03', scope: 'UNIVERSITY', kind: 'QUIET_HOURS', severity: 'INFO', title: 'Maintenance window', description: 'Second Tuesday of the month, 06:00-18:00 ET; jobs crossing it are held.', active: true },
   { id: 'C-GA-01', scope: 'CLUSTER', kind: 'MAX_WALLTIME', severity: 'BLOCK', title: 'Gautschi ai: 4-day walltime', description: 'Normal QOS on the ai partition is limited to 4 days since 2026-11-02.', cluster: { id: 'gautschi', name: 'Gautschi' }, limitValue: 96, limitText: '96 h', active: true },
   { id: 'C-AN-01', scope: 'CLUSTER', kind: 'MAX_GPUS_PER_JOB', severity: 'BLOCK', title: 'Anvil: 12 GPUs per user', description: 'Maximum of 12 GPUs in use per user; 32 per allocation.', cluster: { id: 'anvil', name: 'Anvil' }, limitValue: 12, active: true },
   { id: 'P-GI-01', scope: 'PARTITION', kind: 'PREEMPTIBLE_ONLY', severity: 'WARN', title: 'Standby jobs may be preempted', description: 'Standby runs up to 4 h with no start-time guarantee.', cluster: { id: 'gilbreth', name: 'Gilbreth' }, partition: { id: 'gilbreth-standby', name: 'standby' }, limitValue: 4, active: true },
   { id: 'P-GA-02', scope: 'PARTITION', kind: 'MAX_GPUS_PER_JOB', severity: 'BLOCK', title: 'smallgpu: max 2 GPUs', description: 'L40S bonus partition allows 2 GPUs in use.', cluster: { id: 'gautschi', name: 'Gautschi' }, partition: { id: 'gautschi-smallgpu', name: 'smallgpu' }, limitValue: 2, active: true },
-  { id: 'L-CH-01', scope: 'LAB', kind: 'BUDGET_REMAINING', severity: 'WARN', title: 'Chen lab: keep 10% reserve', description: 'Warn when a run would leave less than 10% of the NSF grant allocation.', lab: { id: 'lab-chen', name: 'Chen Vision Lab' }, limitValue: 0.1, active: true },
-  { id: 'L-OK-01', scope: 'LAB', kind: 'DATA_RESIDENCY', severity: 'BLOCK', title: 'Okafor lab: NOAA data stays on campus', description: 'Licensed reanalysis data cannot be copied to third-party cloud.', lab: { id: 'lab-okafor', name: 'Okafor Climate Modeling' }, active: false },
+  { id: 'L-CH-01', scope: 'LAB', kind: 'BUDGET_REMAINING', severity: 'WARN', title: 'Okafor lab: keep 10% reserve', description: 'Warn when a run would leave less than 10% of the NSF grant allocation.', lab: { id: 'lab-cv', name: 'Okafor Visual Computing Lab' }, limitValue: 0.1, active: true },
+  { id: 'L-OK-01', scope: 'LAB', kind: 'DATA_RESIDENCY', severity: 'BLOCK', title: 'Nguyen lab: licensed reanalysis stays on campus', description: 'Licensed reanalysis data cannot be copied to third-party cloud.', lab: { id: 'lab-climate', name: 'Nguyen Regional Climate Modeling Group' }, active: false },
 ];
 
 function labSummary(labId: string): LabSummaryLite {
@@ -169,9 +170,9 @@ function labSummary(labId: string): LabSummaryLite {
 }
 
 const LIVE_JOBS: JobLite[] = [
-  { id: 'gilbreth-8812731', user: 'user_214', lab: { id: 'lab-kim', name: 'Kim Quantum Chemistry' }, partition: { id: 'gilbreth-a100-80gb', name: 'a100-80gb' }, state: 'RUNNING', allocGpus: 4, gpuUtilAvg: 3, elapsedHours: 6.2, timelimitHours: 48, jobName: 'dft-relax' },
-  { id: 'gilbreth-8812990', user: 'user_031', lab: { id: 'lab-chen', name: 'Chen Vision Lab' }, partition: { id: 'gilbreth-a100-40gb', name: 'a100-40gb' }, state: 'RUNNING', allocGpus: 8, gpuUtilAvg: 88, elapsedHours: 20.5, timelimitHours: 24, jobName: 'vit-l-pretrain' },
-  { id: 'gilbreth-8813102', user: 'user_118', lab: { id: 'lab-ramirez', name: 'Ramirez NLP Group' }, partition: { id: 'gilbreth-a100-80gb', name: 'a100-80gb' }, state: 'PENDING', allocGpus: 4, elapsedHours: 0, timelimitHours: 12, jobName: 'llama-8b-lora' },
+  { id: 'gilbreth-8812731', user: 'user_214', lab: { id: 'lab-chem', name: 'Lindqvist Computational Chemistry Group' }, partition: { id: 'gilbreth-a100-80gb', name: 'a100-80gb' }, state: 'RUNNING', allocGpus: 4, gpuUtilAvg: 3, elapsedHours: 6.2, timelimitHours: 48, jobName: 'dft-relax' },
+  { id: 'gilbreth-8812990', user: 'user_031', lab: { id: 'lab-cv', name: 'Okafor Visual Computing Lab' }, partition: { id: 'gilbreth-a100-40gb', name: 'a100-40gb' }, state: 'RUNNING', allocGpus: 8, gpuUtilAvg: 88, elapsedHours: 20.5, timelimitHours: 24, jobName: 'vit-l-pretrain' },
+  { id: 'gilbreth-8813102', user: 'user_118', lab: { id: 'lab-nlp', name: 'Ramirez Clinical NLP Lab' }, partition: { id: 'gilbreth-a100-80gb', name: 'a100-80gb' }, state: 'PENDING', allocGpus: 4, elapsedHours: 0, timelimitHours: 12, jobName: 'llama-8b-lora' },
 ];
 
 export async function stubCall(type: string, action: string, _thisArg: unknown, args: unknown[]): Promise<unknown> {
@@ -187,6 +188,7 @@ export async function stubCall(type: string, action: string, _thisArg: unknown, 
     if (type === 'Policy') return { objs: POLICIES };
     if (type === 'Lab') return { objs: LABS };
     if (type === 'Job') return { objs: id === 'gilbreth' ? LIVE_JOBS : [] };
+    if (type === 'RuleCheck') return { objs: [{ id: 'rc1', policy: { id: 'C-GA-01' }, checkedAt: new Date().toISOString() }, { id: 'rc2', policy: { id: 'P-GI-01' }, checkedAt: new Date().toISOString() }] };
   }
   throw new Error(`No stub for ${type}.${action}`);
 }

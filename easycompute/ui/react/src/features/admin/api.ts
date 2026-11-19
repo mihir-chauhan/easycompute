@@ -83,3 +83,10 @@ export async function listLabSummaries(): Promise<LabSummaryLite[]> {
   const labs = await listLabs();
   return Promise.all(labs.map(async (lab) => ({ ...(await getLabSummary(lab.id)), lab })));
 }
+
+export const listPartitions = (): Promise<Partition[]> =>
+  fetchObjs<Partition>('Partition', { include: PARTITION_INCLUDE, order: 'name', limit: 200 });
+
+/** FAIL rule checks (for "Blocks (30d)" per policy). */
+export const listFailedChecks = (): Promise<Array<{ id: string; policy?: { id: string } | null; checkedAt?: string }>> =>
+  fetchObjs('RuleCheck', { include: 'id, policy.id, checkedAt', filter: "outcome == 'FAIL'", order: 'descending(checkedAt)', limit: 2000 });

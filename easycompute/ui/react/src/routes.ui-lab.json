@@ -1,8 +1,10 @@
 [
-  { "path": "/", "element": "pages/LabHome/LabHome", "export": "default", "navLabel": "Lab Home", "icon": "LayoutDashboard", "section": "lab" },
-  { "path": "/plan", "element": "pages/PlanRun/PlanRun", "export": "default", "navLabel": "Plan a Run", "icon": "Rocket", "section": "lab" },
-  { "path": "/runs", "element": "pages/Runs/RunList", "export": "default", "navLabel": "Live Runs", "icon": "Activity", "section": "lab" },
+  { "path": "/", "element": "pages/LabHome/LabHome", "export": "default", "navLabel": "Overview", "icon": "House", "section": "lab", "group": "Overview" },
+  { "path": "/context", "element": "pages/LabContext/LabContext", "export": "default", "navLabel": "Lab context", "icon": "FileText", "section": "lab", "group": "Before a run" },
+  { "path": "/plan", "element": "pages/PlanRun/PlanRun", "export": "default", "navLabel": "Launch planner", "icon": "Rocket", "section": "lab", "group": "Before a run" },
+  { "path": "/runs", "element": "pages/Runs/RunList", "export": "default", "navLabel": "Runs", "icon": "List", "section": "lab", "group": "Before a run" },
   { "path": "/runs/:id", "element": "pages/Runs/RunDetail", "export": "default", "section": "lab" },
-  { "path": "/history", "element": "pages/History/History", "export": "default", "navLabel": "History & Insights", "icon": "ChartColumn", "section": "lab" },
-  { "path": "/context", "element": "pages/LabContext/LabContext", "export": "default", "navLabel": "Lab Context", "icon": "BookOpenText", "section": "lab" }
+  { "path": "/monitor", "element": "pages/Runs/LiveMonitor", "export": "default", "navLabel": "Live monitor", "icon": "Activity", "section": "lab", "group": "During a run", "badge": "live" },
+  { "path": "/guardrails", "element": "pages/Guardrails/Guardrails", "export": "default", "navLabel": "Guardrails", "icon": "Zap", "section": "lab", "group": "During a run", "badge": "New" },
+  { "path": "/history", "element": "pages/History/History", "export": "default", "navLabel": "Allocations & usage", "icon": "Wallet", "section": "lab", "group": "Lab" }
 ]

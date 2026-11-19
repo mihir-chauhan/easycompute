@@ -95,6 +95,15 @@ function csv(text) {
     });
 }
 
+/** A `json` value returned by another type's method, as a plain JS object (it may arrive boxed or as a string). */
+function plainJson(v) {
+  if (v == null || typeof v.a100HoursP50 !== 'undefined') return v;
+  if (v.value != null && typeof v.value.a100HoursP50 !== 'undefined') return v.value;
+  var text = typeof v.toJsonString === 'function' ? v.toJsonString() : String(v);
+  var parsed = JSON.parse(text);
+  return parsed != null && parsed.value != null && parsed.a100HoursP50 === undefined ? parsed.value : parsed;
+}
+
 // ---------------------------------------------------------------- context loading
 
 /** Everything the rule engine and planner read for one request, loaded with a handful of bounded reads. */
@@ -171,6 +180,7 @@ function loadContext(id) {
     num(req.modelParamsB, 0),
     labId
   );
+  prediction = plainJson(prediction);
   var memNeedGb = num(prediction.memoryNeedGb, 0);
   if (/q?lora/i.test(String(req.description || '') + ' ' + String(req.name || '')) && req.workloadType == 'FINETUNE') {
     memNeedGb = round(num(req.modelParamsB, 0) * 2.6, 1);
@@ -215,18 +225,12 @@ function loadContext(id) {
 /** Lab share of GPU-hours on a cluster (cached per cluster), for FAIRSHARE_CAP. */
 function labShareOnCluster(ctx, clusterId) {
   if (ctx.fairShare[clusterId] !== undefined) return ctx.fairShare[clusterId];
-  var res = Job.evaluate({
-    projection: 'lab.id, sum(gpuHours)',
-    group: 'lab.id',
-    filter: Filter.eq('cluster.id', clusterId),
-    limit: 500,
-  });
   var total = 0;
   var mine = 0;
-  list(res.tuples).forEach(function (t) {
-    var v = num(cellValue(t, 1), 0);
-    total += v;
-    if (cellValue(t, 0) == ctx.labId) mine += v;
+  Job.fetchObjStream({ filter: Filter.eq('cluster.id', clusterId).and('allocGpus > 0'), include: 'lab, allocGpus, elapsedHours' }).each(function (j) {
+    var gh = num(j.allocGpus, 0) * num(j.elapsedHours, 0);
+    total += gh;
+    if (j.lab != null && j.lab.id == ctx.labId) mine += gh;
   });
   ctx.fairShare[clusterId] = total > 0 ? mine / total : null;
   return ctx.fairShare[clusterId];

@@ -79,7 +79,7 @@ entity type RunRequest {
   /**
    * Planner status.
    */
-  status: string enum RunRequest.Status = 'DRAFT'
+  status: string enum RunRequest.Status
 
   /**
    * Plan chosen at submission.

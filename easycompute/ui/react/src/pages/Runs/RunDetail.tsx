@@ -3,7 +3,7 @@
  * Confidential and Proprietary C3 Materials.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   Ban,
@@ -23,35 +23,35 @@ import {
   User,
 } from 'lucide-react';
 
-import EChart from '@/components/charts/EChart';
+import {
+  CardGrid,
+  KpiRow,
+  KpiTile,
+  Countdown,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  MetricChart,
+  PageFrame,
+  SectionCard,
+  StatusBadge,
+  ToneBadge,
+  TONE_BG,
+  errorMessage,
+  lineOption,
+  toneColor,
+  useThemeKey,
+  utilTone,
+  type ChartSeries,
+  type ChartThreshold,
+} from '@/components/app';
 import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
-import PageFrame, { errorMessage, ErrorState, LoadingState } from '@/components/PageFrame/PageFrame';
-import { EnumBadge } from '@/components/StatusBadges/StatusBadges';
 import { Button } from '@/components/ui/button';
-import { Container } from '@/components/ui/container';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, ModalSubtitle, ModalTitle } from '@/components/ui/modal';
-import {
-  ackAlert,
-  applyJobAction,
-  fetchJobActions,
-  fetchJobAlerts,
-  fetchJobMetrics,
-  getJob,
-  monitorTick,
-} from '@/features/lab/api';
-import { timeSeriesOption, type TimeSeries } from '@/features/lab/charts';
-import { ActorBadge, AlertTypeBadge, EmptyBlock, JobStateBadge, Meter, muted, Stat } from '@/features/lab/components';
-import {
-  ACTION_LABEL,
-  formatClock,
-  formatDuration,
-  formatInt,
-  formatPct100,
-  formatRelative,
-  formatUsd,
-  titleCase,
-  walltimeLeft,
-} from '@/features/lab/format';
+import { ackAlert, applyJobAction, fetchJobActions, fetchJobAlerts, fetchJobMetrics, getJob, monitorTick } from '@/features/lab/api';
+import { ActivityRow, AlertTypeBadge, HeadNote, JobStateBadge, muted, Notice } from '@/features/lab/components';
+import { ACTION_LABEL, ALERT_TYPE_LABEL, formatClock, formatDuration, formatInt, formatPct100, formatRelative, formatUsd, walltimeLeft } from '@/features/lab/format';
 import type { ActionType, Alert, JobMetric } from '@/features/lab/types';
 import { useLoad } from '@/features/lab/useLoad';
 import { formatDateTime } from '@/lib/format';
@@ -79,9 +79,10 @@ const ACTION_HELP: Partial<Record<ActionType, string>> = {
 const MANUAL_ACTIONS: ActionType[] = ['CHECKPOINT_NOW', 'EXTEND_WALLTIME', 'SCALE_DOWN', 'REQUEUE_STANDBY', 'NOTIFY_PI', 'CANCEL'];
 const DESTRUCTIVE: ActionType[] = ['CANCEL', 'SCALE_DOWN', 'REQUEUE_STANDBY'];
 
-type MetricKey = keyof Pick<JobMetric, 'gpuUtilPct' | 'gpuMemPct' | 'cpuUtilPct' | 'memPct' | 'ioReadMBps' | 'ioWriteMBps' | 'powerW'>;
+type MetricKey = keyof Pick<JobMetric, 'gpuUtilPct' | 'gpuMemPct' | 'cpuUtilPct' | 'memPct' | 'ioReadMBps' | 'ioWriteMBps' | 'powerW' | 'trainingLoss'>;
+type Tab = 'metrics' | 'events' | 'activity' | 'actions';
 
-const pts = (ms: JobMetric[], k: MetricKey): [number, number | null][] => ms.map((m) => [new Date(m.ts).getTime(), m[k] ?? null]);
+const pts = (ms: JobMetric[], k: MetricKey): (number | null)[] => ms.map((m) => (m[k] == null ? null : Math.round((m[k] as number) * 10) / 10));
 
 const RunDetail: React.FC = () => {
   const { id = '' } = useParams<{ id: string }>();
@@ -90,23 +91,15 @@ const RunDetail: React.FC = () => {
   const [confirm, setConfirm] = useState<ActionType | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>('metrics');
 
-  const job = useLoad(() => getJob(id), [id]);
-  const detail = useLoad(() => Promise.all([fetchJobMetrics(id), fetchJobAlerts(id), fetchJobActions(id)]), [id]);
+  const themeKey = useThemeKey();
+  const job = useLoad(() => getJob(id), [id], 30000);
+  const detail = useLoad(() => Promise.all([fetchJobMetrics(id), fetchJobAlerts(id), fetchJobActions(id)]), [id], 30000);
   const reloadAll = () => {
     job.reload();
     detail.reload();
   };
-
-  const { reload: reloadJob } = job;
-  const { reload: reloadDetail } = detail;
-  useEffect(() => {
-    const t = window.setInterval(() => {
-      reloadJob();
-      reloadDetail();
-    }, 30000);
-    return () => window.clearInterval(t);
-  }, [reloadJob, reloadDetail]);
 
   const [metrics, alerts, log] = detail.data ?? [[], [], []];
   const j = job.data;
@@ -115,17 +108,19 @@ const RunDetail: React.FC = () => {
   const live = j?.state === 'RUNNING' || j?.state === 'PENDING';
 
   const charts = useMemo(() => {
+    const x = metrics.map((m) => formatClock(m.ts));
     const pct = (v: number) => `${Math.round(v)}%`;
-    const defs: { title: string; sub: string; series: TimeSeries[]; fmt: (v: number) => string; yMax?: number; thresholds?: { value: number; label: string; appearance: 'danger' | 'warning' }[] }[] = [
-      { title: 'GPU utilization', sub: 'Mean across allocated GPUs', series: [{ name: 'GPU util', appearance: 'accent', area: true, points: pts(metrics, 'gpuUtilPct') }], fmt: pct, yMax: 100, thresholds: [{ value: 15, label: 'Idle', appearance: 'warning' }] },
-      { title: 'GPU memory', sub: 'Framebuffer used', series: [{ name: 'GPU memory', appearance: 'accent', area: true, points: pts(metrics, 'gpuMemPct') }], fmt: pct, yMax: 100, thresholds: [{ value: 95, label: 'OOM risk', appearance: 'danger' }] },
-      { title: 'CPU utilization', sub: 'Allocated cores', series: [{ name: 'CPU', appearance: 'accent', points: pts(metrics, 'cpuUtilPct') }], fmt: pct, yMax: 100 },
-      { title: 'Host memory', sub: 'RSS vs requested --mem', series: [{ name: 'RAM', appearance: 'accent', points: pts(metrics, 'memPct') }], fmt: pct, yMax: 100, thresholds: [{ value: 90, label: 'OOM-kill', appearance: 'danger' }] },
-      { title: 'I/O throughput', sub: 'Scratch read / write', series: [{ name: 'Read', appearance: 'accent', points: pts(metrics, 'ioReadMBps') }, { name: 'Write', appearance: 'info', points: pts(metrics, 'ioWriteMBps') }], fmt: (v) => `${Math.round(v)} MB/s` },
-      { title: 'Power draw', sub: 'Per GPU, watts', series: [{ name: 'Power', appearance: 'accent', points: pts(metrics, 'powerW') }], fmt: (v) => `${Math.round(v)} W` },
+    const defs: { key: string; title: string; sub: string; series: ChartSeries[]; fmt: (v: number) => string; max?: number; thresholds?: ChartThreshold[]; color?: string }[] = [
+      { key: 'util', title: 'GPU utilization', sub: 'Mean SM activity across allocated GPUs', series: [{ name: 'GPU util', data: pts(metrics, 'gpuUtilPct'), area: true, color: toneColor('good') }], fmt: pct, max: 100, thresholds: [{ value: 15, label: 'Idle below 15%', tone: 'warn' }] },
+      { key: 'mem', title: 'GPU memory used', sub: `peak ${formatPct100(Math.max(0, ...metrics.map((m) => m.gpuMemPct ?? 0)))}`, series: [{ name: 'GPU memory', data: pts(metrics, 'gpuMemPct'), area: true, color: toneColor('pink') }], fmt: pct, max: 100, thresholds: [{ value: 95, label: 'OOM risk 95%', tone: 'bad' }] },
+      { key: 'loss', title: 'Training loss', sub: latest?.trainingLoss != null ? `${latest.trainingLoss.toFixed(2)} · no NaN/Inf` : 'From the training sidecar', series: [{ name: 'Loss', data: pts(metrics, 'trainingLoss'), area: true, color: toneColor('good') }], fmt: (v) => v.toFixed(2) },
+      { key: 'io', title: 'I/O throughput', sub: 'Scratch read / write, MB/s', series: [{ name: 'Read', data: pts(metrics, 'ioReadMBps'), area: true, color: toneColor('info') }, { name: 'Write', data: pts(metrics, 'ioWriteMBps'), color: toneColor('accent') }], fmt: (v) => `${Math.round(v)}` },
+      { key: 'power', title: 'Node power', sub: 'Per-GPU average, watts', series: [{ name: 'Power', data: pts(metrics, 'powerW'), area: true, color: toneColor('warn') }], fmt: (v) => `${Math.round(v)} W` },
+      { key: 'host', title: 'CPU and host memory', sub: 'Allocated cores · RSS vs --mem', series: [{ name: 'CPU', data: pts(metrics, 'cpuUtilPct') }, { name: 'RAM', data: pts(metrics, 'memPct'), color: toneColor('info'), dashed: true }], fmt: pct, max: 100, thresholds: [{ value: 90, label: 'OOM-kill', tone: 'bad' }] },
     ];
-    return defs.map((d) => ({ ...d, option: timeSeriesOption({ series: d.series, yFormatter: d.fmt, yMax: d.yMax, thresholds: d.thresholds }) }));
-  }, [metrics]);
+    return defs.map((d) => ({ ...d, option: lineOption({ x, series: d.series, valueFormat: d.fmt, min: 0, max: d.max, thresholds: d.thresholds }) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metrics, themeKey, latest]);
 
   const run = async (action: ActionType) => {
     if (!j) return;
@@ -164,7 +159,7 @@ const RunDetail: React.FC = () => {
     setActionError(null);
     try {
       const res = await monitorTick();
-      setNote(`Simulated 15 min: ${formatInt(Number(res?.metricsAdded ?? 0))} samples, ${formatInt(Number(res?.alertsRaised ?? 0))} alerts, ${formatInt(Number(res?.actionsTaken ?? 0))} autopilot actions.`);
+      setNote(`Simulated ${res?.stepMinutes ?? 15} minutes: ${formatInt(res?.newAlerts?.length ?? 0)} new alerts, ${formatInt(res?.resolvedAlerts?.length ?? 0)} resolved, ${formatInt(res?.actions?.length ?? 0)} guardrail actions.`);
       reloadAll();
     } catch (err) {
       setActionError(errorMessage(err));
@@ -196,78 +191,179 @@ const RunDetail: React.FC = () => {
   const burn = j.elapsedHours ? (j.costUsd ?? 0) / j.elapsedHours : null;
   const ckpt = latest?.checkpointAgeMin;
 
+  const ckptTone = ckpt == null ? 'neutral' : ckpt > 60 ? 'bad' : ckpt > 30 ? 'warn' : 'good';
+  const banner = openAlerts.find((a) => a.severity === 'CRITICAL' && a.status === 'OPEN');
+  const issues = [...alerts].sort((a, b) => (a.detectedAt ?? '').localeCompare(b.detectedAt ?? ''));
+  const peakMem = Math.max(0, ...metrics.map((m) => m.gpuMemPct ?? 0));
+  const utilTrend = metrics.slice(-12).map((m) => m.gpuUtilPct ?? null);
+  const chartByKey = Object.fromEntries(charts.map((c) => [c.key, c]));
+  const chart = (k: string, height = 'h-52') => {
+    const c = chartByKey[k];
+    return (
+      <MetricChart
+        key={k}
+        title={c.title}
+        subtitle={c.sub}
+        option={c.option}
+        loading={detail.loading && !detail.data}
+        error={detail.error}
+        onRetry={detail.reload}
+        empty={metrics.length < 2}
+        emptyLabel={j.state === 'PENDING' ? 'Waiting for the job to start' : 'No samples yet'}
+        heightClass={height}
+        ariaLabel={c.title}
+        legend={c.series.length > 1 ? c.series.map((sr, i) => ({ label: sr.name, swatchClass: i === 0 ? TONE_BG.info : TONE_BG.accent, dashed: sr.dashed })) : undefined}
+      />
+    );
+  };
+
   return (
     <PageFrame
-      title={j.jobName ?? j.id}
-      description={`Slurm job ${j.slurmJobId ?? j.id} · ${j.user ?? 'unknown user'} · ${j.account ?? ''}${j.project?.name ? ` · ${j.project.name}` : ''}`}
-      breadcrumbs={crumbs}
-      badges={
-        <span className="flex gap-1">
-          <JobStateBadge value={j.state} />
-          {j.qos && <EnumBadge value={j.qos} appearance={j.qos === 'normal' ? 'secondary' : 'info'} />}
+      title={
+        <span>
+          <a href="#/runs" className={`${muted} hover:underline`}>Runs</a>
+          <span className={muted}> / </span>
+          <span className="font-mono">{j.jobName ?? j.id}</span>
         </span>
       }
+      description={[j.user, [j.cluster?.name ?? j.cluster?.id, j.partition?.name].filter(Boolean).join(' '), j.qos && `${j.qos} QOS`, j.slurmJobId && `job ${j.slurmJobId}`, j.nodeList && `node ${j.nodeList}`, j.project?.name].filter(Boolean).join(' · ')}
+      badges={banner && live ? <ToneBadge tone="warn">Needs approval</ToneBadge> : <JobStateBadge value={j.state} />}
       actions={
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" appearance="secondary" leadingIcon={<FastForward />} loading={busy === 'tick'} onClick={simulate}>
             Simulate next 15 min
           </Button>
           {live && (
+            <Button variant="outline" appearance="secondary" leadingIcon={<Save />} loading={busy === 'CHECKPOINT_NOW'} onClick={() => run('CHECKPOINT_NOW')}>
+              Checkpoint now
+            </Button>
+          )}
+          {live && (
             <Button variant="outline" appearance="danger" leadingIcon={<Ban />} onClick={() => setConfirm('CANCEL')}>
-              Cancel job
+              Cancel run
             </Button>
           )}
         </div>
       }
     >
       {actionError && <ErrorState message={actionError} />}
-      {note && !actionError && (
-        <div role="status" className={`rounded-sm border border-[var(--c3-style-basic-border-primary)] bg-[var(--c3-style-basic-bg-primary)] px-4 py-2 text-c3-regular-body-p2 ${muted}`}>
-          {note}
+      {note && !actionError && <Notice>{note}</Notice>}
+
+      {banner && live && (
+        <div role="alert" className="flex flex-wrap items-center gap-4 rounded-[var(--ec-card-radius,8px)] border border-[var(--c3-style-basic-border-danger)] bg-[var(--c3-style-basic-bg-danger)] px-5 py-4">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">{`${ALERT_TYPE_LABEL[banner.alertType] ?? banner.alertType} · ${formatClock(banner.detectedAt)}`}</div>
+            <div className={`mt-0.5 text-[13px] ${muted}`}>{banner.message}</div>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button variant="outline" appearance="secondary" size="sm" loading={busy === banner.id} onClick={() => acknowledge(banner)}>
+              Acknowledge
+            </Button>
+            {banner.recommendedAction && (
+              <Button size="sm" appearance={banner.recommendedAction === 'CANCEL' ? 'danger' : 'accent'} loading={busy === banner.recommendedAction} onClick={() => request(banner.recommendedAction as ActionType)}>
+                {ACTION_LABEL[banner.recommendedAction]}
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
-      <Container>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-4 md:grid-cols-3 xl:grid-cols-6">
-          <Stat label="Cluster / partition" value={j.cluster?.name ?? j.cluster?.id} sub={`${j.partition?.name ?? j.partition?.id ?? '—'} · ${j.nodeList ?? ''}`} />
-          <Stat label="Resources" value={`${j.allocGpus ?? 0}× ${j.gpuType?.id ?? 'CPU'}`} sub={`${j.allocNodes ?? 1} node · ${j.allocCpus ?? '—'} cores`} />
-          <div className="flex min-w-0 flex-col gap-1">
-            <Stat label="Walltime left" value={formatDuration(left)} sub={`${formatDuration(j.elapsedHours)} of ${formatDuration(j.timelimitHours)} used`} />
-            <Meter value={wallFrac} appearance={wallFrac > 0.9 ? 'danger' : wallFrac > 0.75 ? 'warning' : 'accent'} label="Walltime used" />
-          </div>
-          <Stat label="Cost so far" value={formatUsd(j.costUsd)} sub={burn != null ? `${formatUsd(burn)}/h burn` : undefined} />
-          <Stat label="GPU util now" value={formatPct100(latest?.gpuUtilPct)} sub={`avg ${formatPct100(j.gpuUtilAvg)} since start`} />
-          <Stat
-            label="Last checkpoint"
-            value={<span className={ckpt != null && ckpt > 60 ? 'text-[var(--c3-style-basic-fg-danger)]' : undefined}>{ckpt != null ? `${formatDuration(ckpt / 60)} ago` : '—'}</span>}
-            sub={j.startTime ? `Started ${formatDateTime(j.startTime)}` : `Queued ${formatRelative(j.submitTime)}`}
-          />
-        </div>
-      </Container>
+      <KpiRow>
+        <KpiTile
+          label="Walltime"
+          value={formatDuration(j.elapsedHours)}
+          unit={`of ${formatDuration(j.timelimitHours)}`}
+          caption={j.state === 'RUNNING' ? <span className="inline-flex items-center gap-1"><Countdown hoursLeft={left} icon={false} /></span> : (j.startTime ? `Started ${formatDateTime(j.startTime)}` : `Queued ${formatRelative(j.submitTime)}`)}
+          tone={wallFrac > 0.9 ? 'bad' : wallFrac > 0.75 ? 'warn' : 'good'}
+        />
+        <KpiTile
+          label="GPU utilization"
+          value={formatPct100(latest?.gpuUtilPct)}
+          unit={`${j.allocGpus ?? 0} × ${j.gpuType?.id ?? 'GPU'}`}
+          caption={`${formatPct100(j.gpuUtilAvg)} average since start`}
+          trend={utilTrend.length > 1 ? (utilTrend as number[]) : undefined}
+          trendTone={utilTone(latest?.gpuUtilPct)}
+        />
+        <KpiTile
+          label="GPU memory · checkpoint"
+          value={formatPct100(latest?.gpuMemPct)}
+          unit={`peak ${formatPct100(peakMem)}`}
+          tone={peakMem >= 95 ? 'bad' : peakMem >= 88 ? 'warn' : undefined}
+          caption={<span className={ckptTone === 'bad' ? 'text-[var(--c3-style-basic-fg-danger)]' : undefined}>{ckpt != null ? `Last checkpoint ${formatDuration(ckpt / 60)} ago` : 'No checkpoint reported'}</span>}
+        />
+        <KpiTile label="Charged so far" value={formatUsd(j.costUsd)} unit={j.costUnits != null ? `${formatInt(j.costUnits)} units` : undefined} caption={burn != null ? `${formatUsd(burn)}/h burn rate` : 'Not started'} />
+      </KpiRow>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <div className="flex min-w-0 flex-col gap-4 xl:col-span-2">
-          <Container title="Alerts" subtitle={openAlerts.length ? `${openAlerts.length} open — recommended fixes are one click` : 'Health rules on the latest 60-minute window'}>
-            {openAlerts.length === 0 ? (
-              <EmptyBlock icon={<ShieldCheck className="size-6 text-[var(--c3-style-basic-fg-success)]" aria-hidden />} label={detail.loading && !detail.data ? 'Checking health…' : 'No open alerts. This run looks healthy.'} />
-            ) : (
-              <ul className="flex flex-col gap-3">
-                {openAlerts.map((a) => {
-                  const Icon = a.recommendedAction ? ACTION_ICON[a.recommendedAction] : CheckCheck;
-                  return (
-                    <li
-                      key={a.id}
-                      className="flex flex-col gap-3 rounded-sm border border-[var(--c3-style-basic-border-primary)] p-4 md:flex-row md:items-center"
-                    >
-                      <div className="flex min-w-0 flex-1 flex-col gap-1">
-                        <span className="flex flex-wrap items-center gap-2">
-                          <AlertTypeBadge type={a.alertType} severity={a.severity} />
-                          {a.status === 'ACKED' && <EnumBadge value="Acknowledged" appearance="secondary" />}
-                          {a.autoActionTaken && <EnumBadge value="Autopilot acted" appearance="accent" />}
-                          <span className={`text-xs ${muted}`}>{formatRelative(a.detectedAt)}</span>
-                        </span>
-                        <span className="text-c3-regular-body-p2 text-[var(--c3-style-basic-fg-primary)]">{a.message}</span>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} variant="bordered">
+        <TabsList>
+          <TabsTrigger value="metrics">Metrics</TabsTrigger>
+          <TabsTrigger value="events">{`Events${issues.length ? ` (${issues.length})` : ''}`}</TabsTrigger>
+          <TabsTrigger value="activity">{`Activity${log.length ? ` (${log.length})` : ''}`}</TabsTrigger>
+          <TabsTrigger value="actions">Actions</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {tab === 'metrics' && (
+        <>
+          <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+            {chart('util', 'h-64')}
+            <SectionCard title="Detected issues" actions={<HeadNote>{`${issues.length} on this run`}</HeadNote>}>
+              {issues.length === 0 ? (
+                <EmptyState icon={<ShieldCheck />} title={detail.loading && !detail.data ? 'Checking health…' : 'No issues detected'} hint="Idle GPUs, OOM risk, walltime, checkpoints and budget are checked every 5 minutes." className="py-6" />
+              ) : (
+                <ol className="flex flex-col">
+                  {issues.map((a, i) => (
+                    <li key={a.id} className="grid grid-cols-[44px_22px_minmax(0,1fr)] gap-2 border-b border-[var(--c3-style-basic-border-border)] py-3 first:pt-0 last:border-b-0 last:pb-0">
+                      <span className={`pt-0.5 font-mono text-[11.5px] ${muted}`}>{formatClock(a.detectedAt)}</span>
+                      <span className={`mt-0.5 flex size-5 items-center justify-center rounded-full text-[11px] font-semibold ${a.status === 'OPEN' ? (a.severity === 'CRITICAL' ? 'bg-[var(--c3-style-basic-bg-danger)] text-[var(--c3-style-basic-fg-danger)]' : 'bg-[var(--c3-style-basic-bg-warning)] text-[var(--c3-style-basic-fg-warning)]') : 'bg-[var(--c3-style-basic-bg-success)] text-[var(--c3-style-basic-fg-success)]'}`}>
+                        {i + 1}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">{ALERT_TYPE_LABEL[a.alertType] ?? a.alertType}</div>
+                        <div className={`text-[13px] ${muted}`}>{a.message}</div>
+                        <div className={`mt-0.5 text-[12px] ${muted}`}>
+                          {a.status === 'OPEN' || a.status === 'ACKED'
+                            ? `Suggested: ${a.recommendedAction ? ACTION_LABEL[a.recommendedAction] : 'review'}${a.status === 'ACKED' ? ' · acknowledged' : ''}`
+                            : `${a.autoActionTaken ? 'Guardrail acted · ' : ''}${a.status === 'AUTO_RESOLVED' ? 'Cleared on its own' : 'Resolved'}`}
+                        </div>
                       </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </SectionCard>
+          </div>
+          <CardGrid layout="halves">
+            {chart('mem')}
+            {chart('loss')}
+            {chart('io')}
+            {chart('power')}
+          </CardGrid>
+          {chart('host', 'h-44')}
+        </>
+      )}
+
+      {tab === 'events' && (
+        <SectionCard title="Alerts" subtitle={openAlerts.length ? `${openAlerts.length} open · recommended fixes are one click` : 'Health rules run on the latest 60-minute window'}>
+          {alerts.length === 0 ? (
+            <EmptyState icon={<ShieldCheck />} title="No alerts on this run" className="py-6" />
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {[...openAlerts, ...alerts.filter((a) => !openAlerts.includes(a))].map((a) => {
+                const Icon = a.recommendedAction ? ACTION_ICON[a.recommendedAction] : CheckCheck;
+                const isOpen = a.status === 'OPEN' || a.status === 'ACKED';
+                return (
+                  <li key={a.id} className="flex flex-col gap-3 rounded-[var(--ec-card-radius,8px)] border border-[var(--c3-style-basic-border-border)] p-4 md:flex-row md:items-center">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <AlertTypeBadge type={a.alertType} severity={a.severity} />
+                        <StatusBadge kind="alertStatus" value={a.status} />
+                        {a.autoActionTaken && <ToneBadge tone="accent">Auto-fixed</ToneBadge>}
+                        <span className={`text-xs ${muted}`}>{formatRelative(a.detectedAt)}</span>
+                      </span>
+                      <span className="text-[13px] text-[var(--c3-style-basic-fg-primary)]">{a.message}</span>
+                    </div>
+                    {isOpen && (
                       <div className="flex shrink-0 flex-wrap gap-2">
                         {a.status === 'OPEN' && (
                           <Button variant="ghost" appearance="secondary" size="sm" loading={busy === a.id} onClick={() => acknowledge(a)}>
@@ -275,94 +371,73 @@ const RunDetail: React.FC = () => {
                           </Button>
                         )}
                         {a.recommendedAction && live && (
-                          <Button
-                            size="sm"
-                            appearance={a.recommendedAction === 'CANCEL' ? 'danger' : 'accent'}
-                            leadingIcon={<Icon />}
-                            loading={busy === a.recommendedAction}
-                            onClick={() => request(a.recommendedAction as ActionType)}
-                          >
+                          <Button size="sm" appearance={a.recommendedAction === 'CANCEL' ? 'danger' : 'accent'} leadingIcon={<Icon />} loading={busy === a.recommendedAction} onClick={() => request(a.recommendedAction as ActionType)}>
                             {ACTION_LABEL[a.recommendedAction]}
                           </Button>
                         )}
                       </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Container>
-
-          {detail.error && <ErrorState message={`Could not load metrics: ${detail.error}`} onRetry={detail.reload} />}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            {charts.map((c) => (
-              <Container key={c.title} title={c.title} subtitle={c.sub}>
-                {metrics.length < 2 ? (
-                  <EmptyBlock label={detail.loading && !detail.data ? 'Loading samples…' : j.state === 'PENDING' ? 'Waiting for the job to start.' : 'No samples yet.'} />
-                ) : (
-                  <EChart ariaLabel={c.title} option={c.option} className="h-52" />
-                )}
-              </Container>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex min-w-0 flex-col gap-4">
-          <Container title="Actions" subtitle={live ? 'Every action is logged with its Slurm command' : 'This run has ended'}>
-            <ul className="flex flex-col gap-1">
-              {MANUAL_ACTIONS.map((a) => {
-                const Icon = ACTION_ICON[a];
-                return (
-                  <li key={a}>
-                    <button
-                      type="button"
-                      disabled={!live || busy !== null}
-                      onClick={() => request(a)}
-                      className="flex w-full items-center gap-3 rounded-sm px-2 py-2 text-left hover:bg-[var(--c3-style-basic-bg-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <Icon className={`size-4 shrink-0 ${a === 'CANCEL' ? 'text-[var(--c3-style-basic-fg-danger)]' : 'text-[var(--c3-style-basic-fg-accent)]'}`} aria-hidden />
-                      <span className="flex min-w-0 flex-col">
-                        <span className="text-c3-bold-body-p2 text-[var(--c3-style-basic-fg-primary)]">{ACTION_LABEL[a]}</span>
-                        <span className={`truncate text-xs ${muted}`}>{ACTION_HELP[a]}</span>
-                      </span>
-                    </button>
+                    )}
                   </li>
                 );
               })}
             </ul>
-          </Container>
+          )}
+        </SectionCard>
+      )}
 
-          <Container title="Activity" subtitle="Autopilot and user actions on this run">
-            {log.length === 0 ? (
-              <EmptyBlock icon={<Clock className="size-6" aria-hidden />} label="No actions yet." />
-            ) : (
-              <ol className="relative flex flex-col gap-4 border-l border-[var(--c3-style-basic-border-primary)] pl-5">
-                {log.map((e) => {
-                  const Icon = e.actor === 'AUTOPILOT' ? Bot : e.actor === 'ADMIN' ? ShieldCheck : User;
-                  return (
-                    <li key={e.id} className="relative">
-                      <span className="absolute top-0.5 -left-[29px] flex size-4 items-center justify-center rounded-full bg-[var(--c3-style-basic-bg-primary)] ring-1 ring-[var(--c3-style-basic-border-primary)]">
-                        <Icon className={`size-3 ${e.actor === 'AUTOPILOT' ? 'text-[var(--c3-style-basic-fg-accent)]' : muted}`} aria-hidden />
-                      </span>
-                      <div className="flex flex-col gap-0.5">
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="text-c3-bold-body-p2 text-[var(--c3-style-basic-fg-primary)]">{ACTION_LABEL[e.actionType] ?? e.actionType}</span>
-                          <ActorBadge value={e.actor} />
-                          {e.outcome && e.outcome !== 'DONE' && <EnumBadge value={titleCase(e.outcome)} appearance={e.outcome === 'FAILED' ? 'danger' : 'warning'} />}
-                        </span>
-                        {e.detail && <span className={`break-words font-mono text-xs ${muted}`}>{e.detail}</span>}
-                        <span className={`text-xs ${muted}`} title={formatDateTime(e.actedAt)}>
-                          {formatClock(e.actedAt)} · {formatRelative(e.actedAt)}
-                        </span>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
-          </Container>
-        </div>
-      </div>
+      {tab === 'activity' && (
+        <SectionCard title="Activity" subtitle="Guardrail and user actions on this run, with the Slurm command each one ran">
+          {log.length === 0 ? (
+            <EmptyState icon={<Clock />} title={detail.loading && !detail.data ? 'Loading…' : 'No actions yet'} className="py-6" />
+          ) : (
+            <ul className="flex flex-col">
+              {log.map((e) => (
+                <ActivityRow
+                  key={e.id}
+                  time={formatClock(e.actedAt)}
+                  icon={e.actor === 'AUTOPILOT' ? <Bot /> : e.actor === 'ADMIN' ? <ShieldCheck /> : <User />}
+                  title={
+                    <span className="flex flex-wrap items-center gap-2">
+                      {ACTION_LABEL[e.actionType] ?? e.actionType}
+                      <StatusBadge kind="actor" value={e.actor} />
+                      {e.outcome && e.outcome !== 'DONE' && <StatusBadge kind="actionOutcome" value={e.outcome} />}
+                    </span>
+                  }
+                  detail={e.detail ? <span className="font-mono text-[12px] break-words">{e.detail}</span> : undefined}
+                />
+              ))}
+            </ul>
+          )}
+        </SectionCard>
+      )}
+
+      {tab === 'actions' && (
+        <SectionCard title="Actions" subtitle={live ? 'Every action is logged with its Slurm command' : 'This run has ended'}>
+          <ul className="grid grid-cols-1 gap-1 md:grid-cols-2">
+            {MANUAL_ACTIONS.map((a) => {
+              const Icon = ACTION_ICON[a];
+              return (
+                <li key={a}>
+                  <button
+                    type="button"
+                    disabled={!live || busy !== null}
+                    onClick={() => request(a)}
+                    className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left hover:bg-[var(--c3-style-basic-bg-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <span className={`flex size-8 shrink-0 items-center justify-center rounded-md bg-[var(--c3-style-basic-bg-secondary)] ${a === 'CANCEL' ? 'text-[var(--c3-style-basic-fg-danger)]' : 'text-[var(--c3-style-basic-fg-primary)]'}`}>
+                      <Icon className="size-4" aria-hidden />
+                    </span>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="text-[13px] font-medium text-[var(--c3-style-basic-fg-primary)]">{ACTION_LABEL[a]}</span>
+                      <span className={`truncate text-xs ${muted}`}>{ACTION_HELP[a]}</span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </SectionCard>
+      )}
 
       <Modal open={confirm !== null} onOpenChange={(open) => !open && !busy && setConfirm(null)}>
         <ModalContent width={460} aria-describedby="confirm-action-subtitle">
@@ -371,7 +446,7 @@ const RunDetail: React.FC = () => {
             <ModalSubtitle id="confirm-action-subtitle">{confirm ? ACTION_HELP[confirm] : ''}</ModalSubtitle>
           </ModalHeader>
           <ModalBody>
-            <p className="text-c3-regular-body-p2">
+            <p className="text-sm">
               {confirm === 'CANCEL'
                 ? `Cancel ${j.jobName}? Work since the last checkpoint (${ckpt != null ? `${Math.round(ckpt)} min` : 'unknown'}) will be lost.`
                 : `Apply "${confirm ? ACTION_LABEL[confirm] : ''}" to ${j.jobName}? The job restarts from its last checkpoint.`}

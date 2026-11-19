@@ -31,7 +31,7 @@ entity type Lab {
   contextDump: string
 
   /**
-   * Comma-separated Slurm accounts (for example "asc170016,asc170016-gpu").
+   * Comma-separated Slurm accounts (for example "ees250031,ees250031-gpu").
    */
   slurmAccounts: string
 

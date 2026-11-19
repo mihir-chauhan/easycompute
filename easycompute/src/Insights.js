@@ -103,6 +103,16 @@ function grouped(type, group, measures, filter) {
   return out;
 }
 
+/** GPU-hours of a job (allocated GPUs x elapsed hours). */
+function jobGpuHours(j) {
+  return num(j.allocGpus, 0) * num(j.elapsedHours, 0);
+}
+
+/** GPU-hours allocated but idle: GPU-hours x (100 - average GPU utilization) / 100; 0 without utilization data. */
+function jobWastedGpuHours(j) {
+  return j.gpuUtilAvg == null ? 0 : (jobGpuHours(j) * (100 - num(j.gpuUtilAvg, 0))) / 100;
+}
+
 // ---------------------------------------------------------------- predictDuration
 
 function memoryNeedGb(workloadType, paramsB) {
@@ -277,14 +287,14 @@ function labSummary(labId) {
 
   Job.fetchObjStream({
     filter: Filter.eq('lab.id', labId),
-    include: 'user, cluster, state, submitTime, timelimitHours, elapsedHours, allocGpus, gpuHours, wastedGpuHours, gpuUtilAvg, cpuEfficiency, memEfficiency, costUnits, costUsd, workloadType, isLive',
+    include: 'user, cluster, state, submitTime, timelimitHours, elapsedHours, allocGpus, gpuUtilAvg, cpuEfficiency, memEfficiency, costUnits, costUsd, workloadType, isLive',
   }).each(function (j) {
     var st = String(j.state);
     stateCounts[st] = (stateCounts[st] || 0) + 1;
     if (j.isLive && (st == 'RUNNING' || st == 'PENDING')) return;
-    var gh = num(j.gpuHours, num(j.allocGpus, 0) * num(j.elapsedHours, 0));
+    var gh = jobGpuHours(j);
     var cost = num(j.costUsd, 0);
-    var wasted = num(j.wastedGpuHours, 0);
+    var wasted = jobWastedGpuHours(j);
     var t = ms(j.submitTime);
     k.jobs++;
     k.gpuHours += gh;
@@ -522,10 +532,31 @@ function universityOverview() {
   var partitions = list(Partition.fetch({ limit: 500 }).objs);
   var labs = list(Lab.fetch({ limit: 500 }).objs);
 
-  // history aggregates in the database
-  var byCluster = grouped(Job, 'cluster.id', ['count()', 'sum(gpuHours)', 'sum(costUsd)'], null);
-  var byBilling = grouped(Job, 'cluster.billing', ['count()', 'sum(gpuHours)', 'sum(costUsd)'], null);
-  var byLab = grouped(Job, 'lab.id', ['sum(gpuHours)', 'sum(costUsd)', 'sum(wastedGpuHours)'], null);
+  // history aggregates: one streamed pass (GPU-hours are computed here, not from a stored calc)
+  var billingOf = {};
+  clusters.forEach(function (c) {
+    billingOf[c.id] = String(c.billing);
+  });
+  var byCluster = {};
+  var byBilling = {};
+  var byLab = {};
+  var perJob = {};
+  var add = function (m, k, vals) {
+    if (k == null) return;
+    var e = (m[k] = m[k] || vals.map(function () { return 0; }));
+    vals.forEach(function (v, i) {
+      e[i] += v;
+    });
+  };
+  Job.fetchObjStream({ include: 'cluster, lab, partition, isLive, allocGpus, elapsedHours, gpuUtilAvg, costUsd' }).each(function (j) {
+    var gh = jobGpuHours(j);
+    var cost = num(j.costUsd, 0);
+    var cid = j.cluster ? j.cluster.id : null;
+    add(byCluster, cid, [1, gh, cost]);
+    add(byBilling, cid ? billingOf[cid] : null, [1, gh, cost]);
+    add(byLab, j.lab ? j.lab.id : null, [gh, cost, jobWastedGpuHours(j)]);
+    if (!j.isLive) add(perJob, j.partition ? j.partition.id : null, [1, gh]);
+  });
   var liveByCluster = grouped(Job, 'cluster.id', ['count()'], Filter.eq('isLive', true).and().intersects('state', ['RUNNING', 'PENDING']));
 
   // live jobs: running GPUs, pending GPU demand per partition, idle jobs
@@ -548,8 +579,6 @@ function universityOverview() {
     }
   });
 
-  // median GPU-hours per job per partition, to size the queue backlog
-  var perJob = grouped(Job, 'partition.id', ['count()', 'sum(gpuHours)'], Filter.eq('isLive', false));
 
   var types = gpuTypeMap();
   // partitions on the same (cluster, GPU type) are QOS views of the same hardware: share its capacity
@@ -745,10 +774,10 @@ function universityOverview() {
   });
   var gtByWeek = {};
   var since = weeks[0];
-  Job.fetchObjStream({ filter: "submitTime >= dateTime('" + since + "')", include: 'submitTime, gpuHours, allocGpus, timelimitHours, gpuType, state' }).each(function (j) {
+  Job.fetchObjStream({ filter: "submitTime >= dateTime('" + since + "')", include: 'submitTime, allocGpus, elapsedHours, timelimitHours, gpuType, state' }).each(function (j) {
     var i = wIdx[weekKey(ms(j.submitTime))];
     if (i == null) return;
-    var gh = j.state == 'PENDING' || j.state == 'RUNNING' ? num(j.allocGpus, 0) * num(j.timelimitHours, 0) : num(j.gpuHours, 0);
+    var gh = j.state == 'PENDING' || j.state == 'RUNNING' ? num(j.allocGpus, 0) * num(j.timelimitHours, 0) : jobGpuHours(j);
     wGh[i] += gh;
     wJobs[i]++;
     if (j.gpuType) {

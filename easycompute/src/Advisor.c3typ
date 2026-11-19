@@ -128,7 +128,8 @@ type Advisor {
    * @param clusterId     Requested cluster: anvil, gilbreth, gautschi, negishi, bell or aws-p4d.
    * @param modelParamsB  Model size in billions of parameters.
    * @param datasetGb     Dataset size in GB.
-   * @param deadline      Deadline as YYYY-MM-DD or a weekday name such as Friday; defaults to the project deadline.
+   * @param deadline      Deadline as YYYY-MM-DD or a weekday name such as Friday, inclusive (the run may finish any time
+   *                      that day, until 23:59 UTC); defaults to the project deadline.
    * @return rule check results, ranked plans and remaining budget as JSON text, including runRequestId and planId values.
    */
   evaluateRun: function(labId: !string, name: string, description: string, workloadType: string, project: string, gpuTypeId: string, gpus: int, walltimeHours: double, clusterId: string, modelParamsB: double, datasetGb: double, deadline: string): !string js-server

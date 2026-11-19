@@ -179,6 +179,10 @@ export interface RuleCheck {
   outcome: CheckOutcome;
   message?: string;
   checkedAt?: string;
+  title?: string;
+  ruleKind?: string;
+  severity?: RuleSeverity;
+  scope?: RuleScope;
 }
 
 export interface RunPlan {
@@ -200,6 +204,18 @@ export interface RunPlan {
   label?: 'Fastest' | 'Cheapest' | 'Balanced' | string;
   rationale?: string;
   sbatchScript?: string;
+  qos?: string;
+  account?: string;
+  slurmPartition?: string;
+  waitBucket?: string;
+  waitReason?: string;
+  chainedJobs?: number;
+  preemptionRisk?: number;
+  gpuMemNeedGb?: number;
+  costPerGpuHourUsd?: number;
+  finishBy?: string;
+  deadlineSlackHours?: number | null;
+  ruleWarnings?: number;
 }
 
 export interface Job {
@@ -235,6 +251,8 @@ export interface Job {
   exitCode?: string;
   nodeList?: string;
   isLive?: boolean;
+  gpuHours?: number;
+  wastedGpuHours?: number;
 }
 
 export interface JobMetric {
@@ -283,42 +301,124 @@ export interface FetchResult<T> {
   hasMore?: boolean;
 }
 
-/** One day of the allocation burn-down (cumulative spend vs the straight-line plan). */
-export interface BurnPoint {
-  date: string;
-  usedUsd: number;
-  planUsd?: number;
+export interface SummaryAllocation {
+  id: string;
+  name?: string;
+  clusterId?: string;
+  clusterName?: string;
+  source?: string;
+  grantName?: string;
+  unitName?: string;
+  totalUnits?: number;
+  usedUnits?: number;
+  remainingUnits?: number;
+  pctUsed?: number;
+  remainingUsd?: number;
+  startDate?: string;
+  endDate?: string;
+  daysLeft?: number;
+  burnPerDay?: number;
+  projectedRunOut?: string | null;
+  runsOutBeforeEnd?: boolean;
 }
 
-/** `Insights.labSummary(labId)` — numbers for the Lab Home tiles and burn chart. */
+export interface SummaryDeadline {
+  projectId: string;
+  name: string;
+  deadline: string;
+  deadlineLabel?: string;
+  daysLeft?: number;
+  priority?: number;
+  workloadType?: WorkloadType;
+}
+
+export interface UserUsage {
+  user: string;
+  jobs: number;
+  gpuHours: number;
+  costUsd: number;
+  avgGpuUtil?: number | null;
+  wastedGpuHours?: number;
+  avgCpuEfficiency?: number | null;
+  timeEfficiency?: number | null;
+}
+
+export interface Recommendation {
+  kind: string;
+  title: string;
+  detail?: string;
+  impact?: string;
+}
+
+/** `Insights.labSummary(labId)` (API.md section 4). */
 export interface LabSummary {
-  labId?: string;
-  allocationUsd?: number;
-  usedUsd?: number;
-  remainingUsd?: number;
-  burnRateUsdPerDay?: number;
-  projectedExhaustDate?: string | null;
-  runningJobs?: number;
-  pendingJobs?: number;
-  liveGpus?: number;
-  openAlerts?: number;
-  criticalAlerts?: number;
-  efficiencyScore?: number;
-  efficiencyScorePrev?: number;
-  gpuHours30d?: number;
-  wastedGpuHours30d?: number;
-  spend30dUsd?: number;
-  burn?: BurnPoint[];
+  asOf?: string;
+  lab?: Lab;
+  kpis: {
+    liveJobs?: number;
+    runningJobs?: number;
+    pendingJobs?: number;
+    runningGpus?: number;
+    openAlerts?: number;
+    criticalAlerts?: number;
+    jobs?: number;
+    gpuHours?: number;
+    costUsd?: number;
+    wastedGpuHours?: number;
+    wastePct?: number;
+    avgGpuUtil?: number;
+    failedJobs?: number;
+    failRate?: number;
+    gpuHours30d?: number;
+    costUsd30d?: number;
+    allocationRemainingUsd?: number;
+  };
+  allocations: SummaryAllocation[];
+  deadlines: SummaryDeadline[];
+  usageByCluster?: { clusterId: string; name: string; jobs: number; gpuHours: number; costUsd: number }[];
+  usageByUser?: UserUsage[];
+  usageByWorkload?: { workloadType: string; jobs: number; gpuHours: number; avgGpuUtil?: number }[];
+  stateMix?: { state: string; count: number }[];
+  efficiency?: { avgCpuEfficiency?: number; avgMemEfficiency?: number; avgGpuUtil?: number; timeEfficiency?: number };
+  weekly?: { week: string; jobs: number; gpuHours: number; costUsd: number }[];
+  recommendations?: Recommendation[];
 }
 
 /** `RunMonitor.tick()` summary. */
 export interface TickSummary {
-  jobsAdvanced?: number;
-  metricsAdded?: number;
-  alertsRaised?: number;
-  actionsTaken?: number;
-  simulatedAt?: string;
-  [key: string]: unknown;
+  simulatedTo?: string;
+  stepMinutes?: number;
+  advanced?: number;
+  started?: string[];
+  finished?: { jobId: string; state: string }[];
+  newAlerts?: { id: string; jobId: string; alertType: string; severity: string; message?: string }[];
+  resolvedAlerts?: string[];
+  actions?: { id: string; jobId: string; actionType: string; outcome?: string; detail?: string }[];
+  openAlerts?: number;
+  liveJobs?: number;
+}
+
+/** `Advisor.extractConstraints(labId, text)` (advisor agent; see pages/Assistant/types.ts `LabConstraints`). */
+export interface LabConstraints {
+  source: string;
+  cached?: boolean;
+  llmError?: string;
+  summary?: string;
+  warnings?: string[];
+  budgets: { kind: string; amount: number; period?: string; scope?: string | null; evidence?: string }[];
+  deadlines: { label: string; date: string; daysAway?: number | null; evidence?: string }[];
+  preferences: {
+    clusters?: string[];
+    gpuTypes?: string[];
+    avoid?: string[];
+    preemptibleOk?: boolean | null;
+    maxWalltimeHours?: number | null;
+    quietHours?: string | null;
+    notes?: string[];
+  };
+  dataRestrictions: { kind: string; description?: string; evidence?: string }[];
+  memberCaps?: { who: string; pct: number; evidence?: string }[];
+  approvals?: { threshold: number; unit: string; evidence?: string }[];
 }
 
 /** A constraint the advisor parsed out of the lab's context dump; editable before saving as a LAB Policy. */

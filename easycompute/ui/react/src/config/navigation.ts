@@ -3,24 +3,34 @@
  * Confidential and Proprietary C3 Materials.
  */
 
-import { Activity, BookOpenText, ChartColumn, LayoutDashboard, Rocket, ScrollText, Server, Sparkles, Users } from 'lucide-react';
+import { Activity, FileText, House, LayoutDashboard, List, Rocket, ScrollText, Server, ShieldCheck, Sparkles, Users, Wallet, Zap } from 'lucide-react';
 
 import type { ShellNavItem } from '@/components/app/AppShell';
 
-/** Side nav of the Lab view. Paths must match routes in App.tsx. */
-export const LAB_NAV: ShellNavItem[] = [
-  { path: '/', label: 'Lab Home', icon: LayoutDashboard },
-  { path: '/plan', label: 'Plan a Run', icon: Rocket },
-  { path: '/runs', label: 'Live Runs', icon: Activity },
-  { path: '/history', label: 'History & Insights', icon: ChartColumn },
-  { path: '/context', label: 'Lab Context', icon: BookOpenText },
-  { path: '/assistant', label: 'AI Advisor', icon: Sparkles },
+/** Lab-view side nav, grouped like the mockup. Paths must match routes in App.tsx. */
+export const labNav = (liveCount?: number): ShellNavItem[] => [
+  { path: '/', label: 'Overview', icon: House },
+  { path: '/context', label: 'Lab context', icon: FileText, group: 'Before a run' },
+  { path: '/policies', label: 'Policies & rules', icon: ShieldCheck, group: 'Before a run' },
+  { path: '/plan', label: 'Launch planner', icon: Rocket, group: 'Before a run' },
+  { path: '/runs', label: 'Runs', icon: List, group: 'Before a run' },
+  {
+    path: '/monitor',
+    label: 'Live monitor',
+    icon: Activity,
+    group: 'During a run',
+    badge: liveCount ? `${liveCount} live` : undefined,
+    badgeTone: 'live',
+  },
+  { path: '/guardrails', label: 'Guardrails', icon: Zap, group: 'During a run', badge: 'New' },
+  { path: '/history', label: 'Allocations & usage', icon: Wallet, group: 'Lab' },
+  { path: '/assistant', label: 'AI Advisor', icon: Sparkles, group: 'Lab' },
 ];
 
-/** Side nav of the Research Computing view (every path under /admin). */
+/** Research Computing side nav (every path under /admin). */
 export const ADMIN_NAV: ShellNavItem[] = [
-  { path: '/admin', label: 'Overview', icon: LayoutDashboard },
-  { path: '/admin/clusters', label: 'Clusters', icon: Server },
-  { path: '/admin/policies', label: 'Policies', icon: ScrollText },
-  { path: '/admin/labs', label: 'Labs', icon: Users },
+  { path: '/admin', label: 'Overview', icon: LayoutDashboard, group: 'Research Computing' },
+  { path: '/admin/clusters', label: 'Clusters', icon: Server, group: 'Research Computing' },
+  { path: '/admin/policies', label: 'Policies', icon: ScrollText, group: 'Research Computing' },
+  { path: '/admin/labs', label: 'Labs', icon: Users, group: 'Research Computing' },
 ];

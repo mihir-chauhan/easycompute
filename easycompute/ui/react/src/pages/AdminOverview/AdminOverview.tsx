@@ -250,7 +250,7 @@ export default function AdminOverview() {
             { label: 'Target', swatchClass: 'bg-[var(--ec-ink-soft)]' },
             { label: 'Balanced', swatchClass: 'bg-[var(--ec-good)]' },
             { label: 'Over target (>125%)', swatchClass: 'bg-[var(--ec-warn)]' },
-            { label: 'Under target (<75%)', swatchClass: 'bg-[var(--ec-cluster-anvil)]' },
+            { label: 'Under target (<75%)', swatchClass: 'bg-[var(--ec-info)]' },
           ]}
           onItemClick={() => navigate('/admin/labs')}
         />

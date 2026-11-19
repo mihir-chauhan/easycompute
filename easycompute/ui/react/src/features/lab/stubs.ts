@@ -14,7 +14,7 @@
 import type {
   ActionLog,
   Alert,
-  ExtractedConstraint,
+  LabConstraints,
   Job,
   JobMetric,
   LabSummary,
@@ -166,7 +166,7 @@ const history: Job[] = Array.from({ length: 420 }, (_, i) => {
   const end = iso(-(i * 0.2 + 0.5) * D);
   return {
     id: `h-${i}`, user: users[i % 5], jobName: ['train', 'sweep', 'eval', 'ft'][i % 4] + `-${i}`, state, workloadType: (['TRAINING', 'FINETUNE', 'INFERENCE', 'DATA_PROCESSING'] as const)[i % 4],
-    cluster: ref(cl), allocGpus: gpus, allocCpus: gpus * 12, timelimitHours: lim, elapsedHours: el, gpuUtilAvg: util, cpuEfficiency: 0.1 + rnd() * 0.8,
+    cluster: ref(cl), gpuType: ref(cl === 'gautschi' ? 'H100-80GB' : 'A100-80GB'), allocGpus: gpus, allocCpus: gpus * 12, timelimitHours: lim, elapsedHours: el, gpuUtilAvg: util, cpuEfficiency: 0.1 + rnd() * 0.8,
     memEfficiency: 0.05 + rnd() * 0.85, costUsd: el * gpus * clusters[cl].usd * (cl === 'anvil' ? 20 : 1), endTime: end, startTime: new Date(new Date(end).getTime() - el * H).toISOString(),
     project: ref(projects[i % 4].id, projects[i % 4].name),
   } as Job;
@@ -178,14 +178,25 @@ const checks: Record<string, RuleCheck[]> = {};
 const plans: Record<string, RunPlan[]> = {};
 
 function summary(labId: string): LabSummary {
-  const live = jobs.filter((j) => j.lab?.id === labId || labId === 'lab-vision');
-  const burn = Array.from({ length: 60 }, (_, i) => ({ date: iso(-(59 - i) * D).slice(0, 10), usedUsd: 38000 + i * 520 + Math.round(rnd() * 400) + (i > 45 ? (i - 45) * 380 : 0), planUsd: 38000 + i * 610 }));
+  const live = jobs.filter((j) => j.isLive);
+  const allocs = allocations(labId).map((a) => {
+    const total = a.totalUnits;
+    const used = a.usedUnits;
+    const days = Math.round((new Date(a.endDate).getTime() - NOW) / D);
+    const burnPerDay = Math.round(used / Math.max(1, (NOW - new Date(a.startDate).getTime()) / D));
+    const runOutDays = (total - used) / Math.max(1, burnPerDay);
+    const usd = a.unitName === 'USD' ? 1 : a.unitName === 'SU' ? 0.01 : 2;
+    return { id: a.id, name: a.grantName, clusterId: a.cluster.id, clusterName: a.cluster.name, source: a.source, grantName: a.grantName, unitName: a.unitName, totalUnits: total, usedUnits: used, remainingUnits: total - used, pctUsed: used / total, remainingUsd: (total - used) * usd, startDate: a.startDate, endDate: a.endDate, daysLeft: days, burnPerDay, projectedRunOut: runOutDays < days ? iso(runOutDays * D) : null, runsOutBeforeEnd: runOutDays < days };
+  });
+  const weekly = Array.from({ length: 12 }, (_, i) => ({ week: iso(-(11 - i) * 7 * D).slice(0, 10), jobs: 30 + i, gpuHours: 700 + i * 40, costUsd: 1400 + i * 90 + Math.round(rnd() * 300) }));
   return {
-    labId, allocationUsd: 128400, usedUsd: burn[59].usedUsd, remainingUsd: 128400 - burn[59].usedUsd, burnRateUsdPerDay: 902, projectedExhaustDate: iso(52 * D),
-    runningJobs: live.filter((j) => j.state === 'RUNNING').length, pendingJobs: live.filter((j) => j.state === 'PENDING').length,
-    liveGpus: live.reduce((s, j) => s + (j.state === 'RUNNING' ? (j.allocGpus ?? 0) : 0), 0),
-    openAlerts: alerts.filter((a) => a.status === 'OPEN').length, criticalAlerts: alerts.filter((a) => a.status === 'OPEN' && a.severity === 'CRITICAL').length,
-    efficiencyScore: 68, efficiencyScorePrev: 61, gpuHours30d: 9120, wastedGpuHours30d: 1874, spend30dUsd: 23950, burn,
+    asOf: iso(0),
+    lab: labs.find((l) => l.id === labId),
+    kpis: { liveJobs: live.length, runningJobs: live.filter((j) => j.state === 'RUNNING').length, pendingJobs: live.filter((j) => j.state === 'PENDING').length, runningGpus: 29, openAlerts: alerts.filter((x) => x.status === 'OPEN').length, criticalAlerts: 2, jobs: 420, gpuHours: 21400, costUsd: 31240, wastedGpuHours: 2310, wastePct: 0.11, avgGpuUtil: 64, failedJobs: 52, failRate: 0.12, gpuHours30d: 9120, costUsd30d: 9810, allocationRemainingUsd: allocs.reduce((n, a) => n + a.remainingUsd, 0) },
+    allocations: allocs,
+    deadlines: projects.filter((p) => new Date(p.deadline).getTime() > NOW).map((p) => ({ projectId: p.id, name: p.name, deadline: p.deadline, deadlineLabel: p.deadlineLabel, daysLeft: Math.round((new Date(p.deadline).getTime() - NOW) / D), priority: p.priority, workloadType: p.workloadType as LabSummary['deadlines'][number]['workloadType'] })),
+    weekly,
+    recommendations: [{ kind: 'WALLTIME', title: 'Request shorter walltimes', detail: 'Median job used 38% of its requested time; tighter limits backfill sooner.', impact: '~2 h less queue wait' }],
   };
 }
 
@@ -220,22 +231,24 @@ function tick() {
     pend.startTime = new Date().toISOString();
     metrics[pend.id] = Array.from({ length: 3 }, (_, i) => ({ id: `${pend.id}-m${i}`, ts: iso(-(2 - i) * 5 * 60000), ...sample('healthy', i, 48) }) as JobMetric);
   }
-  return { jobsAdvanced: jobs.filter((j) => j.state === 'RUNNING').length, metricsAdded: added, alertsRaised: 0, actionsTaken: 0, simulatedAt: new Date().toISOString() };
+  return { simulatedTo: new Date().toISOString(), stepMinutes: 15, advanced: jobs.filter((j) => j.state === 'RUNNING').length + added * 0, started: pend ? [pend.id] : [], finished: [], newAlerts: [], resolvedAlerts: [], actions: [], openAlerts: alerts.filter((a) => a.status === 'OPEN').length, liveJobs: jobs.filter((j) => j.isLive).length };
 }
 
-function extract(text: string): ExtractedConstraint[] {
-  const out: ExtractedConstraint[] = [];
-  const sentences = text.split(/(?<=[.;])\s+/);
-  sentences.forEach((s, i) => {
-    const gpus = /(\d+)\s*GPUs?\s*at once/i.exec(s);
-    const usd = /\$([\d,]+)/.exec(s);
-    if (/preemptible/i.test(s)) out.push({ key: `c${i}`, kind: 'PREEMPTIBLE_ONLY', severity: 'BLOCK', title: 'Never run on preemptible QOS', limitText: /thesis/i.test(s) ? 'project=thesis' : null, sourceText: s });
-    if (gpus) out.push({ key: `c${i}g`, kind: 'MAX_GPUS_PER_JOB', severity: 'WARN', title: `≤ ${gpus[1]} GPUs per job without PI approval`, limitValue: Number(gpus[1]), sourceText: s });
-    if (usd) out.push({ key: `c${i}u`, kind: 'BUDGET_REMAINING', severity: 'WARN', title: `Spend cap $${usd[1]}`, limitValue: Number(usd[1].replace(/,/g, '')), sourceText: s });
-    if (/due|deadline|submission/i.test(s)) out.push({ key: `c${i}d`, kind: 'DEADLINE_FEASIBLE', severity: 'INFO', title: s.replace(/\.$/, '').slice(0, 60), limitText: s, sourceText: s });
-    if (/maintenance|no jobs/i.test(s)) out.push({ key: `c${i}q`, kind: 'QUIET_HOURS', severity: 'INFO', title: 'Quiet window', limitText: s, sourceText: s });
-  });
-  return out;
+function extract(text: string): LabConstraints {
+  const sent = text.split(/(?<=[.;])\s+/);
+  const find = (re: RegExp) => sent.find((x) => re.test(x));
+  const usd = /\$([\d,]+)/.exec(text);
+  const gpus = /(\d+)\s*GPUs?\s*at once/i.exec(text);
+  return {
+    source: 'rules',
+    summary: 'Parsed with the rules parser (stub).',
+    budgets: usd ? [{ kind: 'USD', amount: Number(usd[1].replace(/,/g, '')), period: 'MONTH', evidence: find(/\$/) }] : [],
+    deadlines: /camera-ready/i.test(text) ? [{ label: 'NeurIPS camera-ready', date: iso(23 * D), evidence: find(/camera-ready/i) }] : [],
+    preferences: { preemptibleOk: /never go on preemptible|never on preemptible|must never/i.test(text) ? false : null },
+    dataRestrictions: [],
+    memberCaps: [],
+    approvals: gpus ? [{ threshold: Number(gpus[1]), unit: 'GPUs', evidence: find(/GPUs? at once/i) }] : [],
+  };
 }
 
 export async function stubCall(type: string, action: string, thisArg: any, args: any[]): Promise<unknown> {
@@ -258,7 +271,7 @@ export async function stubCall(type: string, action: string, thisArg: any, args:
     case 'Advisor.extractConstraints': return extract(args[1] ?? '');
     case 'Insights.labSummary': return summary(args[0]);
     case 'Insights.predictDuration': return { estGpuHours: Math.round(((args[3] ?? 7) * 3.1 + 6) * 10) / 10, estDurationHours: 0, basis: 'stub' };
-    case 'Job.fetch': return page(clone(/isLive == true/.test(spec.filter) ? jobs : history), spec);
+    case 'Job.fetch': return page(clone(/isLive == true/.test(spec.filter) ? jobs : /isLive != true/.test(spec.filter) ? history : [...jobs, ...history]), spec);
     case 'Job.get': return clone(jobs.find((j) => j.id === thisArg.id) ?? history.find((j) => j.id === thisArg.id) ?? null);
     case 'JobMetric.fetch': {
       const jobId = filterVal(spec, 'job.id');
@@ -299,7 +312,7 @@ export async function stubCall(type: string, action: string, thisArg: any, args:
       const rr = runRequests[thisArg.id];
       const gpus = rr.requestedGpus ?? 4;
       const wall = rr.requestedWalltimeHours ?? 24;
-      const mk = (p: Policy, outcome: RuleCheck['outcome'], message: string): RuleCheck => ({ id: `${rr.id}-${p.id}`, policy: p, outcome, message });
+      const mk = (p: Policy, outcome: RuleCheck['outcome'], message: string): RuleCheck => ({ id: `${rr.id}-${p.id}`, policy: p, outcome, message, title: p.title, scope: p.scope, severity: p.severity, ruleKind: p.kind });
       const pol = (id: string) => policies.find((p) => p.id === id) as Policy;
       checks[rr.id] = [
         mk(pol('U-01'), 'PASS', 'No export-controlled data declared.'),
@@ -325,7 +338,7 @@ export async function stubCall(type: string, action: string, thisArg: any, args:
       const mk = (rank: number, label: string, cl: string, part: string, gpu: string, g: number, thr: number, wait: number, factor: number, rationale: string, qos: string): RunPlan => {
         const dur = gh / (g * thr);
         const wall = Math.ceil(dur * 1.25);
-        return { id: `${rr.id}-plan-${rank}`, rank, label, cluster: ref(cl), partition: ref(`${cl}-${part}`, part), gpuType: ref(gpu, gpu), gpus: g, nodes: g > 4 ? 2 : 1, walltimeHours: wall, estWaitHours: wait, estDurationHours: dur, estCostUnits: gh * factor / thr, estCostUsd: (gh * factor / thr) * clusters[cl].usd, meetsDeadline: wait + dur < deadlineH, score: 0.9 - rank * 0.1, rationale, sbatchScript: sb(part, qos, g, wall, cl) };
+        return { qos: part === 'ai' ? (label === 'Cheapest' ? 'preemptible' : label === 'Fastest' ? 'burst' : 'normal') : 'normal', slurmPartition: part, account: 'reyes-gpu', waitBucket: wait < 0.25 ? '<15 min' : wait < 2 ? '15 min-2 h' : '2-12 h', chainedJobs: rank === 1 ? 1 : rank === 3 ? 3 : 1, preemptionRisk: label === 'Cheapest' ? 0.3 : 0, costPerGpuHourUsd: clusters[cl].usd * factor, finishBy: iso((wait + dur) * H), deadlineSlackHours: deadlineH < 900 ? deadlineH - wait - dur : null, id: `${rr.id}-plan-${rank}`, rank, label, cluster: ref(cl), partition: ref(`${cl}-${part}`, part), gpuType: ref(gpu, gpu), gpus: g, nodes: g > 4 ? 2 : 1, walltimeHours: wall, estWaitHours: wait, estDurationHours: dur, estCostUnits: gh * factor / thr, estCostUsd: (gh * factor / thr) * clusters[cl].usd, meetsDeadline: wait + dur < deadlineH, score: 0.9 - rank * 0.1, rationale, sbatchScript: sb(part, qos, g, wall, cl) };
       };
       plans[rr.id] = [
         mk(1, 'Balanced', 'gilbreth', 'a100-80gb', 'A100-80GB', 4, 1.6, 0.4, 1, 'Uses the lab’s owned A100-80GB share, so nothing is charged against the Gautschi GPU-hour bank; finishes 6 days before the deadline with a 25% walltime buffer.', 'normal'),

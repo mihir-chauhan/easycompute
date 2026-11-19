@@ -3,329 +3,362 @@
  * Confidential and Proprietary C3 Materials.
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, CalendarClock, Rocket, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Bot, FileText, Rocket, ShieldCheck, User } from 'lucide-react';
 
-import EChart from '@/components/charts/EChart';
-import PageFrame, { EmptyRows, ErrorState, LoadingState } from '@/components/PageFrame/PageFrame';
-import { EnumBadge } from '@/components/StatusBadges/StatusBadges';
+import {
+  DataTable,
+  EmptyState,
+  ErrorState,
+  KpiRow,
+  KpiRowSkeleton,
+  KpiTile,
+  MetricChart,
+  PageFrame,
+  SectionCard,
+  TableSkeleton,
+  ToneBadge,
+  TONE_BG,
+  errorMessage,
+  lineOption,
+  toneColor,
+  useThemeKey,
+  type Column,
+  type Tone,
+} from '@/components/app';
+import { useErrorBoundary } from '@/components/ErrorBoundary/ErrorBoundary';
 import { Button } from '@/components/ui/button';
-import { Container } from '@/components/ui/container';
-import { DataGrid, DataGridBody, DataGridCell, DataGridHead, DataGridHeader, DataGridRow } from '@/components/ui/data-grid';
-import { MetricCardDelta } from '@/components/ui/metric-card';
-import {
-  fetchAllocations,
-  fetchLiveJobs,
-  fetchLiveMetrics,
-  fetchOpenAlerts,
-  fetchProjects,
-  getLabSummary,
-} from '@/features/lab/api';
-import { timeSeriesOption } from '@/features/lab/charts';
-import { AlertTypeBadge, EmptyBlock, JobStateBadge, Kpi, Meter, muted, Sparkline, utilAppearance } from '@/features/lab/components';
-import {
-  ACTION_LABEL,
-  countdown,
-  formatDuration,
-  formatInt,
-  formatPct100,
-  formatRelative,
-  formatUsd,
-  walltimeLeft,
-} from '@/features/lab/format';
-import type { JobMetric } from '@/features/lab/types';
+import { applyJobAction, fetchLabActions, fetchLiveJobs, fetchLiveMetrics, fetchMembers, fetchOpenAlerts, getLabSummary } from '@/features/lab/api';
+import { ActivityRow, CheckRow, HeadNote, JobStateBadge, muted } from '@/features/lab/components';
+import { ACTION_LABEL, ALERT_TYPE_LABEL, formatClock, formatInt, formatPct100, formatUsd } from '@/features/lab/format';
+import type { Alert, Job, SummaryAllocation, SummaryDeadline } from '@/features/lab/types';
 import { useCurrentLab } from '@/features/lab/useCurrentLab';
 import { useLoad } from '@/features/lab/useLoad';
-import { formatCompactCurrency, formatDate } from '@/lib/format';
+import { formatDate, formatShortDate } from '@/lib/format';
+import { cn } from '@/lib/utils';
+
+interface Attention {
+  key: string;
+  kind: 'bad' | 'warn' | 'info';
+  glyph: string;
+  title: React.ReactNode;
+  detail?: string;
+  action?: { label: string; primary?: boolean; run: () => void };
+}
+
+const isUsd = (a: SummaryAllocation) => (a.unitName ?? '').toUpperCase() === 'USD';
+const isGpuHours = (a: SummaryAllocation) => /gpu/i.test(a.unitName ?? '');
+
+/** Deadline status from days left and whether any allocation runs out first. */
+const deadlineStatus = (d: SummaryDeadline, allocations: SummaryAllocation[]): [Tone, string] => {
+  const runOut = allocations.find((a) => a.projectedRunOut && new Date(a.projectedRunOut) < new Date(d.deadline));
+  if (runOut) return ['bad', 'Budget risk'];
+  const days = d.daysLeft ?? (new Date(d.deadline).getTime() - Date.now()) / 86400000;
+  if (days < 7) return ['warn', 'Tight'];
+  return ['good', 'On track'];
+};
 
 const LabHome: React.FC = () => {
   const navigate = useNavigate();
+  const themeKey = useThemeKey();
+  const { reportError } = useErrorBoundary();
   const { lab, labId, error: labError } = useCurrentLab();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const summary = useLoad(() => (labId ? getLabSummary(labId) : null), [labId]);
-  const lists = useLoad(
-    () =>
-      labId
-        ? Promise.all([fetchLiveJobs(labId), fetchOpenAlerts(labId), fetchProjects(labId), fetchAllocations(labId), fetchLiveMetrics(labId)])
-        : null,
+  const summary = useLoad(() => (labId ? getLabSummary(labId) : null), [labId], 30000);
+  const live = useLoad(
+    () => (labId ? Promise.all([fetchLiveJobs(labId), fetchOpenAlerts(labId), fetchLiveMetrics(labId), fetchLabActions(labId, 8), fetchMembers(labId)]) : null),
     [labId],
+    30000,
   );
-
-  const [jobs, alerts, projects, allocations, metrics] = lists.data ?? [[], [], [], [], []];
+  const [jobs, alerts, metrics, actions, members] = live.data ?? [[], [], [], [], []];
   const s = summary.data;
+  const allocations = s?.allocations ?? [];
+  const deadlines = s?.deadlines ?? [];
 
-  const sparkByJob = useMemo(() => {
-    const by: Record<string, number[]> = {};
-    [...(metrics as JobMetric[])].reverse().forEach((m) => {
-      const id = m.job?.id;
-      if (!id) return;
-      (by[id] ??= []).push(m.gpuUtilPct ?? 0);
+  const usd = allocations.filter(isUsd).sort((a, b) => (b.totalUnits ?? 0) - (a.totalUnits ?? 0))[0];
+  const gpuAlloc = allocations.filter(isGpuHours).sort((a, b) => (b.totalUnits ?? 0) - (a.totalUnits ?? 0))[0];
+  const running = jobs.filter((j) => j.state === 'RUNNING');
+  const queued = jobs.filter((j) => j.state === 'PENDING');
+  const liveGpus = running.reduce((n, j) => n + (j.allocGpus ?? 0), 0);
+  const liveClusters = new Set(running.map((j) => j.cluster?.id)).size;
+  const next = deadlines[0];
+  const clusterNames = [...new Set(allocations.map((a) => a.clusterName ?? a.clusterId).filter(Boolean))];
+
+  /** Fleet-average GPU utilization across the lab's live jobs, per sample time. */
+  const utilOption = useMemo(() => {
+    const byTs = new Map<string, number[]>();
+    metrics.forEach((m) => {
+      if (m.gpuUtilPct == null) return;
+      const k = m.ts.slice(0, 16);
+      byTs.set(k, [...(byTs.get(k) ?? []), m.gpuUtilPct]);
     });
-    Object.keys(by).forEach((k) => {
-      by[k] = by[k].slice(-24);
+    const keys = [...byTs.keys()].sort();
+    if (keys.length < 2) return null;
+    return lineOption({
+      x: keys.map((k) => formatClock(`${k}:00Z`)),
+      series: [{ name: 'Avg GPU util', data: keys.map((k) => Math.round(byTs.get(k)!.reduce((a, b) => a + b, 0) / byTs.get(k)!.length)), area: true, color: toneColor('good') }],
+      valueFormat: (v) => `${Math.round(v)}%`,
+      min: 0,
+      max: 100,
+      thresholds: [{ value: 70, label: 'Target 70%' }],
     });
-    return by;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metrics, themeKey]);
+  const nowUtil = useMemo(() => {
+    const latest = new Map<string, number>();
+    metrics.forEach((m) => {
+      if (m.job?.id && m.gpuUtilPct != null && !latest.has(m.job.id)) latest.set(m.job.id, m.gpuUtilPct);
+    });
+    const v = [...latest.values()];
+    return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
   }, [metrics]);
 
-  const upcoming = useMemo(
-    () => projects.filter((p) => p.deadline && new Date(p.deadline).getTime() > Date.now()).slice(0, 5),
-    [projects],
-  );
-
-  const burnOption = useMemo(() => {
-    const burn = s?.burn ?? [];
-    return timeSeriesOption({
-      series: [
-        { name: 'Spent (cumulative)', appearance: 'accent', area: true, points: burn.map((b) => [new Date(b.date).getTime(), b.usedUsd]) },
-        { name: 'Planned burn', appearance: 'secondary', dashed: true, points: burn.map((b) => [new Date(b.date).getTime(), b.planUsd ?? null]) },
-      ],
-      yFormatter: (v) => formatCompactCurrency(v),
-      thresholds: s?.allocationUsd ? [{ value: s.allocationUsd, label: `Allocation ${formatCompactCurrency(s.allocationUsd)}`, appearance: 'danger' }] : [],
-      yMax: s?.allocationUsd ? Math.ceil((s.allocationUsd * 1.05) / 10000) * 10000 : undefined,
-    });
-  }, [s]);
-
-  const usedPct = s?.allocationUsd ? (s.usedUsd ?? 0) / s.allocationUsd : 0;
-  const exhaust = s?.projectedExhaustDate;
-  const nextDeadline = upcoming[0]?.deadline;
-  const exhaustBeforeDeadline = exhaust && nextDeadline && new Date(exhaust) < new Date(nextDeadline);
-  const effDelta = s?.efficiencyScore != null && s?.efficiencyScorePrev != null ? s.efficiencyScore - s.efficiencyScorePrev : null;
-
-  const reload = () => {
-    summary.reload();
-    lists.reload();
+  const runAction = async (a: Alert) => {
+    if (!a.job || !a.recommendedAction) return;
+    setBusy(a.id);
+    setActionError(null);
+    try {
+      await applyJobAction(a.job.id, a.recommendedAction);
+      live.reload();
+      summary.reload();
+    } catch (err) {
+      setActionError(errorMessage(err));
+      reportError(err);
+    } finally {
+      setBusy(null);
+    }
   };
 
-  const actions = (
-    <div className="flex flex-wrap gap-2">
-      <Button variant="outline" appearance="secondary" leadingIcon={<RefreshCw />} onClick={reload} loading={summary.loading && Boolean(s)}>
-        Refresh
-      </Button>
-      <Button leadingIcon={<Rocket />} onClick={() => navigate('/plan')}>
-        Plan a run
-      </Button>
-    </div>
-  );
+  const attention: Attention[] = useMemo(() => {
+    const items: Attention[] = alerts
+      .filter((a) => a.status === 'OPEN')
+      .sort((a, b) => (a.severity === 'CRITICAL' ? 0 : 1) - (b.severity === 'CRITICAL' ? 0 : 1))
+      .slice(0, 4)
+      .map((a) => ({
+        key: a.id,
+        kind: a.severity === 'CRITICAL' ? 'bad' : 'warn',
+        glyph: '!',
+        title: (
+          <span>
+            {`${ALERT_TYPE_LABEL[a.alertType] ?? a.alertType} in `}
+            <button type="button" className="text-[var(--c3-style-basic-fg-accent)] hover:underline" onClick={() => a.job && navigate(`/runs/${encodeURIComponent(a.job.id)}`)}>
+              {a.job?.jobName ?? a.job?.name ?? a.job?.id}
+            </button>
+          </span>
+        ),
+        detail: a.message,
+        action: a.recommendedAction ? { label: ACTION_LABEL[a.recommendedAction], primary: a.severity === 'CRITICAL', run: () => runAction(a) } : undefined,
+      }));
+    allocations
+      .filter((a) => a.runsOutBeforeEnd && a.projectedRunOut)
+      .forEach((a) =>
+        items.push({
+          key: `runout-${a.id}`,
+          kind: 'warn',
+          glyph: '$',
+          title: `At this pace, ${a.grantName ?? a.name ?? a.clusterName} runs out ${formatShortDate(a.projectedRunOut)}`,
+          detail: `${formatInt(a.remainingUnits)} ${a.unitName ?? ''} left, burning ${formatInt(a.burnPerDay)} per day; the allocation ends ${formatDate(a.endDate)}.`,
+          action: { label: 'Review usage', run: () => navigate('/history') },
+        }),
+      );
+    allocations
+      .filter((a) => !a.runsOutBeforeEnd && (a.daysLeft ?? 999) <= 45 && (a.pctUsed ?? 1) < 0.9)
+      .forEach((a) =>
+        items.push({
+          key: `expire-${a.id}`,
+          kind: 'info',
+          glyph: 'i',
+          title: `${formatInt(a.remainingUnits)} ${a.unitName ?? ''} on ${a.clusterName ?? a.clusterId} expire ${formatShortDate(a.endDate)}`,
+          detail: `${a.grantName ?? 'This allocation'} does not carry over. The launch planner prefers it for runs that fit.`,
+          action: { label: `Plan on ${a.clusterName ?? a.clusterId}`, run: () => navigate('/plan') },
+        }),
+      );
+    return items.slice(0, 5);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alerts, allocations]);
 
-  const error = labError ?? summary.error ?? lists.error;
+  const recentColumns: Column<Job>[] = [
+    {
+      key: 'run',
+      header: 'Run',
+      render: (j) => (
+        <div className="flex min-w-0 flex-col">
+          <span className="truncate font-mono font-medium text-[var(--c3-style-basic-fg-primary)]">{j.jobName ?? j.id}</span>
+          <span className={cn('truncate text-xs', muted)}>{[j.user, j.project?.name].filter(Boolean).join(' · ')}</span>
+        </div>
+      ),
+    },
+    { key: 'cl', header: 'Cluster', hideBelow: 'md', render: (j) => [j.cluster?.name ?? j.cluster?.id, j.partition?.name ?? j.partition?.id, j.qos].filter(Boolean).join(' · ') },
+    { key: 'gpus', header: 'GPUs', align: 'right', render: (j) => formatInt(j.allocGpus) },
+    { key: 'st', header: 'Status', render: (j) => (alerts.some((a) => a.job?.id === j.id && a.severity === 'CRITICAL' && a.status === 'OPEN') ? <ToneBadge tone="warn">Needs approval</ToneBadge> : <JobStateBadge value={j.state} />) },
+    { key: 'cost', header: 'Cost', align: 'right', render: (j) => formatUsd(j.costUsd) },
+  ];
+
+  const error = labError ?? summary.error;
 
   return (
     <PageFrame
-      title={lab?.name ?? 'Lab Home'}
-      description={lab ? [lab.piName, lab.department].filter(Boolean).join(' · ') || 'Budget, deadlines and live runs' : 'Budget, deadlines and live runs'}
-      actions={actions}
+      title={lab?.name ?? 'Overview'}
+      description={[lab?.piName && `PI ${lab.piName}`, members.length ? `${members.length} members` : null, clusterNames.join(' · ')].filter(Boolean).join(' · ') || 'Budget, deadlines and live runs'}
+      actions={
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" appearance="secondary" leadingIcon={<FileText />} onClick={() => navigate('/context')}>
+            Update lab context
+          </Button>
+          <Button leadingIcon={<Rocket />} onClick={() => navigate('/plan')}>
+            Plan a run
+          </Button>
+        </div>
+      }
     >
-      {error && <ErrorState message={`Could not load lab overview: ${error}`} onRetry={reload} />}
-      {!error && !s && <LoadingState label="Loading lab overview…" />}
+      {error && <ErrorState message={`Could not load the lab overview: ${error}`} onRetry={summary.reload} />}
+      {actionError && <ErrorState message={actionError} />}
 
-      {s && (
-        <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Kpi
-              label="Budget remaining"
-              value={formatUsd(s.remainingUsd)}
-              tone={usedPct > 0.9 ? 'danger' : usedPct > 0.75 ? 'warning' : undefined}
-              caption={`${formatPct100(usedPct * 100)} of ${formatCompactCurrency(s.allocationUsd)} used`}
-            >
-              <Meter value={usedPct} appearance={usedPct > 0.9 ? 'danger' : usedPct > 0.75 ? 'warning' : 'accent'} label="Allocation used" className="my-1" />
-            </Kpi>
-            <Kpi
-              label="Live jobs"
-              value={formatInt((s.runningJobs ?? 0) + (s.pendingJobs ?? 0))}
-              caption={`${formatInt(s.runningJobs)} running · ${formatInt(s.pendingJobs)} pending · ${formatInt(s.liveGpus)} GPUs`}
-              onClick={() => navigate('/runs')}
-            />
-            <Kpi
-              label="Open alerts"
-              value={formatInt(s.openAlerts)}
-              tone={(s.criticalAlerts ?? 0) > 0 ? 'danger' : (s.openAlerts ?? 0) > 0 ? 'warning' : 'success'}
-              caption={(s.criticalAlerts ?? 0) > 0 ? `${s.criticalAlerts} critical need action` : 'No critical alerts'}
-              onClick={() => navigate('/runs')}
-            />
-            <Kpi
-              label="Efficiency score"
-              value={
-                <span className="flex items-baseline gap-2">
-                  {formatInt(s.efficiencyScore)}
-                  <span className={`text-sm font-normal ${muted}`}>/ 100</span>
-                  {effDelta != null && (
-                    <MetricCardDelta tone={effDelta >= 0 ? 'positive' : 'negative'}>{`${effDelta >= 0 ? '+' : ''}${effDelta} vs last 30 d`}</MetricCardDelta>
-                  )}
-                </span>
-              }
-              tone={(s.efficiencyScore ?? 0) < 50 ? 'danger' : undefined}
-              caption={`${formatInt(s.wastedGpuHours30d)} of ${formatInt(s.gpuHours30d)} GPU-h wasted in 30 d`}
-              onClick={() => navigate('/history')}
-            />
-          </div>
+      {!s && !error ? (
+        <KpiRowSkeleton />
+      ) : s ? (
+        <KpiRow>
+          <KpiTile
+            label={usd ? 'Grant compute remaining' : 'Compute remaining'}
+            value={formatUsd(usd ? usd.remainingUnits : s.kpis.allocationRemainingUsd)}
+            unit={usd ? `of ${formatUsd(usd.totalUnits)}` : 'USD equivalent'}
+            caption={usd ? `${usd.grantName ?? usd.name ?? ''} · ends ${formatDate(usd.endDate)}` : 'All allocations'}
+            onClick={() => navigate('/history')}
+          />
+          <KpiTile
+            label={gpuAlloc ? `${gpuAlloc.clusterName ?? gpuAlloc.clusterId} GPU-hours` : 'GPU-hours (30 d)'}
+            value={gpuAlloc ? `${formatInt(gpuAlloc.remainingUnits)} h` : formatInt(s.kpis.gpuHours30d)}
+            unit={gpuAlloc ? 'left' : undefined}
+            caption={gpuAlloc ? `${formatInt(gpuAlloc.usedUnits)} of ${formatInt(gpuAlloc.totalUnits)} used · ends ${formatShortDate(gpuAlloc.endDate)}` : `${formatUsd(s.kpis.costUsd30d)} spent in 30 days`}
+          />
+          <KpiTile
+            label="Live runs"
+            tone={running.length ? 'good' : 'neutral'}
+            value={formatInt(running.length || s.kpis.runningJobs)}
+            unit={`${formatInt(queued.length || s.kpis.pendingJobs)} queued`}
+            caption={`${formatInt(liveGpus || s.kpis.runningGpus)} GPUs in use across ${liveClusters || 0} cluster${liveClusters === 1 ? '' : 's'}`}
+            onClick={() => navigate('/runs')}
+          />
+          <KpiTile
+            label="Next deadline"
+            value={next ? (next.deadlineLabel ?? next.name) : 'None'}
+            unit={next ? formatShortDate(next.deadline) : undefined}
+            caption={next ? `${formatInt(next.daysLeft)} days · ${next.name}` : 'Add deadlines in Lab context'}
+            onClick={() => navigate('/context')}
+          />
+        </KpiRow>
+      ) : null}
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-            <Container
-              className="xl:col-span-2"
-              title="Budget burn vs allocation"
-              subtitle={
-                exhaust
-                  ? `At ${formatUsd(s.burnRateUsdPerDay)}/day the allocation runs out ${formatDate(exhaust)}${exhaustBeforeDeadline ? ` — before ${upcoming[0]?.deadlineLabel ?? 'the next deadline'}` : ''}`
-                  : 'Cumulative spend across all allocations, USD equivalent'
-              }
-            >
-              {(s.burn ?? []).length > 0 ? (
-                <EChart ariaLabel="Budget burn vs allocation" option={burnOption} className="h-72" />
-              ) : (
-                <EmptyBlock label="No spend recorded yet." />
-              )}
-              {allocations.length > 0 && (
-                <ul className="mt-4 grid grid-cols-1 gap-x-6 gap-y-3 border-t border-[var(--c3-style-basic-border-primary)] pt-4 md:grid-cols-2">
-                  {allocations.map((a) => {
-                    const frac = a.totalUnits ? (a.usedUnits ?? 0) / a.totalUnits : 0;
-                    const left = (a.totalUnits ?? 0) - (a.usedUnits ?? 0);
-                    return (
-                      <li key={a.id} className="flex min-w-0 flex-col gap-1">
-                        <span className="flex items-baseline justify-between gap-2 text-c3-regular-body-p2">
-                          <span className="truncate font-medium text-[var(--c3-style-basic-fg-primary)]" title={a.grantName}>
-                            {a.cluster?.name ?? a.cluster?.id} · {a.grantName ?? a.source}
-                          </span>
-                          <span className={`shrink-0 tabular-nums text-xs ${muted}`}>
-                            {formatInt(left)} {a.unitName} left
-                          </span>
-                        </span>
-                        <Meter value={frac} appearance={frac > 0.9 ? 'danger' : frac > 0.75 ? 'warning' : 'accent'} label={`${a.grantName} used`} />
-                        <span className={`text-xs ${muted}`}>Ends {formatDate(a.endDate)}</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </Container>
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+        <SectionCard title="Needs your attention" actions={attention.length ? <ToneBadge tone="warn">{`${attention.length} open`}</ToneBadge> : undefined}>
+          {(live.loading && !live.data) || (!s && !error) ? (
+            <TableSkeleton rows={3} />
+          ) : attention.length === 0 ? (
+            <EmptyState icon={<ShieldCheck />} title="Nothing needs you right now" hint="Guardrails watch every live run; budget and expiry warnings land here." />
+          ) : (
+            <ul className="flex flex-col">
+              {attention.map((it) => (
+                <CheckRow
+                  key={it.key}
+                  kind={it.kind}
+                  glyph={it.glyph}
+                  title={it.title}
+                  detail={it.detail}
+                  right={
+                    it.action ? (
+                      <Button size="sm" variant={it.action.primary ? 'solid' : 'outline'} appearance={it.action.primary ? 'accent' : 'secondary'} loading={busy === it.key} onClick={it.action.run}>
+                        {it.action.label}
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              ))}
+            </ul>
+          )}
+        </SectionCard>
 
-            <Container
-              title="Upcoming deadlines"
-              subtitle="Projects the planner schedules against"
-              actions={
-                <Button variant="ghost" appearance="accent" size="sm" onClick={() => navigate('/context')}>
-                  Manage
-                </Button>
-              }
-            >
-              {lists.loading && !lists.data ? (
-                <LoadingState />
-              ) : upcoming.length === 0 ? (
-                <EmptyBlock icon={<CalendarClock className="size-6" aria-hidden />} label="No upcoming deadlines." />
-              ) : (
-                <ul className="flex flex-col divide-y divide-[var(--c3-style-basic-border-primary)]">
-                  {upcoming.map((p) => {
-                    const c = countdown(p.deadline);
-                    return (
-                      <li key={p.id} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
-                        <div className="flex min-w-0 flex-col">
-                          <span className="truncate text-c3-bold-body-p2 text-[var(--c3-style-basic-fg-primary)]">{p.deadlineLabel ?? p.name}</span>
-                          <span className={`truncate text-xs ${muted}`}>
-                            {p.name} · {formatDate(p.deadline)}
-                          </span>
-                        </div>
-                        <EnumBadge value={c.text} appearance={c.tone} />
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              <Button className="mt-4 w-full" variant="soft" appearance="accent" leadingIcon={<Rocket />} onClick={() => navigate('/plan')}>
-                Plan a run against a deadline
-              </Button>
-            </Container>
-          </div>
+        <SectionCard title="Deadlines" actions={<HeadNote>From lab context</HeadNote>}>
+          {!s ? (
+            <TableSkeleton rows={4} />
+          ) : deadlines.length === 0 ? (
+            <EmptyState title="No upcoming deadlines" hint="Add projects with deadlines in Lab context." />
+          ) : (
+            <ul className="flex flex-col">
+              {deadlines.slice(0, 5).map((d) => {
+                const [tone, label] = deadlineStatus(d, allocations);
+                return (
+                  <li key={d.projectId} className="grid grid-cols-[18px_minmax(0,1fr)_auto] gap-2.5 border-b border-[var(--c3-style-basic-border-border)] py-3 first:pt-0 last:border-b-0 last:pb-0">
+                    <span aria-hidden className={cn('mt-1.5 size-2.5 rounded-full', TONE_BG[tone])} />
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-[var(--c3-style-basic-fg-primary)]">{d.deadlineLabel ?? d.name}</div>
+                      <div className={cn('text-[13px]', muted)}>{`${formatShortDate(d.deadline)} · ${d.name} · ${formatInt(d.daysLeft)} days`}</div>
+                    </div>
+                    <ToneBadge tone={tone}>{label}</ToneBadge>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </SectionCard>
+      </div>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-            <Container
-              className="xl:col-span-2"
-              contentWidth="full-width"
-              title="Running jobs"
-              subtitle="GPU utilization over the last 2 hours"
-              actions={
-                <Button variant="ghost" appearance="accent" size="sm" trailingIcon={<ArrowRight />} onClick={() => navigate('/runs')}>
-                  Live runs
-                </Button>
-              }
-            >
-              <div className="overflow-x-auto">
-                <DataGrid className="w-full">
-                  <DataGridHeader>
-                    <DataGridRow>
-                      <DataGridHead sortable={false} filterable={false}>Job</DataGridHead>
-                      <DataGridHead sortable={false} filterable={false}>State</DataGridHead>
-                      <DataGridHead sortable={false} filterable={false}>GPU util</DataGridHead>
-                      <DataGridHead sortable={false} filterable={false} align="right">Walltime left</DataGridHead>
-                      <DataGridHead sortable={false} filterable={false} align="right">Cost</DataGridHead>
-                    </DataGridRow>
-                  </DataGridHeader>
-                  <DataGridBody>
-                    {!lists.loading && jobs.length === 0 && <EmptyRows colSpan={5} label="No jobs running. Plan one to get started." />}
-                    {jobs.slice(0, 6).map((j) => {
-                      const left = walltimeLeft(j);
-                      return (
-                        <DataGridRow key={j.id} className="cursor-pointer" onClick={() => navigate(`/runs/${encodeURIComponent(j.id)}`)}>
-                          <DataGridCell className="max-w-64">
-                            <div className="flex min-w-0 flex-col">
-                              <span className="truncate font-medium text-[var(--c3-style-basic-fg-accent)]">{j.jobName ?? j.id}</span>
-                              <span className={`truncate text-xs ${muted}`}>
-                                {j.cluster?.name ?? j.cluster?.id} · {j.allocGpus}× {j.gpuType?.id ?? 'CPU'} · {j.user}
-                              </span>
-                            </div>
-                          </DataGridCell>
-                          <DataGridCell className="whitespace-nowrap">
-                            <JobStateBadge value={j.state} />
-                          </DataGridCell>
-                          <DataGridCell className="whitespace-nowrap">
-                            <span className="flex items-center gap-2">
-                              <Sparkline values={sparkByJob[j.id] ?? []} appearance={utilAppearance(j.gpuUtilAvg)} label={`${j.jobName} GPU utilization`} />
-                              <span className="w-9 text-right tabular-nums text-xs">{formatPct100((sparkByJob[j.id] ?? []).at(-1))}</span>
-                            </span>
-                          </DataGridCell>
-                          <DataGridCell align="right" className="whitespace-nowrap tabular-nums">
-                            <span className={left != null && j.timelimitHours && left / j.timelimitHours < 0.1 ? 'text-[var(--c3-style-basic-fg-danger)]' : undefined}>
-                              {formatDuration(left)}
-                            </span>
-                          </DataGridCell>
-                          <DataGridCell align="right" className="whitespace-nowrap tabular-nums">{formatUsd(j.costUsd)}</DataGridCell>
-                        </DataGridRow>
-                      );
-                    })}
-                  </DataGridBody>
-                </DataGrid>
-              </div>
-            </Container>
+      <MetricChart
+        title="Lab GPU utilization"
+        subtitle={nowUtil != null ? `Average SM utilization across the lab's live GPUs · now ${formatPct100(nowUtil)} · 30-day average ${formatPct100(s?.kpis.avgGpuUtil)}` : 'Average SM utilization across the lab’s live GPUs'}
+        option={utilOption}
+        loading={live.loading && !live.data}
+        error={live.error}
+        onRetry={live.reload}
+        empty={Boolean(live.data) && !utilOption}
+        emptyLabel="No live GPU jobs right now"
+        ariaLabel="Lab GPU utilization"
+        heightClass="h-64"
+      />
 
-            <Container title="Open alerts" subtitle={`${alerts.length} need attention`}>
-              {alerts.length === 0 ? (
-                <EmptyBlock icon={<ShieldCheck className="size-6" aria-hidden />} label="All runs healthy." />
-              ) : (
-                <ul className="flex flex-col divide-y divide-[var(--c3-style-basic-border-primary)]">
-                  {alerts.slice(0, 5).map((a) => (
-                    <li key={a.id} className="py-3 first:pt-0 last:pb-0">
-                      <button
-                        type="button"
-                        className="flex w-full flex-col gap-1 rounded-sm text-left hover:opacity-80"
-                        onClick={() => a.job && navigate(`/runs/${encodeURIComponent(a.job.id)}`)}
-                      >
-                        <span className="flex items-center justify-between gap-2">
-                          <AlertTypeBadge type={a.alertType} severity={a.severity} />
-                          <span className={`text-xs ${muted}`}>{formatRelative(a.detectedAt)}</span>
-                        </span>
-                        <span className="line-clamp-2 text-c3-regular-body-p2 text-[var(--c3-style-basic-fg-primary)]">{a.message}</span>
-                        <span className={`text-xs ${muted}`}>
-                          {a.job?.jobName ?? a.job?.name ?? a.job?.id}
-                          {a.recommendedAction ? ` · Suggested: ${ACTION_LABEL[a.recommendedAction]}` : ''}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Container>
-          </div>
-        </>
-      )}
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+        <SectionCard
+          flush
+          title="Live and queued runs"
+          actions={
+            <Button variant="outline" appearance="secondary" size="sm" onClick={() => navigate('/runs')}>
+              View all
+            </Button>
+          }
+        >
+          <DataTable
+            columns={recentColumns}
+            rows={[...running, ...queued].slice(0, 6)}
+            rowKey={(j) => j.id}
+            onRowClick={(j) => navigate(`/runs/${encodeURIComponent(j.id)}`)}
+            loading={live.loading && !live.data}
+            emptyLabel="No runs live"
+            emptyHint="Plan a run and it shows up here with live health."
+          />
+        </SectionCard>
+
+        <SectionCard title="Agent activity" actions={<HeadNote>Latest</HeadNote>}>
+          {live.loading && !live.data ? (
+            <TableSkeleton rows={4} />
+          ) : actions.length === 0 ? (
+            <EmptyState title="No activity yet" />
+          ) : (
+            <ul className="flex flex-col">
+              {actions.map((e) => (
+                <ActivityRow
+                  key={e.id}
+                  time={formatClock(e.actedAt)}
+                  icon={e.actor === 'AUTOPILOT' ? <Bot /> : <User />}
+                  title={`${ACTION_LABEL[e.actionType] ?? e.actionType}${e.job ? ` · ${e.job.jobName ?? e.job.name ?? e.job.id}` : ''}`}
+                  detail={e.detail}
+                />
+              ))}
+            </ul>
+          )}
+        </SectionCard>
+      </div>
     </PageFrame>
   );
 };

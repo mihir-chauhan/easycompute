@@ -35,7 +35,8 @@ entity type RuleCheck {
   title: string
 
   /**
-   * A {@link Policy.Kind} value, or CLUSTER_ONLINE, ACCOUNT_ACCESS, GPU_MEMORY_FIT for built-in checks.
+   * A {@link Policy.Kind} value, or CLUSTER_ONLINE, ACCOUNT_ACCESS, PARTITION_LIMITS, GPU_MEMORY_FIT for built-in
+   * checks.
    */
   ruleKind: string
 

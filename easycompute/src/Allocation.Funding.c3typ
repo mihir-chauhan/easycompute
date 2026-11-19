@@ -1,7 +1,7 @@
 /**
  * Where an {@link Allocation} comes from.
  */
-enum type Allocation.Source {
+enum type Allocation.Funding {
   /**
    * Purchased from a research grant (community-cluster node share or GPU-hour bank).
    */

@@ -3,71 +3,8 @@
  * Confidential and Proprietary C3 Materials.
  */
 
-import type { BadgeAppearance } from '@/components/ui/badge';
-import type {
-  ActionType,
-  Actor,
-  AlertSeverity,
-  AlertStatus,
-  AlertType,
-  CheckOutcome,
-  JobState,
-  RuleScope,
-  RuleSeverity,
-  RunRequestStatus,
-  WorkloadType,
-} from './types';
-
-/** Badge appearance per enum value (one soft badge style everywhere; semantic colours only). */
-export const JOB_STATE_APPEARANCE: Record<JobState, BadgeAppearance> = {
-  PENDING: 'secondary',
-  RUNNING: 'accent',
-  COMPLETED: 'success',
-  FAILED: 'danger',
-  TIMEOUT: 'warning',
-  CANCELLED: 'secondary',
-  OUT_OF_MEMORY: 'danger',
-  PREEMPTED: 'warning',
-};
-
-export const ALERT_SEVERITY_APPEARANCE: Record<AlertSeverity, BadgeAppearance> = {
-  CRITICAL: 'danger',
-  WARNING: 'warning',
-  INFO: 'info',
-};
-
-export const ALERT_STATUS_APPEARANCE: Record<AlertStatus, BadgeAppearance> = {
-  OPEN: 'danger',
-  ACKED: 'warning',
-  RESOLVED: 'success',
-  AUTO_RESOLVED: 'success',
-};
-
-export const CHECK_OUTCOME_APPEARANCE: Record<CheckOutcome, BadgeAppearance> = {
-  PASS: 'success',
-  WARN: 'warning',
-  FAIL: 'danger',
-};
-
-export const RULE_SEVERITY_APPEARANCE: Record<RuleSeverity, BadgeAppearance> = {
-  BLOCK: 'danger',
-  WARN: 'warning',
-  INFO: 'info',
-};
-
-export const RUN_REQUEST_STATUS_APPEARANCE: Record<RunRequestStatus, BadgeAppearance> = {
-  DRAFT: 'secondary',
-  CHECKED: 'info',
-  PLANNED: 'accent',
-  SUBMITTED: 'success',
-  REJECTED: 'danger',
-};
-
-export const ACTOR_APPEARANCE: Record<Actor, BadgeAppearance> = {
-  USER: 'secondary',
-  AUTOPILOT: 'accent',
-  ADMIN: 'info',
-};
+import type { Tone } from '@/components/app';
+import type { ActionType, AlertType, JobState, RuleScope, WorkloadType } from './types';
 
 export const WORKLOAD_LABEL: Record<WorkloadType, string> = {
   TRAINING: 'Training',
@@ -155,13 +92,13 @@ export const formatDuration = (hours?: number | null): string => {
 };
 
 /** Countdown text and urgency for a deadline. */
-export const countdown = (iso?: string | null, now = Date.now()): { text: string; tone: BadgeAppearance; days: number } => {
-  if (!iso) return { text: '—', tone: 'secondary', days: Infinity };
+export const countdown = (iso?: string | null, now = Date.now()): { text: string; tone: Tone; days: number } => {
+  if (!iso) return { text: '—', tone: 'neutral', days: Infinity };
   const ms = new Date(iso).getTime() - now;
   const days = ms / 86400000;
-  if (ms <= 0) return { text: 'Passed', tone: 'secondary', days };
+  if (ms <= 0) return { text: 'Passed', tone: 'neutral', days };
   const text = days >= 2 ? `${Math.floor(days)}d ${Math.floor((days % 1) * 24)}h` : formatDuration(ms / 3600000);
-  return { text, tone: days < 7 ? 'danger' : days < 21 ? 'warning' : 'success', days };
+  return { text, tone: days < 7 ? 'bad' : days < 21 ? 'warn' : 'neutral', days };
 };
 
 /** `5 min ago`, `3 h ago`, `Nov 12`. */
@@ -180,9 +117,17 @@ export const formatRelative = (iso?: string | null, now = Date.now()): string =>
 export const formatClock = (iso?: string | null): string => {
   if (!iso) return '—';
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
 /** Walltime remaining for a live job, hours. */
 export const walltimeLeft = (job: { timelimitHours?: number; elapsedHours?: number }): number | null =>
   job.timelimitHours == null ? null : Math.max(0, job.timelimitHours - (job.elapsedHours ?? 0));
+
+/** Clock time for today, `Nov 19` otherwise (activity timelines). */
+export const formatShortDateTime = (iso?: string | null): string => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toDateString() === new Date().toDateString() ? formatClock(iso) : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};

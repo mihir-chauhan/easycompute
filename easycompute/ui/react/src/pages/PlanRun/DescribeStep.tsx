@@ -8,7 +8,7 @@ import { ArrowRight, Calculator, Sparkles, WandSparkles } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Combobox } from '@/components/ui/combobox';
-import { Container } from '@/components/ui/container';
+import { SectionCard as Container } from '@/components/app';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -64,8 +64,10 @@ export default function DescribeStep({ form, onChange, projects, gpuTypes, clust
     setEstimateError(null);
     try {
       const res = await predictDuration(form.workloadType, form.gpuTypeId, Number(form.gpus) || 1, Number(form.modelParamsB) || 1);
-      const gh = typeof res?.estGpuHours === 'number' ? res.estGpuHours : undefined;
-      setEstimate({ gpuHours: gh, basis: typeof res?.basis === 'string' ? res.basis : undefined });
+      const raw = res?.gpuHours ?? res?.estGpuHours;
+      const gh = typeof raw === 'number' ? raw : undefined;
+      const why = res?.explanation ?? res?.basis;
+      setEstimate({ gpuHours: gh, basis: typeof why === 'string' ? why : undefined });
       if (gh != null) onChange({ estGpuHours: String(Math.round(gh * 10) / 10) });
     } catch (err) {
       setEstimateError(err instanceof Error ? err.message : 'Estimate failed');
@@ -213,7 +215,7 @@ export default function DescribeStep({ form, onChange, projects, gpuTypes, clust
               </div>
             ))}
           </dl>
-          {estimate?.basis && <p className={`mt-3 text-xs ${muted}`}>Estimate basis: {estimate.basis}</p>}
+          {estimate?.basis && <p className={`mt-3 text-xs ${muted}`}>{estimate.basis}</p>}
           {estimateError && <p className="mt-3 text-xs text-[var(--c3-style-basic-fg-danger)]">{estimateError}</p>}
           <Button className="mt-4 w-full" trailingIcon={<ArrowRight />} disabled={!canNext} loading={busy} onClick={onNext}>
             Check rules

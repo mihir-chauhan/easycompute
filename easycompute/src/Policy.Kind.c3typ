@@ -24,8 +24,9 @@ enum type Policy.Kind {
    */
   ALLOWED_GPU_TYPES = 'ALLOWED_GPU_TYPES'
   /**
-   * Estimated cost must fit the lab's remaining allocation on the cluster; limitValue (0-1), when
-   * set, is the largest share of the remaining balance one run may use.
+   * Budget rule. With limitText "days": the allocation must not end within limitValue days. limitValue above 1: a
+   * single run above that many GPU-hours needs PI approval. limitValue in (0, 1]: used plus estimated units must stay
+   * under that share of the allocation. No limitValue: the estimated cost must fit the remaining balance.
    */
   BUDGET_REMAINING = 'BUDGET_REMAINING'
   /**

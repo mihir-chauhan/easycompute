@@ -33,6 +33,59 @@ CUSTOM_TOOLS = {
     "proposeRunSubmission": ["runRequestId", "planId", "reason"],
     "proposeJobAction": ["jobId", "actionType", "reason"],
 }
+# Expected argsSchema descriptions (= the @param text of each tool method in Advisor.c3typ, whitespace-normalised), so a
+# doc change also refreshes the tool. Generated from the c3typ; keep in sync (a selftest checks it).
+TOOL_PARAM_DOCS = {
+    "labContext": {
+        "labId": "The lab id, e.g. as given in the conversation context."
+    },
+    "labSummary": {
+        "labId": "The lab id."
+    },
+    "listPolicies": {
+        "labId": "The lab id; lab-scoped rules of other labs are left out.",
+        "clusterId": "Optional cluster: anvil, gilbreth, gautschi, negishi, bell or aws-p4d.",
+        "kind": "Optional rule kind: MAX_WALLTIME, MAX_GPUS_PER_JOB, MAX_NODES_PER_JOB, MAX_JOBS_PER_USER, ALLOWED_GPU_TYPES, BUDGET_REMAINING, DEADLINE_FEASIBLE, FAIRSHARE_CAP, PREEMPTIBLE_ONLY, DATA_RESIDENCY, EXPORT_CONTROL, MIN_GPU_UTIL or QUIET_HOURS."
+    },
+    "predictDuration": {
+        "workloadType": "TRAINING, FINETUNE, INFERENCE, SIMULATION, DATA_PROCESSING or INTERACTIVE.",
+        "gpuTypeId": "GPU type id, e.g. A100-40GB or H100-80GB.",
+        "gpus": "Number of GPUs.",
+        "modelParamsB": "Model size in billions of parameters (0 when not a model)."
+    },
+    "evaluateRun": {
+        "labId": "The lab id.",
+        "name": "Short name of the run.",
+        "description": "What the run does, in the words of the user.",
+        "workloadType": "TRAINING, FINETUNE, INFERENCE, SIMULATION, DATA_PROCESSING or INTERACTIVE.",
+        "project": "Project id or a word of its name or deadline label, e.g. NeurIPS; supplies the deadline.",
+        "gpuTypeId": "Requested GPU type id, e.g. A100-40GB or H100-80GB.",
+        "gpus": "Requested number of GPUs.",
+        "walltimeHours": "Requested walltime in hours.",
+        "clusterId": "Requested cluster: anvil, gilbreth, gautschi, negishi, bell or aws-p4d.",
+        "modelParamsB": "Model size in billions of parameters.",
+        "datasetGb": "Dataset size in GB.",
+        "deadline": "Deadline as YYYY-MM-DD or a weekday name such as Friday, inclusive (the run may finish any time that day, until 23:59 UTC); defaults to the project deadline."
+    },
+    "liveJobs": {
+        "labId": "The lab id; empty lists live jobs of every lab.",
+        "state": "Optional job state filter: PENDING or RUNNING."
+    },
+    "jobHealth": {
+        "jobId": "The job id as returned by liveJobs."
+    },
+    "universityOverview": {},
+    "proposeRunSubmission": {
+        "runRequestId": "The runRequestId returned by evaluateRun.",
+        "planId": "The planId of the chosen plan returned by evaluateRun.",
+        "reason": "Why this plan, in one sentence."
+    },
+    "proposeJobAction": {
+        "jobId": "The job id as returned by liveJobs.",
+        "actionType": "EXTEND_WALLTIME, CANCEL, CHECKPOINT_NOW, REQUEUE_STANDBY, SCALE_DOWN, NOTIFY_PI or HOLD.",
+        "reason": "Why, in one sentence citing the metric or alert."
+    }
+}
 GENERIC_TOOL_IDS = []
 
 SYSTEM_PROMPT = """You are the EasyCompute Advisor, the AI assistant of a Purdue research-computing app. You help a
@@ -108,32 +161,41 @@ occurrence. Do not invent anything that is not stated in the text; use empty lis
 
 # ------------------------------------------------------------------------------------------------------------- agent
 
+# Set after the first ensureAgent in this worker (see ask).
+_ENSURED = False
+
+
 def _latest_agent(cls):
     objs = c3.GenaiCore.Agent.fetch(filter=c3.Filter.eq("name", AGENT_NAME), order="descending(ver)", limit=1).objs
     # Re-read the full record: without it the short-term memory store is not resolved and follow-ups lose context.
     return objs[0].get("this") if objs else None
 
 
-def _schema_params(tool):
+def _schema_matches(tool, method):
+    """True when the tool argsSchema has exactly the method parameters with the current @param descriptions."""
     try:
-        schema = tool.argsSchema or {}
-        props = schema.get("properties") if isinstance(schema, dict) else None
-        return sorted((props or {}).keys())
+        props = dict((tool.argsSchema or {}).get("properties") or {})
+        if sorted(props.keys()) != sorted(CUSTOM_TOOLS[method]):
+            return False
+        for name, text in TOOL_PARAM_DOCS.get(method, {}).items():
+            if " ".join(str((props.get(name) or {}).get("description") or "").split()) != text:
+                return False
+        return True
     except Exception:  # noqa: BLE001 - unknown shape: treat as stale
-        return []
+        return False
 
 
 def _custom_tools():
-    """Reuses the C3Method tool of each method (ids look like Advisor_<method>_<n>) when its parameters still match;
-    creates it otherwise, so repeated calls do not create duplicate tools or agent versions."""
+    """Reuses the C3Method tool of each method (ids look like Advisor_<method>_<n>) when its parameters and their
+    descriptions still match; creates it otherwise, so repeated calls do not create duplicate tools or agent versions."""
     tools = []
-    for method, params in CUSTOM_TOOLS.items():
+    for method in CUSTOM_TOOLS:
         existing = c3.GenaiCore.Tool.C3Method.fetch(
             filter=c3.Filter.startsWith("id", "Advisor_" + method + "_").and_().eq("name", method),
             order="descending(meta.created)",
             limit=1,
         ).objs
-        if existing and _schema_params(existing[0].get("this")) == sorted(params):
+        if existing and _schema_matches(existing[0].get("this"), method):
             tools.append(existing[0])
         else:
             tools.append(c3.GenaiCore.Tool.C3Method.createFromMethodName(type=c3.Advisor, methodName=method))
@@ -217,10 +279,12 @@ def ask(cls, question, sessionId=None, labId=None, mode=None):
     answer, run_id, status, used_mode, reason = "", None, "completed", "agent", None
     if (mode or "agent") != "offline":
         try:
-            agent = _latest_agent(cls)
-            if agent is None:
+            global _ENSURED
+            if not _ENSURED:
+                # Once per worker: picks up a prompt/tool change from the last pull (idempotent, ~0.4 s when current).
                 c3.Advisor.ensureAgent(False)
-                agent = _latest_agent(cls)
+                _ENSURED = True
+            agent = _latest_agent(cls)
             # The session id is the LangChain thread id: the agent restores/saves the conversation in its Kv store.
             run = agent.run(
                 query=_context_line(labId) + "\n\n" + question,

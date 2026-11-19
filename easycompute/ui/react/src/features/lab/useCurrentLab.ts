@@ -5,6 +5,8 @@
 
 import { useEffect, useState } from 'react';
 
+import { useAppShell } from '@/components/app';
+
 import { fetchLabs } from './api';
 import type { Lab } from './types';
 
@@ -36,7 +38,9 @@ let labsCache: Promise<Lab[]> | null = null;
 
 /** Resolves the current lab: the stored id when it exists, otherwise the first lab by name. */
 export function useCurrentLab(): { lab: Lab | null; labId: string | null; error: string | null } {
-  const [labId, setLabId] = useState<string | null>(readStored);
+  const shellLabId = useAppShell().labId;
+  const [storedId, setLabId] = useState<string | null>(readStored);
+  const labId = shellLabId ?? storedId;
   const [labs, setLabs] = useState<Lab[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 

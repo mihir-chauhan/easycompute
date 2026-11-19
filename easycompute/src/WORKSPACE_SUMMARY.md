@@ -10,7 +10,24 @@
 
 ## Backend types (`easycompute/src/`)
 
-- `GpuType` (entity): inherited `name`, `vendor`, `memoryGb`, `fp16Tflops`, `relativeThroughput`, `costPerGpuHourUsd`.
+Response shapes and method contracts: `project/API.md`. Platform-name collisions forced `ComputeCluster` (not Cluster),
+`JobAlert` (not Alert; field `alertType`), `ActionLogEntry` (not ActionLog; field `actedAt`), `RunMonitor` (not Monitor).
+
+- Reference entities: `GpuType`, `ComputeCluster` (+ `.Billing`, `.Status`), `Partition` (one row per partition + QOS),
+  `Lab`, `LabMember` (+ `.Role`), `Allocation` (+ `.Funding`), `Project`, `Policy` (+ `.Scope`, `.Severity`, `.Kind`),
+  `AutopilotPolicy` (id = lab id). Shared enums `WorkloadType`, `ActionType`.
+- Planner: `RunRequest` (+ `.Status`; `checkRules`, `recommendPlans`, `submit` in `RunRequest.js`), `RuleCheck`
+  (+ `.Outcome`), `RunPlan` (+ `.Label`). Rule engine evaluates each Policy per candidate (partition x GPU count)
+  and aggregates PASS/WARN/FAIL; plans are scored on finish time, cost, risk, deadline slack.
+- Runs: `Job` (+ `.State`; `gpuHours`/`wastedGpuHours` are on-read calcs; `evaluateHealth`, `applyAction` in `Job.js`),
+  `JobMetric`, `JobAlert` (+ `.AlertType`, `.Severity`, `.Status`), `ActionLogEntry` (+ `.Actor`, `.Outcome`).
+- `RunMonitor.tick()` (`RunMonitor.js`): 15-minute simulation step + health + autopilot; CronJob seed
+  `seed/CronJob/EasyComputeMonitorTick.json` (every 5 min, ships inactive).
+- `Insights` (`Insights.js`): `predictDuration`, `labSummary`, `universityOverview` (all `json`). Aggregates that need
+  GPU-hours are computed in JS over `fetchObjStream` (stored calcs were not populated by `upsertAllSeed`).
+- Tests: `test/js-rhino/test_{RunRequest,Job,Insights}.js` (self-contained fixtures, need `testtools` in the manifest).
+  Local runner without the platform: `node project/tools/backend-harness/run.js` (all methods on the seed) and
+  `node project/tools/backend-harness/jasmine.js` (the Jasmine files on an in-memory mock).
 
 ## Data (`easycompute/data/`)
 

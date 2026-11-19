@@ -16,10 +16,11 @@ export interface Loaded<T> {
 }
 
 /**
- * Fetch-on-mount with StrictMode-safe cancellation, error reporting and a `reload()`. `loader` returning
- * `null` (e.g. no lab yet) leaves the view in its loading state without calling the backend.
+ * Like `useC3Data` (components/app) but the loader may return `null` while a prerequisite (the current lab) is not
+ * known yet: the view stays in its loading state without calling the backend. `pollMs` (>= 5 s) refreshes in the
+ * background without flipping `loading`.
  */
-export function useLoad<T>(loader: () => Promise<T> | null, deps: DependencyList): Loaded<T> {
+export function useLoad<T>(loader: () => Promise<T> | null, deps: DependencyList, pollMs?: number): Loaded<T> {
   const { reportError } = useErrorBoundary();
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -27,27 +28,38 @@ export function useLoad<T>(loader: () => Promise<T> | null, deps: DependencyList
   const [key, setKey] = useState(0);
 
   useEffect(() => {
-    const p = loader();
-    if (!p) return undefined;
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    p.then((res) => {
-      if (!cancelled) setData(res);
-    })
-      .catch((err: unknown) => {
+    let timer: number | undefined;
+    const run = (background: boolean) => {
+      const p = loader();
+      if (!p) return;
+      if (!background) {
+        setLoading(true);
+        setError(null);
+      }
+      p.then((res) => {
         if (cancelled) return;
-        setError(errorMessage(err));
-        reportError(err);
+        setData(res);
+        setError(null);
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          setError(errorMessage(err));
+          reportError(err);
+        })
+        .finally(() => {
+          if (cancelled) return;
+          setLoading(false);
+          if (pollMs) timer = window.setTimeout(() => run(true), Math.max(5000, pollMs));
+        });
+    };
+    run(false);
     return () => {
       cancelled = true;
+      if (timer) window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, key, reportError]);
+  }, [...deps, key, pollMs, reportError]);
 
   const reload = useCallback(() => setKey((k) => k + 1), []);
   return { data, error, loading, reload };

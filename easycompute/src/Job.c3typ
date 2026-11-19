@@ -163,12 +163,12 @@ entity type Job {
   /**
    * GPU-hours used (allocated GPUs x elapsed hours).
    */
-  gpuHours: double stored calc "allocGpus * elapsedHours"
+  gpuHours: double calc "allocGpus * elapsedHours"
 
   /**
    * GPU-hours allocated but not used (GPU-hours x idle fraction).
    */
-  wastedGpuHours: double stored calc "exists(gpuUtilAvg) ? allocGpus * elapsedHours * (100 - gpuUtilAvg) / 100 : 0"
+  wastedGpuHours: double calc "exists(gpuUtilAvg) ? allocGpus * elapsedHours * (100 - gpuUtilAvg) / 100 : 0"
 
   /**
    * Resource-usage samples.

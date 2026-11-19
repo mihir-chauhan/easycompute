@@ -11,21 +11,24 @@ import React, { useEffect, useState } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import ErrorReporterProvider from './components/ErrorBoundary/ErrorBoundary';
 import AppShell, { AppShellProvider, useAppShell, type ShellLab } from './components/app/AppShell';
-import { ADMIN_NAV, LAB_NAV } from './config/navigation';
+import { c3Call } from './c3Action';
+import { ADMIN_NAV, labNav } from './config/navigation';
 import { fetchLabs } from './features/lab/api';
 import { setCurrentLabId } from './features/lab/useCurrentLab';
 // <routes-imports> (generated from routes.*.json by the integrator)
 import LabHome from './pages/LabHome/LabHome';
 import LabContext from './pages/LabContext/LabContext';
+import AdminPolicies from './pages/AdminPolicies/AdminPolicies';
 import PlanRun from './pages/PlanRun/PlanRun';
 import RunList from './pages/Runs/RunList';
 import RunDetail from './pages/Runs/RunDetail';
+import LiveMonitor from './pages/Runs/LiveMonitor';
 import History from './pages/History/History';
+import Guardrails from './pages/Guardrails/Guardrails';
 import AssistantPage from './pages/Assistant/AssistantPage';
 import AdminOverview from './pages/AdminOverview/AdminOverview';
 import AdminClusters from './pages/AdminClusters/AdminClusters';
 import AdminClusterDetail from './pages/AdminClusters/AdminClusterDetail';
-import AdminPolicies from './pages/AdminPolicies/AdminPolicies';
 import AdminLabs from './pages/AdminLabs/AdminLabs';
 // </routes-imports>
 
@@ -37,6 +40,37 @@ function LabSync() {
     if (labId) setCurrentLabId(labId);
   }, [labId]);
   return null;
+}
+
+/** Number of the current lab's running live jobs, for the "Live monitor" badge. */
+function useLiveCount(labId: string | null): number | undefined {
+  const [count, setCount] = useState<number>();
+  useEffect(() => {
+    if (!labId) return undefined;
+    let cancelled = false;
+    c3Call('Job', 'fetchCount', 'Job', [{ filter: `lab.id == "${labId}" && isLive == true && state == "RUNNING"` }])
+      .then((n) => {
+        if (!cancelled) setCount(Number(n) || 0);
+      })
+      .catch(() => {
+        if (!cancelled) setCount(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [labId]);
+  return count;
+}
+
+/** The shell with the nav for the current lab (inside the provider so it can read the lab). */
+function Shell({ children }: { children: React.ReactNode }) {
+  const { labId } = useAppShell();
+  const liveCount = useLiveCount(labId);
+  return (
+    <AppShell labNav={labNav(liveCount)} adminNav={ADMIN_NAV}>
+      {children}
+    </AppShell>
+  );
 }
 
 /**
@@ -64,16 +98,18 @@ export default function App() {
     <ErrorReporterProvider>
       <AppShellProvider labs={labs}>
         <LabSync />
-        <AppShell labNav={LAB_NAV} adminNav={ADMIN_NAV}>
+        <Shell>
           <Routes>
             {/* <routes> */}
                 <Route path="/" element={<LabHome />} />
                 <Route path="/context" element={<LabContext />} />
+                <Route path="/policies" element={<AdminPolicies />} />
                 <Route path="/plan" element={<PlanRun />} />
                 <Route path="/runs" element={<RunList />} />
                 <Route path="/runs/:id" element={<RunDetail />} />
+                <Route path="/monitor" element={<LiveMonitor />} />
                 <Route path="/history" element={<History />} />
-                <Route path="/guardrails" element={<p className="p-8 text-center">Guardrails: this page is being built.</p>} />
+                <Route path="/guardrails" element={<Guardrails />} />
                 <Route path="/assistant" element={<AssistantPage />} />
                 <Route path="/admin" element={<AdminOverview />} />
                 <Route path="/admin/clusters" element={<AdminClusters />} />
@@ -90,7 +126,7 @@ export default function App() {
               }
             />
           </Routes>
-        </AppShell>
+        </Shell>
       </AppShellProvider>
     </ErrorReporterProvider>
   );

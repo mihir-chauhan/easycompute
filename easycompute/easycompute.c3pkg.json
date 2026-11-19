@@ -4,7 +4,8 @@
   "description": "AI-assisted compute allocation and run monitoring for Purdue research labs",
   "dependencies": {
     "mcpServer": "8.10",
-    "genAiUi": "8.12"
+    "genAiUi": "8.12",
+    "testtools": "8.10"
   },
   "version": "1.0.0"
 }

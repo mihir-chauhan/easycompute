@@ -18,7 +18,7 @@ entity type Allocation {
   /**
    * Where the allocation comes from.
    */
-  source: string enum Allocation.Source
+  source: string enum Allocation.Funding
 
   /**
    * Funding grant or award name.

@@ -13,6 +13,7 @@ import type {
   AutopilotPolicy,
   ExtractedConstraint,
   FetchResult,
+  LabConstraints,
   Job,
   JobMetric,
   Lab,
@@ -68,7 +69,7 @@ export const fetchLabs = () =>
 
 export const getLab = (labId: string) =>
   labCall<Lab | null>('Lab', 'get', { id: labId }, [
-    'id, name, piName, piEmail, department, researchArea, contextDump, slurmAccounts, fairShareTarget, preferredClusters, notes',
+    'id, name, piName, piEmail, department, researchArea, contextDump, slurmAccounts, fairShareTarget, preferredClusters, notes, meta.updated',
   ]);
 
 export const saveContextDump = (labId: string, contextDump: string) =>
@@ -130,9 +131,9 @@ export const getAutopilot = (labId: string) =>
 export const saveAutopilot = (p: AutopilotPolicy) =>
   labCall<AutopilotPolicy>('AutopilotPolicy', 'merge', { ...p, lab: { id: p.lab?.id ?? p.id } });
 
-/** Advisor: parse free-text lab context into structured constraints (deterministic fallback lives server-side). */
-export const extractConstraints = async (labId: string, text: string) =>
-  unbox<ExtractedConstraint[]>(await labCall('Advisor', 'extractConstraints', null, [labId, text])) ?? [];
+/** Advisor: parse the lab's free-text context (text, or the stored contextDump when null) into structured constraints. */
+export const extractConstraints = async (labId: string, text: string | null) =>
+  unbox<LabConstraints>(await labCall('Advisor', 'extractConstraints', null, [labId, text]));
 
 /* ---------- Insights ---------- */
 
@@ -149,6 +150,15 @@ export const fetchLiveJobs = (labId: string) =>
     filter: `${eq('lab.id', labId)} && isLive == true`,
     order: 'descending(submitTime)',
     limit: 100,
+  });
+
+/** Most recent jobs of the lab (live and finished), for the Runs list. */
+export const fetchRecentJobs = (labId: string, limit = 60) =>
+  fetchObjs<Job>('Job', {
+    include: `${JOB_LIST_INCLUDE}, cpuEfficiency, gpuHours`,
+    filter: eq('lab.id', labId),
+    order: 'descending(submitTime)',
+    limit,
   });
 
 export const fetchHistoryJobs = (labId: string, limit = 2000) =>
@@ -238,23 +248,18 @@ export const createRunRequest = async (req: NewRunRequest): Promise<RunRequest> 
 export const updateRunRequest = (req: Partial<RunRequest> & { id: string }) =>
   labCall<RunRequest>('RunRequest', 'merge', { ...req, status: 'DRAFT' });
 
-/** Runs the rule engine, then re-reads the checks with their policy (scope/title/severity) for display. */
-export const checkRules = async (runRequestId: string): Promise<RuleCheck[]> => {
-  await labCall('RunRequest', 'checkRules', { id: runRequestId }, []);
-  return fetchObjs<RuleCheck>('RuleCheck', {
-    include:
-      'id, outcome, message, checkedAt, policy.id, policy.scope, policy.kind, policy.severity, policy.title, policy.description, policy.sourceUrl',
-    filter: eq('runRequest.id', runRequestId),
-    order: 'ascending(policy.id)',
-    limit: 200,
-  });
-};
+/** Runs the rule engine; rows carry title/scope/severity/ruleKind (sorted FAIL, WARN, PASS). */
+export const checkRules = async (runRequestId: string): Promise<RuleCheck[]> =>
+  (await labCall<RuleCheck[]>('RunRequest', 'checkRules', { id: runRequestId }, [])) ?? [];
+
+export const getRunRequestStatus = async (id: string) =>
+  (await labCall<RunRequest | null>('RunRequest', 'get', { id }, ['id, status']))?.status;
 
 export const recommendPlans = async (runRequestId: string): Promise<RunPlan[]> => {
   await labCall('RunRequest', 'recommendPlans', { id: runRequestId }, []);
   return fetchObjs<RunPlan>('RunPlan', {
     include:
-      'id, rank, label, cluster.id, cluster.name, partition.id, partition.name, gpuType.id, gpuType.name, gpus, nodes, walltimeHours, estWaitHours, estDurationHours, estCostUnits, estCostUsd, meetsDeadline, score, rationale, sbatchScript',
+      'this, cluster.id, cluster.name, partition.id, partition.name, gpuType.id, gpuType.name',
     filter: eq('runRequest.id', runRequestId),
     order: 'ascending(rank)',
     limit: 3,
@@ -262,6 +267,9 @@ export const recommendPlans = async (runRequestId: string): Promise<RunPlan[]> =
 };
 
 export interface DurationPrediction {
+  gpuHours?: number;
+  explanation?: string;
+  recommendedWalltimeHours?: number;
   estGpuHours?: number;
   estDurationHours?: number;
   basis?: string;
