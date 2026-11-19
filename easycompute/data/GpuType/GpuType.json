@@ -1,0 +1,20 @@
+[
+  {
+    "id": "A100-40GB",
+    "name": "NVIDIA A100 40GB",
+    "vendor": "NVIDIA",
+    "memoryGb": 40,
+    "fp16Tflops": 312,
+    "relativeThroughput": 1,
+    "costPerGpuHourUsd": 3
+  },
+  {
+    "id": "H100-80GB",
+    "name": "NVIDIA H100 80GB",
+    "vendor": "NVIDIA",
+    "memoryGb": 80,
+    "fp16Tflops": 990,
+    "relativeThroughput": 2.5,
+    "costPerGpuHourUsd": 6
+  }
+]

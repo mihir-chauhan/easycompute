@@ -1,0 +1,31 @@
+/**
+ * A GPU model available on Purdue and cloud clusters.
+ */
+@db(index=[])
+entity type GpuType {
+
+  /**
+   * GPU vendor.
+   */
+  vendor: string
+
+  /**
+   * GPU memory in GB.
+   */
+  memoryGb: int
+
+  /**
+   * Peak FP16 TFLOPS.
+   */
+  fp16Tflops: double
+
+  /**
+   * Throughput relative to A100-40GB.
+   */
+  relativeThroughput: double
+
+  /**
+   * Reference third-party price per GPU-hour.
+   */
+  costPerGpuHourUsd: double
+}

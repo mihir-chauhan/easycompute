@@ -1,0 +1,9 @@
+{
+  "author": "{{author}}",
+  "name": "easycompute",
+  "description": "AI-assisted compute allocation and run monitoring for Purdue research labs",
+  "dependencies": {
+    "mcpServer": "8.10"
+  },
+  "version": "1.0.0"
+}
